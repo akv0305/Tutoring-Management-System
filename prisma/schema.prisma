@@ -1,0 +1,534 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ───────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  COORDINATOR
+  TEACHER
+  PARENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  TRIAL_PENDING
+  DROPPED
+}
+
+enum OnboardingStage {
+  NEW_LEAD
+  TRIAL_SCHEDULED
+  TRIAL_COMPLETED
+  CONVERTED
+  DROPPED
+}
+
+enum TeacherStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+}
+
+enum CoordinatorStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SubjectCategory {
+  MATH
+  SCIENCE
+  ENGLISH
+  TEST_PREP
+  COMPUTER_SCIENCE
+  LANGUAGES
+  OTHER
+}
+
+enum SubjectStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PackageStatus {
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  DRAFT
+  CANCELLED
+}
+
+enum ClassStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED_STUDENT
+  CANCELLED_TEACHER
+  NO_SHOW_STUDENT
+  NO_SHOW_TEACHER
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  REFUNDED
+  FAILED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CREDIT_CARD
+  DEBIT_CARD
+  UPI
+  OTHER
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  ON_HOLD
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum NotificationType {
+  CLASS
+  PAYMENT
+  SYSTEM
+}
+
+enum ReferralStatus {
+  PENDING
+  SUCCESSFUL
+  EXPIRED
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ─── 1. USERS (Authentication Master) ───────────────────
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  passwordHash   String
+  role           UserRole
+  status         UserStatus @default(ACTIVE)
+  firstName      String
+  lastName       String
+  phone          String?
+  avatarUrl      String?
+  emailVerified  DateTime?
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Role-specific profiles (one-to-one)
+  coordinatorProfile CoordinatorProfile?
+  teacherProfile     TeacherProfile?
+  parentProfile      ParentProfile?
+
+  // Relations
+  confirmedPayments  Payment[]        @relation("ConfirmedBy")
+  reviewedRefunds    RefundRequest[]  @relation("ReviewedBy")
+  notifications      Notification[]
+  sentReferrals      Referral[]       @relation("ReferredBy")
+  receivedReferrals  Referral[]       @relation("ReferredTo")
+
+  @@map("users")
+}
+
+// ─── 2. COORDINATOR PROFILE ─────────────────────────────
+
+model CoordinatorProfile {
+  id              String            @id @default(cuid())
+  userId          String            @unique
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bucketSize      Int               @default(50)
+  status          CoordinatorStatus @default(ACTIVE)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Students assigned to this coordinator
+  students        Student[]
+
+  @@map("coordinator_profiles")
+}
+
+// ─── 3. TEACHER PROFILE ─────────────────────────────────
+
+model TeacherProfile {
+  id                String        @id @default(cuid())
+  userId            String        @unique
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  qualification     String?
+  bio               String?
+  experience        Int           @default(0)  // years
+  compensationRate  Decimal       @db.Decimal(10, 2)  // per hour - ADMIN ONLY
+  studentFacingRate Decimal       @db.Decimal(10, 2)  // per hour - visible to parents
+  rating            Decimal       @default(0) @db.Decimal(3, 2)
+  totalReviews      Int           @default(0)
+  status            TeacherStatus @default(ACTIVE)
+  timezone          String        @default("America/New_York")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  subjects          TeacherSubject[]
+  availabilities    TeacherAvailability[]
+  blockedDates      TeacherBlockedDate[]
+  packages          Package[]
+  classes           Class[]
+  payouts           Payout[]
+
+  @@map("teacher_profiles")
+}
+
+// ─── 4. PARENT PROFILE ──────────────────────────────────
+
+model ParentProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timezone    String   @default("America/New_York")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Children
+  students    Student[]
+
+  @@map("parent_profiles")
+}
+
+// ─── 5. STUDENTS MASTER ─────────────────────────────────
+
+model Student {
+  id              String          @id @default(cuid())
+  firstName       String
+  lastName        String
+  grade           String
+  school          String?
+  gender          Gender?
+  timezone        String          @default("America/New_York")
+  status          StudentStatus   @default(TRIAL_PENDING)
+  onboardingStage OnboardingStage @default(NEW_LEAD)
+  scheduleNotes   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Parent
+  parentId        String
+  parent          ParentProfile   @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+  // Coordinator
+  coordinatorId   String?
+  coordinator     CoordinatorProfile? @relation(fields: [coordinatorId], references: [id], onDelete: SetNull)
+
+  // Relations
+  subjects        StudentSubject[]
+  packages        Package[]
+  classes         Class[]
+  payments        Payment[]
+  refundRequests  RefundRequest[]
+
+  @@map("students")
+}
+
+// ─── 6. SUBJECTS MASTER ─────────────────────────────────
+
+model Subject {
+  id            String          @id @default(cuid())
+  name          String          @unique
+  category      SubjectCategory
+  basePriceHour Decimal         @db.Decimal(10, 2)
+  status        SubjectStatus   @default(ACTIVE)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // Relations
+  teachers      TeacherSubject[]
+  students      StudentSubject[]
+  packages      Package[]
+  classes       Class[]
+
+  @@map("subjects")
+}
+
+// ─── Junction: Teacher <-> Subject ──────────────────────
+
+model TeacherSubject {
+  id        String         @id @default(cuid())
+  teacherId String
+  teacher   TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId String
+  subject   Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId])
+  @@map("teacher_subjects")
+}
+
+// ─── Junction: Student <-> Subject ──────────────────────
+
+model StudentSubject {
+  id           String  @id @default(cuid())
+  studentId    String
+  student      Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId    String
+  subject      Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  trialTaken   Boolean @default(false)
+
+  @@unique([studentId, subjectId])
+  @@map("student_subjects")
+}
+
+// ─── 7. PACKAGES MASTER ─────────────────────────────────
+
+model Package {
+  id              String        @id @default(cuid())
+  name            String
+  studentId       String
+  student         Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId       String
+  teacher         TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  classesIncluded Int
+  classesUsed     Int           @default(0)
+  pricePerClass   Decimal       @db.Decimal(10, 2)
+  totalPrice      Decimal       @db.Decimal(10, 2)
+  validityDays    Int
+  startDate       DateTime
+  expiryDate      DateTime
+  status          PackageStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  classes         Class[]
+  payments        Payment[]
+
+  @@map("packages")
+}
+
+// ─── 8. CLASSES / SESSIONS MASTER ───────────────────────
+
+model Class {
+  id            String      @id @default(cuid())
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId     String
+  teacher       TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId     String
+  subject       Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  packageId     String?
+  package       Package?    @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  scheduledAt   DateTime
+  duration      Int         @default(60)  // minutes
+  timezone      String      @default("America/New_York")
+  status        ClassStatus @default(SCHEDULED)
+  meetingLink   String?
+  topicCovered  String?
+  sessionNotes  String?
+  parentRating  Int?        // 1-5
+  parentFeedback String?
+  isTrial       Boolean     @default(false)
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@map("classes")
+}
+
+// ─── 9. PAYMENTS MASTER ─────────────────────────────────
+
+model Payment {
+  id            String        @id @default(cuid())
+  studentId     String
+  student       Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  packageId     String?
+  package       Package?      @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  amount        Decimal       @db.Decimal(10, 2)
+  method        PaymentMethod @default(BANK_TRANSFER)
+  status        PaymentStatus @default(PENDING)
+  bankReference String?
+  confirmedById String?
+  confirmedBy   User?         @relation("ConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  refundRequests RefundRequest[]
+
+  @@map("payments")
+}
+
+// ─── 10. PAYOUTS MASTER ─────────────────────────────────
+
+model Payout {
+  id              String       @id @default(cuid())
+  teacherId       String
+  teacher         TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  periodMonth     Int          // 1-12
+  periodYear      Int
+  classesCompleted Int
+  compensationRate Decimal     @db.Decimal(10, 2)
+  grossAmount     Decimal      @db.Decimal(10, 2)
+  deductions      Decimal      @default(0) @db.Decimal(10, 2)
+  netAmount       Decimal      @db.Decimal(10, 2)
+  status          PayoutStatus @default(PENDING)
+  paidAt          DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([teacherId, periodMonth, periodYear])
+  @@map("payouts")
+}
+
+// ─── 11. REFUND REQUESTS ────────────────────────────────
+
+model RefundRequest {
+  id              String       @id @default(cuid())
+  studentId       String
+  student         Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  paymentId       String
+  payment         Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  refundAmount    Decimal      @db.Decimal(10, 2)
+  reason          String
+  status          RefundStatus @default(PENDING)
+  reviewedById    String?
+  reviewedBy      User?        @relation("ReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  processedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@map("refund_requests")
+}
+
+// ─── 12. TEACHER AVAILABILITY ───────────────────────────
+
+model TeacherAvailability {
+  id        String         @id @default(cuid())
+  teacherId String
+  teacher   TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  dayOfWeek DayOfWeek
+  startTime String         // "09:00" in 24h format
+  endTime   String         // "17:00" in 24h format
+  isEnabled Boolean        @default(true)
+
+  @@unique([teacherId, dayOfWeek, startTime])
+  @@map("teacher_availabilities")
+}
+
+model TeacherBlockedDate {
+  id          String         @id @default(cuid())
+  teacherId   String
+  teacher     TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  blockedDate DateTime       @db.Date
+  reason      String?
+  createdAt   DateTime       @default(now())
+
+  @@unique([teacherId, blockedDate])
+  @@map("teacher_blocked_dates")
+}
+
+// ─── 13. NOTIFICATIONS ──────────────────────────────────
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── 14. REFERRALS ──────────────────────────────────────
+
+model Referral {
+  id              String         @id @default(cuid())
+  referralCode    String         @unique
+  referredById    String
+  referredBy      User           @relation("ReferredBy", fields: [referredById], references: [id], onDelete: Cascade)
+  referredToId    String?
+  referredTo      User?          @relation("ReferredTo", fields: [referredToId], references: [id], onDelete: SetNull)
+  status          ReferralStatus @default(PENDING)
+  rewardClasses   Int            @default(0)
+  convertedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@map("referrals")
+}
+
+// ─── 15. PLATFORM SETTINGS (Single Row) ─────────────────
+
+model PlatformSettings {
+  id                      String  @id @default("default")
+  platformName            String  @default("Expert Guru")
+  supportEmail            String  @default("support@expertguru.net")
+  supportPhone            String  @default("+1 (555) 100-2000")
+  defaultTimezone         String  @default("America/New_York")
+  currency                String  @default("USD")
+  studentFreeWindow       Int     @default(24)   // hours
+  lateCancelPenalty       Int     @default(50)   // percentage
+  noShowPenalty           Int     @default(100)  // percentage
+  teacherMaxCancellations Int     @default(3)    // per month
+  teacherNoShowRatingHit  Decimal @default(0.5) @db.Decimal(3, 2)
+  trialClassEnabled       Boolean @default(true)
+  lowBalanceThreshold     Int     @default(2)    // classes remaining
+  minPasswordLength       Int     @default(8)
+  passwordResetExpiry     Int     @default(24)   // hours
+  maxLoginAttempts        Int     @default(5)
+  lockoutDuration         Int     @default(30)   // minutes
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("platform_settings")
+}

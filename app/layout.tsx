@@ -1,11 +1,12 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { SessionProvider } from '@/components/providers/SessionProvider'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Expert Guru – Expert Tutoring from India\'s Top Educators',
+  title: 'Expert Guru — Expert Tutoring from India\'s Top Educators',
   description: 'Personalized 1-on-1 online tutoring for K-12, AP, IB, SAT & ACT. Same tutor every session. Book your free trial today.',
 }
 
@@ -16,7 +17,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        <SessionProvider>{children}</SessionProvider>
+      </body>
     </html>
   )
 }
