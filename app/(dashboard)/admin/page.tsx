@@ -16,36 +16,21 @@ import {
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { prisma } from "@/lib/prisma"
 
-/* ─────────────────────────── Hard-coded data ─────────────────────────── */
-
-const recentPayments = [
-  { id: 1, student: "Aryan Mehta",    package: "Premium Monthly",   amount: "$250", status: "paid",    date: "Mar 08, 2026" },
-  { id: 2, student: "Priya Sharma",   package: "Standard Monthly",  amount: "$180", status: "paid",    date: "Mar 07, 2026" },
-  { id: 3, student: "Rohan Gupta",    package: "Trial Package",     amount: "$50",  status: "pending", date: "Mar 07, 2026" },
-  { id: 4, student: "Sneha Patel",    package: "Premium Quarterly", amount: "$680", status: "paid",    date: "Mar 06, 2026" },
-  { id: 5, student: "Karthik Nair",   package: "Standard Monthly",  amount: "$180", status: "failed",  date: "Mar 05, 2026" },
-]
-
-const teacherPayouts = [
-  { id: 1, teacher: "Dr. Anil Verma",   classes: 24, rate: "$15", total: "$360", status: "pending" },
-  { id: 2, teacher: "Ms. Divya Iyer",   classes: 18, rate: "$18", total: "$324", status: "paid"    },
-  { id: 3, teacher: "Mr. Suresh Babu",  classes: 30, rate: "$12", total: "$360", status: "pending" },
-  { id: 4, teacher: "Ms. Lakshmi Rao",  classes: 15, rate: "$20", total: "$300", status: "pending" },
-]
+/* ─────────────────── Static data (no DB equivalent yet) ─────────────── */
 
 const quickActions = [
-  { icon: UserPlus,  label: "Add New Student"   },
-  { icon: GraduationCap, label: "Add New Teacher" },
-  { icon: Package,   label: "Create Package"    },
-  { icon: CreditCard,label: "Confirm Payment"   },
-  { icon: Wallet,    label: "Process Payout"    },
-  { icon: Settings,  label: "Platform Settings" },
+  { icon: UserPlus,       label: "Add New Student" },
+  { icon: GraduationCap,  label: "Add New Teacher" },
+  { icon: Package,        label: "Create Package" },
+  { icon: CreditCard,     label: "Confirm Payment" },
+  { icon: Wallet,         label: "Process Payout" },
+  { icon: Settings,       label: "Platform Settings" },
 ]
 
 const systemAlerts = [
   {
-    color: "#EF4444",
     bg: "bg-red-50",
     border: "border-red-400",
     Icon: AlertCircle,
@@ -54,7 +39,6 @@ const systemAlerts = [
     time: "2 hours ago",
   },
   {
-    color: "#F97316",
     bg: "bg-orange-50",
     border: "border-orange-400",
     Icon: AlertTriangle,
@@ -63,7 +47,6 @@ const systemAlerts = [
     time: "4 hours ago",
   },
   {
-    color: "#3B82F6",
     bg: "bg-blue-50",
     border: "border-blue-400",
     Icon: Info,
@@ -72,7 +55,6 @@ const systemAlerts = [
     time: "1 day ago",
   },
   {
-    color: "#22C55E",
     bg: "bg-green-50",
     border: "border-green-400",
     Icon: CheckCircle,
@@ -82,70 +64,142 @@ const systemAlerts = [
   },
 ]
 
-const popularSubjects = [
-  { name: "Mathematics",      percent: 78, color: "#0D9488", count: "312 students"  },
-  { name: "Science",          percent: 62, color: "#0D9488", count: "248 students"  },
-  { name: "English",          percent: 45, color: "#F59E0B", count: "180 students"  },
-  { name: "SAT Prep",         percent: 38, color: "#F59E0B", count: "152 students"  },
-  { name: "Computer Science", percent: 25, color: "#1E3A5F", count: "100 students"  },
-  { name: "ACT Prep",         percent: 18, color: "#1E3A5F", count: "72 students"   },
-]
+/* ─────────────────────────── Helper ──────────────────────────────────── */
 
-/* ──────────────────────────────── Page ──────────────────────────────── */
+function formatDate(date: Date): string {
+  return date.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })
+}
 
-export default function AdminPage() {
+/* ─────────────────────────── Page (Server Component) ─────────────────── */
+
+export default async function AdminPage() {
+  const [
+    totalStudents,
+    totalTeachers,
+    totalClasses,
+    revenueResult,
+    recentPaymentsRaw,
+    payoutsRaw,
+    subjectStats,
+  ] = await Promise.all([
+    prisma.student.count(),
+    prisma.teacherProfile.count({ where: { status: "ACTIVE" } }),
+    prisma.class.count(),
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: { status: "CONFIRMED" },
+    }),
+    prisma.payment.findMany({
+      take: 5,
+      orderBy: { createdAt: "desc" },
+      include: {
+        student: { select: { firstName: true, lastName: true } },
+        package: { select: { name: true } },
+      },
+    }),
+    prisma.payout.findMany({
+      take: 4,
+      orderBy: { createdAt: "desc" },
+      include: {
+        teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
+      },
+    }),
+    prisma.subject.findMany({
+      where: { status: "ACTIVE" },
+      include: {
+        _count: { select: { students: true } },
+      },
+      orderBy: { name: "asc" },
+    }),
+  ])
+
+  const totalRevenue = revenueResult._sum.amount ?? 0
+
+  // Map recent payments
+  const recentPayments = recentPaymentsRaw.map((p) => ({
+    id: p.id,
+    student: `${p.student.firstName} ${p.student.lastName}`,
+    package: p.package?.name ?? "—",
+    amount: `$${Number(p.amount).toLocaleString()}`,
+    status: p.status.toLowerCase(),
+    date: formatDate(p.createdAt),
+  }))
+
+  // Map teacher payouts
+  const teacherPayouts = payoutsRaw.map((po) => ({
+    id: po.id,
+    teacher: `${po.teacher.user.firstName} ${po.teacher.user.lastName}`,
+    classes: po.classesCompleted,
+    rate: `$${Number(po.compensationRate)}`,
+    total: `$${Number(po.grossAmount).toLocaleString()}`,
+    status: po.status.toLowerCase(),
+  }))
+
+  // Subject distribution
+  const maxStudents = Math.max(
+    ...subjectStats.map((s) => s._count.students),
+    1
+  )
+  const popularSubjects = subjectStats
+    .sort((a, b) => b._count.students - a._count.students)
+    .slice(0, 6)
+    .map((s, idx) => ({
+      name: s.name,
+      count: `${s._count.students} student${s._count.students !== 1 ? "s" : ""}`,
+      percent: Math.round((s._count.students / maxStudents) * 100),
+      color: idx < 2 ? "#0D9488" : idx < 4 ? "#F59E0B" : "#1E3A5F",
+    }))
+
   return (
     <div className="space-y-6">
 
-      {/* ── KPI Cards ── */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
         <KPICard
           title="Total Students"
-          value="847"
-          subtitle="42 new this month"
-          change="+12%"
-          changeType="positive"
+          value={totalStudents.toString()}
+          subtitle="All registered students"
+          change=""
+          changeType="neutral"
           icon={Users}
         />
         <KPICard
-          title="Total Teachers"
-          value="124"
-          subtitle="8 new this month"
-          change="+6%"
-          changeType="positive"
+          title="Active Teachers"
+          value={totalTeachers.toString()}
+          subtitle="Currently active"
+          change=""
+          changeType="neutral"
           icon={GraduationCap}
         />
         <KPICard
           title="Total Classes"
-          value="3,247"
-          subtitle="March 2026"
-          change="+18%"
-          changeType="positive"
+          value={totalClasses.toString()}
+          subtitle="All sessions"
+          change=""
+          changeType="neutral"
           icon={Calendar}
         />
         <KPICard
           title="Revenue Collected"
-          value="$48,350"
-          subtitle="March 2026"
-          change="+22%"
-          changeType="positive"
+          value={`$${Number(totalRevenue).toLocaleString()}`}
+          subtitle="Confirmed payments"
+          change=""
+          changeType="neutral"
           icon={DollarSign}
         />
       </div>
 
-      {/* ── Two-column section ── */}
+      {/* Two-column section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        {/* ── LEFT COLUMN ── */}
+        {/* LEFT COLUMN */}
         <div className="flex flex-col gap-6">
 
           {/* Recent Payments */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#1E293B]">Recent Payments</h2>
-              <span className="text-xs text-[#0D9488] font-medium cursor-pointer hover:underline">
-                View All →
-              </span>
+              <span className="text-xs text-[#0D9488] font-medium cursor-pointer hover:underline">View All →</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -159,17 +213,19 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {recentPayments.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50/60 transition-colors">
-                      <td className="px-5 py-3 font-medium text-[#1E293B]">{row.student}</td>
-                      <td className="px-5 py-3 text-gray-500">{row.package}</td>
-                      <td className="px-5 py-3 font-semibold text-[#1E293B]">{row.amount}</td>
-                      <td className="px-5 py-3">
-                        <StatusBadge status={row.status} size="sm" />
-                      </td>
-                      <td className="px-5 py-3 text-gray-400 text-xs">{row.date}</td>
-                    </tr>
-                  ))}
+                  {recentPayments.length > 0 ? (
+                    recentPayments.map((row) => (
+                      <tr key={row.id} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="px-5 py-3 font-medium text-[#1E293B]">{row.student}</td>
+                        <td className="px-5 py-3 text-gray-500">{row.package}</td>
+                        <td className="px-5 py-3 font-semibold text-[#1E293B]">{row.amount}</td>
+                        <td className="px-5 py-3"><StatusBadge status={row.status} size="sm" /></td>
+                        <td className="px-5 py-3 text-gray-400 text-xs">{row.date}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400 text-sm">No payments recorded yet</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -179,9 +235,7 @@ export default function AdminPage() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#1E293B]">Teacher Payouts Summary</h2>
-              <span className="text-xs text-[#0D9488] font-medium cursor-pointer hover:underline">
-                View All →
-              </span>
+              <span className="text-xs text-[#0D9488] font-medium cursor-pointer hover:underline">View All →</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -195,17 +249,19 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {teacherPayouts.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50/60 transition-colors">
-                      <td className="px-5 py-3 font-medium text-[#1E293B]">{row.teacher}</td>
-                      <td className="px-5 py-3 text-gray-500">{row.classes}</td>
-                      <td className="px-5 py-3 text-gray-500">{row.rate}</td>
-                      <td className="px-5 py-3 font-semibold text-[#1E293B]">{row.total}</td>
-                      <td className="px-5 py-3">
-                        <StatusBadge status={row.status} size="sm" />
-                      </td>
-                    </tr>
-                  ))}
+                  {teacherPayouts.length > 0 ? (
+                    teacherPayouts.map((row) => (
+                      <tr key={row.id} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="px-5 py-3 font-medium text-[#1E293B]">{row.teacher}</td>
+                        <td className="px-5 py-3 text-gray-500">{row.classes}</td>
+                        <td className="px-5 py-3 text-gray-500">{row.rate}</td>
+                        <td className="px-5 py-3 font-semibold text-[#1E293B]">{row.total}</td>
+                        <td className="px-5 py-3"><StatusBadge status={row.status} size="sm" /></td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400 text-sm">No payouts recorded yet</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -213,7 +269,7 @@ export default function AdminPage() {
 
         </div>
 
-        {/* ── RIGHT COLUMN ── */}
+        {/* RIGHT COLUMN */}
         <div className="flex flex-col gap-6">
 
           {/* Quick Actions */}
@@ -221,10 +277,7 @@ export default function AdminPage() {
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
             <div className="grid grid-cols-2 gap-3">
               {quickActions.map(({ icon: Icon, label }) => (
-                <button
-                  key={label}
-                  className="flex items-center gap-2.5 px-4 py-3 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:border-[#0D9488] hover:text-[#0D9488] hover:bg-teal-50 transition-all duration-150 group"
-                >
+                <button key={label} className="flex items-center gap-2.5 px-4 py-3 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:border-[#0D9488] hover:text-[#0D9488] hover:bg-teal-50 transition-all duration-150 group">
                   <Icon className="w-4 h-4 text-gray-400 group-hover:text-[#0D9488] transition-colors flex-shrink-0" />
                   <span className="text-left leading-tight">{label}</span>
                 </button>
@@ -237,10 +290,7 @@ export default function AdminPage() {
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">System Alerts</h2>
             <div className="space-y-3">
               {systemAlerts.map((alert, idx) => (
-                <div
-                  key={idx}
-                  className={`flex items-start gap-3 p-3 rounded-lg ${alert.bg} border-l-4 ${alert.border}`}
-                >
+                <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg ${alert.bg} border-l-4 ${alert.border}`}>
                   <alert.Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${alert.iconColor}`} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-[#1E293B] leading-snug">{alert.message}</p>
@@ -251,36 +301,28 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Popular Subjects */}
+          {/* Subject Distribution */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Popular Subjects</h2>
+            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Subject Distribution</h2>
             <div className="space-y-3">
-              {popularSubjects.map((subject) => (
-                <div key={subject.name}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium text-[#1E293B]">{subject.name}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-400">{subject.count}</span>
-                      <span
-                        className="text-xs font-semibold"
-                        style={{ color: subject.color }}
-                      >
-                        {subject.percent}%
-                      </span>
+              {popularSubjects.length > 0 ? (
+                popularSubjects.map((subject) => (
+                  <div key={subject.name}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sm font-medium text-[#1E293B]">{subject.name}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-400">{subject.count}</span>
+                        <span className="text-xs font-semibold" style={{ color: subject.color }}>{subject.percent}%</span>
+                      </div>
+                    </div>
+                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${subject.percent}%`, backgroundColor: subject.color }} />
                     </div>
                   </div>
-                  {/* Track */}
-                  <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${subject.percent}%`,
-                        backgroundColor: subject.color,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-4">No subjects found</p>
+              )}
             </div>
           </div>
 

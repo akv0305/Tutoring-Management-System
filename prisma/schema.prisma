@@ -288,8 +288,10 @@ model Subject {
   students      StudentSubject[]
   packages      Package[]
   classes       Class[]
+  packageTemplates PackageTemplate[]
 
   @@map("subjects")
+  
 }
 
 // ─── Junction: Teacher <-> Subject ──────────────────────
@@ -319,6 +321,28 @@ model StudentSubject {
   @@map("student_subjects")
 }
 
+// ─── 7a. PACKAGE TEMPLATES (Catalog) ────────────────────
+
+model PackageTemplate {
+  id              String        @id @default(cuid())
+  name            String
+  subjectId       String
+  subject         Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  classesIncluded Int
+  validityDays    Int
+  suggestedPrice  Decimal       @db.Decimal(10, 2)
+  description     String?
+  isPopular       Boolean       @default(false)
+  status          SubjectStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Purchased instances
+  packages        Package[]
+
+  @@map("package_templates")
+}
+
 // ─── 7. PACKAGES MASTER ─────────────────────────────────
 
 model Package {
@@ -340,6 +364,8 @@ model Package {
   status          PackageStatus @default(ACTIVE)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  templateId      String?
+  template        PackageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   // Relations
   classes         Class[]

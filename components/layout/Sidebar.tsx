@@ -4,6 +4,7 @@ import React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { LogOut, type LucideIcon } from "lucide-react"
+import { signOut } from "next-auth/react"
 import { cn } from "@/lib/utils"
 
 type NavItem = {
@@ -45,6 +46,10 @@ function getInitials(name: string): string {
 
 export function Sidebar({ role, navItems, userName, userEmail }: SidebarProps) {
   const pathname = usePathname()
+
+  const handleSignOut = () => {
+    signOut({ callbackUrl: "/login" })
+  }
 
   return (
     <aside
@@ -114,11 +119,9 @@ export function Sidebar({ role, navItems, userName, userEmail }: SidebarProps) {
       {/* User section */}
       <div className="px-3 py-4">
         <div className="flex items-center gap-3 px-2 py-2">
-          {/* Avatar */}
           <div className="w-8 h-8 rounded-full bg-[#1E3A5F] flex items-center justify-center flex-shrink-0 text-white text-xs font-bold">
             {getInitials(userName)}
           </div>
-          {/* Name + email */}
           <div className="flex-1 min-w-0">
             <p className="text-white text-xs font-medium truncate">{userName}</p>
             <p className="text-gray-500 text-[10px] truncate">{userEmail}</p>
@@ -126,7 +129,10 @@ export function Sidebar({ role, navItems, userName, userEmail }: SidebarProps) {
         </div>
 
         {/* Sign out */}
-        <button className="w-full flex items-center gap-2.5 px-3 py-2 mt-1 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors text-sm group">
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-2.5 px-3 py-2 mt-1 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors text-sm group"
+        >
           <LogOut className="w-4 h-4 group-hover:text-red-400 transition-colors" />
           <span>Sign Out</span>
         </button>
