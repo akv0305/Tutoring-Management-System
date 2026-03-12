@@ -20,14 +20,34 @@ export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [error, setError] = useState("")
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Simulate a brief loading state then show success — no real API
+    setError("")
     setIsLoading(true)
-    setTimeout(() => {
+
+    try {
+      const res = await fetch("/api/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.toLowerCase().trim() }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong.")
+        setIsLoading(false)
+        return
+      }
+
       setIsLoading(false)
       setSubmitted(true)
-    }, 900)
+    } catch {
+      setError("Something went wrong. Please try again.")
+      setIsLoading(false)
+    }
   }
 
   const handleReset = () => {
@@ -137,6 +157,13 @@ export default function ForgotPasswordPage() {
                   Enter your email and we&apos;ll send you a reset link
                 </p>
               </div>
+              
+              {/* Error */}
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <p className="text-sm text-red-600 font-medium">{error}</p>
+                </div>
+              )}
 
               {/* Form */}
               <form onSubmit={handleSubmit} className="flex flex-col gap-5">

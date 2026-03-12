@@ -21,6 +21,8 @@ import {
 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
+import { signIn } from "next-auth/react"
+import { Loader2 } from "lucide-react"
 
 /* ─────────────────────────────────────────────
    Types
@@ -576,11 +578,15 @@ function Step3({
   step2,
   onBack,
   onSubmit,
+  isLoading,
+  error,
 }: {
   step1: Step1Data
   step2: Step2Data
   onBack: () => void
   onSubmit: () => void
+  isLoading: boolean
+  error: string
 }) {
   const [agreeTerms, setAgreeTerms] = useState(false)
   const [agreeGuardian, setAgreeGuardian] = useState(false)
@@ -598,6 +604,13 @@ function Step3({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      {/* Error message */}
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+          <p className="text-sm text-red-600 font-medium">{error}</p>
+        </div>
+      )}
+
       {/* Parent summary */}
       <div className="bg-[#F8FAFC] rounded-xl border border-gray-100 overflow-hidden">
         <div className="px-4 py-2.5 bg-[#1E3A5F]/5 border-b border-gray-100">
@@ -687,6 +700,7 @@ function Step3({
         <button
           type="button"
           onClick={onBack}
+          disabled={isLoading}
           className="flex-1 h-12 rounded-xl border-2 border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 hover:border-gray-300 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -694,16 +708,25 @@ function Step3({
         </button>
         <button
           type="submit"
-          disabled={!agreeTerms || !agreeGuardian}
+          disabled={!agreeTerms || !agreeGuardian || isLoading}
           className={cn(
             "flex-[2] h-12 rounded-xl text-white font-bold text-sm active:scale-[0.98] transition-all shadow-sm flex items-center justify-center gap-2",
-            agreeTerms && agreeGuardian
+            agreeTerms && agreeGuardian && !isLoading
               ? "bg-[#0D9488] hover:bg-[#0b7a70] hover:shadow-md"
               : "bg-gray-300 cursor-not-allowed"
           )}
         >
-          Create Account
-          <ArrowRight className="w-4 h-4" />
+          {isLoading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Creating Account...
+            </>
+          ) : (
+            <>
+              Create Account
+              <ArrowRight className="w-4 h-4" />
+            </>
+          )}
         </button>
       </div>
 
@@ -714,10 +737,11 @@ function Step3({
   )
 }
 
+
 /* ─────────────────────────────────────────────
    Success View
 ───────────────────────────────────────────── */
-function SuccessView({ name }: { name: string }) {
+function SuccessView({ name, onGoToLogin }: { name: string; onGoToLogin: () => void }) {
   return (
     <div className="flex flex-col items-center text-center py-8 gap-4">
       <div className="w-20 h-20 rounded-full bg-[#22C55E]/10 flex items-center justify-center mb-2">
@@ -753,16 +777,17 @@ function SuccessView({ name }: { name: string }) {
         ))}
       </div>
 
-      <a
-        href="/login"
+      <button
+        onClick={onGoToLogin}
         className="w-full mt-2 h-12 rounded-xl bg-[#0D9488] text-white font-bold text-sm hover:bg-[#0b7a70] transition-all flex items-center justify-center gap-2"
       >
-        Go to Login
+        Go to Dashboard
         <ArrowRight className="w-4 h-4" />
-      </a>
+      </button>
     </div>
   )
 }
+
 
 /* ─────────────────────────────────────────────
    REGISTRATION PAGE (main export)
@@ -772,11 +797,89 @@ export default function RegisterPage() {
   const [submitted, setSubmitted] = useState(false)
   const [step1, setStep1] = useState<Step1Data>(STEP1_INIT)
   const [step2, setStep2] = useState<Step2Data>(STEP2_INIT)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState("")
 
   const updateStep1 = (partial: Partial<Step1Data>) =>
     setStep1((prev) => ({ ...prev, ...partial }))
   const updateStep2 = (partial: Partial<Step2Data>) =>
     setStep2((prev) => ({ ...prev, ...partial }))
+
+  async function handleRegister() {
+    setError("")
+    setIsLoading(true)
+
+    // Parse name into first/last
+    const nameParts = step1.fullName.trim().split(/\s+/)
+    const parentFirstName = nameParts[0] || ""
+    const parentLastName = nameParts.slice(1).join(" ") || nameParts[0] || ""
+
+    const childParts = step2.childName.trim().split(/\s+/)
+    const childFirstName = childParts[0] || ""
+    const childLastName = childParts.slice(1).join(" ") || childParts[0] || ""
+
+    // Map grade format — Genspark uses "Grade 8", API expects "8"
+    const gradeNum = step2.grade.replace("Grade ", "")
+
+    // Map timezone — Genspark uses "EST", API expects "America/New_York"
+    const tzMap: Record<string, string> = {
+      EST: "America/New_York",
+      CST: "America/Chicago",
+      MST: "America/Denver",
+      PST: "America/Los_Angeles",
+    }
+
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentFirstName,
+          parentLastName,
+          parentEmail: step1.email,
+          parentPhone: step1.phone,
+          password: step1.password,
+          childFirstName,
+          childLastName,
+          childGrade: gradeNum,
+          childSchool: step2.schoolName,
+          childSubjects: step2.subjects,
+          childTimezone: tzMap[step2.timezone] || "America/New_York",
+          scheduleNotes: step2.preferredSchedule,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || "Registration failed. Please try again.")
+        setIsLoading(false)
+        return
+      }
+
+      // Show success view first
+      setSubmitted(true)
+      setIsLoading(false)
+    } catch {
+      setError("Something went wrong. Please try again.")
+      setIsLoading(false)
+    }
+  }
+
+  async function handleGoToLogin() {
+    // Try auto sign-in, then redirect
+    const result = await signIn("credentials", {
+      email: step1.email.toLowerCase().trim(),
+      password: step1.password,
+      redirect: false,
+    })
+
+    if (result?.ok) {
+      window.location.href = "/parent"
+    } else {
+      window.location.href = "/login"
+    }
+  }
 
   const stepTitles: Record<number, { heading: string; sub: string }> = {
     1: {
@@ -819,7 +922,7 @@ export default function RegisterPage() {
 
         <div className="w-full max-w-md">
           {submitted ? (
-            <SuccessView name={step1.fullName} />
+            <SuccessView name={step1.fullName} onGoToLogin={handleGoToLogin} />
           ) : (
             <>
               {/* Page heading */}
@@ -850,7 +953,9 @@ export default function RegisterPage() {
                   step1={step1}
                   step2={step2}
                   onBack={() => setStep(2)}
-                  onSubmit={() => setSubmitted(true)}
+                  onSubmit={handleRegister}
+                  isLoading={isLoading}
+                  error={error}
                 />
               )}
 
@@ -873,3 +978,4 @@ export default function RegisterPage() {
     </div>
   )
 }
+

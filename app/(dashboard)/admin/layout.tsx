@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
   Users,
@@ -32,26 +33,28 @@ const navItems = [
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession()
+
+  const userName = session?.user
+    ? `${session.user.firstName} ${session.user.lastName}`
+    : "Admin"
+  const userEmail = session?.user?.email || "admin@expertguru.net"
+
   return (
     <div className="flex min-h-screen" style={{ background: "#F8FAFC" }}>
-      {/* Fixed Sidebar */}
       <Sidebar
         role="admin"
         navItems={navItems}
-        userName="Rajesh Kumar"
-        userEmail="admin@expertguru.net"
+        userName={userName}
+        userEmail={userEmail}
       />
 
-      {/* Main content area – offset by sidebar width */}
       <div className="flex flex-col flex-1 overflow-hidden" style={{ marginLeft: 260 }}>
-        {/* Sticky TopBar */}
         <TopBar
           title="Admin Dashboard"
-          userName="Rajesh Kumar"
+          userName={userName}
           notificationCount={8}
         />
-
-        {/* Page content */}
         <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>

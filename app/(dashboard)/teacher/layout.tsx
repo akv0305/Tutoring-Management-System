@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
   Calendar,
@@ -28,24 +29,29 @@ export default function TeacherLayout({
 }: {
   children: React.ReactNode
 }) {
+  const { data: session } = useSession()
+
+  const userName = session?.user
+    ? `${session.user.firstName} ${session.user.lastName}`
+    : "Teacher"
+  const userEmail = session?.user?.email || ""
+
   return (
     <div className="flex min-h-screen" style={{ background: "#F8FAFC" }}>
-      {/* Fixed Sidebar */}
       <Sidebar
         role="teacher"
         navItems={navItems}
-        userName="Dr. Ananya Sharma"
-        userEmail="ananya@expertguru.net"
+        userName={userName}
+        userEmail={userEmail}
       />
 
-      {/* Main area offset by sidebar width */}
       <div
         className="flex flex-col flex-1 overflow-hidden"
         style={{ marginLeft: 260 }}
       >
         <TopBar
           title="Teacher Dashboard"
-          userName="Dr. Ananya Sharma"
+          userName={userName}
           notificationCount={4}
         />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>

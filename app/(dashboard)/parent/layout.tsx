@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
   Search,
@@ -30,25 +31,30 @@ export default function ParentLayout({
 }: {
   children: React.ReactNode
 }) {
+  const { data: session } = useSession()
+
+  const userName = session?.user
+    ? `${session.user.firstName} ${session.user.lastName}`
+    : "Parent"
+  const userEmail = session?.user?.email || ""
+
   return (
     <div className="flex min-h-screen" style={{ background: "#F8FAFC" }}>
-      {/* Fixed Sidebar */}
       <Sidebar
         role="parent"
         navItems={navItems}
-        userName="Jane Smith"
-        userEmail="jane@email.com"
+        userName={userName}
+        userEmail={userEmail}
       />
 
-      {/* Main area */}
       <div
         className="flex flex-col flex-1 overflow-hidden"
         style={{ marginLeft: 260 }}
       >
         <TopBar
           title="Parent Dashboard"
-          subtitle="Alex Smith — Grade 8"
-          userName="Jane Smith"
+          subtitle="My Children"
+          userName={userName}
           notificationCount={3}
         />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
