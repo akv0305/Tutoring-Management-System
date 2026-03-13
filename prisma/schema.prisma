@@ -399,6 +399,7 @@ model Class {
   completedAt   DateTime?
   cancelledAt   DateTime?
   cancelReason  String?
+  rescheduleCount Int     @default(0)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -553,6 +554,16 @@ model PlatformSettings {
   passwordResetExpiry     Int     @default(24)   // hours
   maxLoginAttempts        Int     @default(5)
   lockoutDuration         Int     @default(30)   // minutes
+  coordinatorCanConfirmPayments Boolean @default(false)
+  rescheduleWindowHours    Int     @default(24)    // Free reschedule if > X hours before class
+  rescheduleLateFeePercent Int     @default(50)    // Fee % if within reschedule window but > hardCutoff
+  rescheduleHardCutoffHours Int    @default(2)     // No reschedule allowed within X hours of class
+  cancelFreeWindowHours    Int     @default(24)    // Free cancel if > X hours before class
+  cancelLateFeePercent     Int     @default(50)    // Fee % if within cancel window but > hardCutoff
+  cancelHardCutoffHours    Int     @default(2)     // No cancel within X hours (100% forfeit or blocked)
+  cancelHardCutoffFeePercent Int   @default(100)   // Fee % if within hard cutoff (100 = full forfeit)
+  maxReschedulesPerClass   Int     @default(2)     // Max times a single class can be rescheduled
+
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

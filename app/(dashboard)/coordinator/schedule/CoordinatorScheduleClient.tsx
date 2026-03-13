@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { ChevronLeft, ChevronRight, Plus, Users } from "lucide-react"
+import { BookClassModal } from "@/components/modals/BookClassModal"
 
 type ClassBlock = {
   id: string
@@ -18,11 +19,15 @@ type ClassBlock = {
 
 type LegendItem = { label: string; cls: string }
 
+type Student = { id: string; name: string }
+type Teacher = { id: string; name: string; subjects: { id: string; name: string }[] }
+type PackageOption = { id: string; label: string; remaining: number; subjectId: string; teacherId: string }
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const TIME_SLOTS = [
-  "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM",
-  "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM",
-  "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM",
+  "8:00 AM","9:00 AM","10:00 AM","11:00 AM",
+  "12:00 PM","1:00 PM","2:00 PM","3:00 PM",
+  "4:00 PM","5:00 PM","6:00 PM","7:00 PM",
 ]
 
 function Block({ block }: { block: ClassBlock }) {
@@ -61,10 +66,25 @@ export function CoordinatorScheduleClient({
   hasTrial: boolean
 }) {
   const [view, setView] = useState<"day" | "week" | "month">("week")
+  const [showBookModal, setShowBookModal] = useState(false)
+  const [bookingData, setBookingData] = useState<{
+    students: Student[]
+    teachers: Teacher[]
+    packages: PackageOption[]
+  } | null>(null)
 
-  // Find today's dayIndex for highlighting
   const todayJs = new Date().getDay()
   const todayIdx = todayJs === 0 ? 6 : todayJs - 1
+
+  // Fetch booking dropdown data when modal opens
+  useEffect(() => {
+    if (showBookModal && !bookingData) {
+      fetch("/api/classes/booking-data")
+        .then((r) => r.json())
+        .then((d) => setBookingData(d))
+        .catch(() => {})
+    }
+  }, [showBookModal, bookingData])
 
   return (
     <div className="space-y-5">
@@ -83,20 +103,24 @@ export function CoordinatorScheduleClient({
                 key={v}
                 onClick={() => setView(v)}
                 className={`px-4 py-2 capitalize transition-colors ${
-                  view === v
-                    ? "bg-[#1E3A5F] text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
+                  view === v ? "bg-[#1E3A5F] text-white" : "bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
                 {v}
               </button>
             ))}
           </div>
-          <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm">
+          <button
+            onClick={() => setShowBookModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
+          >
             <Users className="w-4 h-4" />
             Schedule on Behalf of Student
           </button>
-          <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#1E3A5F] text-[#1E3A5F] text-sm font-medium hover:bg-[#1E3A5F]/5 transition-colors">
+          <button
+            onClick={() => setShowBookModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#1E3A5F] text-[#1E3A5F] text-sm font-medium hover:bg-[#1E3A5F]/5 transition-colors"
+          >
             <Plus className="w-4 h-4" />
             New Class
           </button>
@@ -106,7 +130,6 @@ export function CoordinatorScheduleClient({
       {/* Week Calendar */}
       {view === "week" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          {/* Week navigation */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <div className="flex items-center gap-3">
               <button className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
@@ -119,73 +142,42 @@ export function CoordinatorScheduleClient({
                 <ChevronRight className="w-4 h-4 text-gray-600" />
               </button>
             </div>
-            <button className="text-sm text-[#0D9488] font-medium hover:underline">
-              Today
-            </button>
+            <button className="text-sm text-[#0D9488] font-medium hover:underline">Today</button>
           </div>
 
-          {/* Grid */}
           <div className="overflow-x-auto">
             <div className="min-w-[900px]">
-              {/* Day headers */}
               <div className="flex border-b border-gray-100">
                 <div className="w-20 flex-shrink-0" />
                 {DAYS.map((day, i) => (
                   <div
                     key={day}
-                    className={`flex-1 text-center py-3 border-l border-gray-100 ${
-                      i === todayIdx ? "bg-[#1E3A5F]/5" : ""
-                    }`}
+                    className={`flex-1 text-center py-3 border-l border-gray-100 ${i === todayIdx ? "bg-[#1E3A5F]/5" : ""}`}
                   >
-                    <p
-                      className={`text-xs font-medium ${
-                        i === todayIdx ? "text-[#1E3A5F]" : "text-gray-500"
-                      }`}
-                    >
-                      {day}
-                    </p>
-                    <p
-                      className={`text-lg font-bold mt-0.5 ${
-                        i === todayIdx ? "text-[#1E3A5F]" : "text-[#1E293B]"
-                      }`}
-                    >
-                      {dates[i]}
-                    </p>
+                    <p className={`text-xs font-medium ${i === todayIdx ? "text-[#1E3A5F]" : "text-gray-500"}`}>{day}</p>
+                    <p className={`text-lg font-bold mt-0.5 ${i === todayIdx ? "text-[#1E3A5F]" : "text-[#1E293B]"}`}>{dates[i]}</p>
                   </div>
                 ))}
               </div>
 
-              {/* Time rows + blocks */}
               <div className="flex">
                 <div className="w-20 flex-shrink-0">
                   {TIME_SLOTS.map((t) => (
-                    <div
-                      key={t}
-                      className="h-[52px] flex items-start justify-end pr-3 pt-1"
-                    >
+                    <div key={t} className="h-[52px] flex items-start justify-end pr-3 pt-1">
                       <span className="text-[10px] text-gray-400">{t}</span>
                     </div>
                   ))}
                 </div>
-
                 {DAYS.map((day, dayIdx) => {
-                  const blocksForDay = classBlocks.filter(
-                    (b) => b.dayIndex === dayIdx
-                  )
+                  const blocksForDay = classBlocks.filter((b) => b.dayIndex === dayIdx)
                   return (
                     <div
                       key={day}
-                      className={`flex-1 relative border-l border-gray-100 ${
-                        dayIdx === todayIdx ? "bg-[#1E3A5F]/[0.02]" : ""
-                      }`}
+                      className={`flex-1 relative border-l border-gray-100 ${dayIdx === todayIdx ? "bg-[#1E3A5F]/[0.02]" : ""}`}
                       style={{ height: `${TIME_SLOTS.length * 52}px` }}
                     >
                       {TIME_SLOTS.map((_, i) => (
-                        <div
-                          key={i}
-                          className="absolute left-0 right-0 border-t border-gray-50"
-                          style={{ top: `${i * 52}px` }}
-                        />
+                        <div key={i} className="absolute left-0 right-0 border-t border-gray-50" style={{ top: `${i * 52}px` }} />
                       ))}
                       {blocksForDay.map((block) => (
                         <Block key={block.id} block={block} />
@@ -199,15 +191,11 @@ export function CoordinatorScheduleClient({
         </div>
       )}
 
-      {/* Day / Month placeholder */}
       {view !== "week" && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <p className="text-gray-400 text-sm">
             {view === "day" ? "Day" : "Month"} view coming soon. Switch to{" "}
-            <button
-              onClick={() => setView("week")}
-              className="text-[#0D9488] font-medium hover:underline"
-            >
+            <button onClick={() => setView("week")} className="text-[#0D9488] font-medium hover:underline">
               Week view
             </button>{" "}
             to see classes.
@@ -226,13 +214,24 @@ export function CoordinatorScheduleClient({
         ))}
         {hasTrial && (
           <div className="flex items-center gap-1.5">
-            <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-bold">
-              TRIAL
-            </span>
+            <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-bold">TRIAL</span>
             <span className="text-xs text-gray-600">Trial class</span>
           </div>
         )}
       </div>
+
+      {/* Book Class Modal */}
+      {bookingData && (
+        <BookClassModal
+          open={showBookModal}
+          onClose={() => setShowBookModal(false)}
+          onSuccess={() => window.location.reload()}
+          role="COORDINATOR"
+          students={bookingData.students}
+          teachers={bookingData.teachers}
+          packages={bookingData.packages}
+        />
+      )}
     </div>
   )
 }

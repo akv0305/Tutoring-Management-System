@@ -13,7 +13,10 @@ export default async function CoordinatorPaymentsPage() {
   })
   if (!coordinator) redirect("/unauthorized")
 
-  // Fetch payments for students assigned to this coordinator
+  // Check platform setting
+  const settings = await prisma.platformSettings.findFirst({ where: { id: "default" } })
+  const canConfirmPayments = settings?.coordinatorCanConfirmPayments ?? false
+
   const paymentsRaw = await prisma.payment.findMany({
     where: {
       student: { coordinatorId: coordinator.id },
@@ -44,7 +47,7 @@ export default async function CoordinatorPaymentsPage() {
     package: p.package?.name ?? "Direct Payment",
     amount: `$${Number(p.amount)}`,
     method: p.method.replace("_", " "),
-    proof: null as string | null, // proof upload not yet implemented
+    proof: null as string | null,
     date: p.createdAt.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
@@ -63,5 +66,11 @@ export default async function CoordinatorPaymentsPage() {
     rejected: payments.filter((p) => p.status === "failed").length,
   }
 
-  return <CoordinatorPaymentsClient payments={payments} counts={counts} />
+  return (
+    <CoordinatorPaymentsClient
+      payments={payments}
+      counts={counts}
+      canConfirmPayments={canConfirmPayments}
+    />
+  )
 }

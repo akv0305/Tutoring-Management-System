@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useMemo } from "react"
-import { Info, CheckCircle, XCircle, Eye, ExternalLink } from "lucide-react"
+import { Info, CheckCircle, XCircle, Eye, ExternalLink, Loader2 } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 
 type Payment = {
@@ -35,14 +35,19 @@ const FILTERS: { key: FilterKey; label: string; countKey: keyof Counts | null }[
 ]
 
 export function CoordinatorPaymentsClient({
-  payments,
-  counts,
+  payments: initialPayments,
+  counts: initialCounts,
+  canConfirmPayments,
 }: {
   payments: Payment[]
   counts: Counts
+  canConfirmPayments: boolean
 }) {
+  const [payments, setPayments] = useState(initialPayments)
+  const [counts, setCounts] = useState(initialCounts)
   const [activeFilter, setActiveFilter] = useState<FilterKey>("pending")
   const [search, setSearch] = useState("")
+  const [processing, setProcessing] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     return payments.filter((p) => {
@@ -58,19 +63,53 @@ export function CoordinatorPaymentsClient({
     })
   }, [activeFilter, search, payments])
 
+  async function handleAction(paymentId: string, action: "confirm" | "reject") {
+    setProcessing(paymentId)
+    try {
+      const res = await fetch("/api/payments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: paymentId, action }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setPayments((prev) =>
+          prev.map((p) =>
+            p.id === paymentId
+              ? { ...p, status: action === "confirm" ? "confirmed" : "failed" }
+              : p
+          )
+        )
+        setCounts((prev) => ({
+          ...prev,
+          pending: prev.pending - 1,
+          ...(action === "confirm"
+            ? { confirmed: prev.confirmed + 1 }
+            : { rejected: prev.rejected + 1 }),
+        }))
+      } else {
+        alert(data.error || "Failed to process payment")
+      }
+    } catch {
+      alert("Network error")
+    } finally {
+      setProcessing(null)
+    }
+  }
+
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-[#1E293B]">
-          Payment Confirmations
+          Payment {canConfirmPayments ? "Confirmations" : "Overview"}
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Review and confirm student payment proofs
+          {canConfirmPayments
+            ? "Review and confirm student payment proofs"
+            : "View payment status for your students"}
         </p>
       </div>
 
-      {/* Filter tabs */}
       <div className="flex gap-2 flex-wrap">
         {FILTERS.map((f) => {
           const badge = f.countKey ? counts[f.countKey] : null
@@ -101,19 +140,25 @@ export function CoordinatorPaymentsClient({
         })}
       </div>
 
-      {/* Info Banner */}
       <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 flex gap-3">
         <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
         <div className="text-sm text-amber-800">
-          <span className="font-semibold">Coordinator Action Required:</span>{" "}
-          All payments are received directly by families via bank transfer,
-          Zelle, or Venmo. Your role is to verify the payment proof uploaded by
-          the parent and confirm or reject it. Only confirmed payments unlock
-          class credits for the student.
+          {canConfirmPayments ? (
+            <>
+              <span className="font-semibold">Coordinator Action Required:</span>{" "}
+              You have been granted permission to confirm or reject payments.
+              Verify the payment proof and take action.
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">View Only:</span>{" "}
+              Payment confirmations are handled by the admin. Contact admin if
+              you need a payment processed urgently.
+            </>
+          )}
         </div>
       </div>
 
-      {/* Search */}
       <div className="relative max-w-sm">
         <input
           type="text"
@@ -134,7 +179,6 @@ export function CoordinatorPaymentsClient({
         </svg>
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -150,7 +194,7 @@ export function CoordinatorPaymentsClient({
                   "Proof",
                   "Date",
                   "Status",
-                  "Actions",
+                  ...(canConfirmPayments ? ["Actions"] : []),
                 ].map((h) => (
                   <th
                     key={h}
@@ -165,7 +209,7 @@ export function CoordinatorPaymentsClient({
               {filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={canConfirmPayments ? 10 : 9}
                     className="text-center py-10 text-gray-400 text-sm"
                   >
                     No payments found.
@@ -215,32 +259,42 @@ export function CoordinatorPaymentsClient({
                   <td className="px-4 py-3">
                     <StatusBadge status={p.status} size="sm" />
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <button
-                        title="View Details"
-                        className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                      {p.status === "pending" && (
-                        <>
-                          <button
-                            title="Confirm"
-                            className="p-1.5 rounded-md text-[#22C55E] hover:bg-green-50 transition-colors"
-                          >
-                            <CheckCircle className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            title="Reject"
-                            className="p-1.5 rounded-md text-[#EF4444] hover:bg-red-50 transition-colors"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
+                  {canConfirmPayments && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button
+                          title="View Details"
+                          className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        {p.status === "pending" && (
+                          <>
+                            <button
+                              title="Confirm"
+                              disabled={processing === p.id}
+                              onClick={() => handleAction(p.id, "confirm")}
+                              className="p-1.5 rounded-md text-[#22C55E] hover:bg-green-50 transition-colors disabled:opacity-50"
+                            >
+                              {processing === p.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <button
+                              title="Reject"
+                              disabled={processing === p.id}
+                              onClick={() => handleAction(p.id, "reject")}
+                              className="p-1.5 rounded-md text-[#EF4444] hover:bg-red-50 transition-colors disabled:opacity-50"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

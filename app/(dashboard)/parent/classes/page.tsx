@@ -43,7 +43,7 @@ export default async function ClassesPage() {
       const initials = `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`
       // Can join if class starts within 15 minutes
       const canJoin = dt.getTime() - now.getTime() < 15 * 60000 && dt.getTime() > now.getTime() - 60 * 60000
-
+      
       return {
         id: c.id,
         dayLabel: dt.toLocaleDateString("en-US", { weekday: "long" }),
@@ -61,6 +61,7 @@ export default async function ClassesPage() {
         status: c.status.toLowerCase(),
         canJoin,
         isTrial: c.isTrial,
+        teacherId: c.teacherId,
       }
     })
 

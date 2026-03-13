@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState,useEffect } from "react"
 import {
   Calendar,
   Clock,
@@ -15,6 +15,9 @@ import {
 } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
+import { BookClassModal } from "@/components/modals/BookClassModal"
+import { Plus } from "lucide-react"  // add Plus to existing import
+import { RescheduleModal } from "@/components/modals/RescheduleModal"
 
 type UpcomingClass = {
   id: string
@@ -29,6 +32,7 @@ type UpcomingClass = {
   status: string
   canJoin: boolean
   isTrial: boolean
+  teacherId: string
 }
 
 type CompletedClass = {
@@ -146,6 +150,34 @@ export function ParentClassesClient({
   calendarData: CalendarData
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("upcoming")
+  
+  const [showBookModal, setShowBookModal] = useState(false)
+  const [bookingData, setBookingData] = useState<any>(null)
+  
+
+  useEffect(() => {
+    if (showBookModal && !bookingData) {
+      fetch("/api/classes/booking-data")
+        .then((r) => r.json())
+        .then((d) => setBookingData(d))
+        .catch(() => {})
+    }
+  }, [showBookModal, bookingData])
+
+  const [rescheduleClass, setRescheduleClass] = useState<UpcomingClass | null>(null)
+  const [teacherSlots, setTeacherSlots] = useState<any>(null)
+
+  useEffect(() => {
+    if (rescheduleClass) {
+      fetch(`/api/classes/teacher-slots?teacherId=${(rescheduleClass as any).teacherId}`)
+        .then((r) => r.json())
+        .then((d) => setTeacherSlots(d))
+        .catch(() => {})
+    } else {
+      setTeacherSlots(null)
+    }
+  }, [rescheduleClass])
+
 
   const tabs: { key: Tab; label: string; badge?: number }[] = [
     { key: "upcoming", label: "Upcoming", badge: upcoming.length || undefined },
@@ -155,13 +187,23 @@ export function ParentClassesClient({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[#1E293B]">My Classes</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Manage and track {childName}&apos;s learning sessions
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[#1E293B]">My Classes</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage and track {childName}&apos;s learning sessions
+          </p>
+        </div>
+        <button
+          onClick={() => setShowBookModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
+        >
+          <Plus className="w-4 h-4" />
+          Book a Class
+        </button>
       </div>
 
+      
       <div className="flex items-center gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 w-fit">
         {tabs.map((t) => (
           <button
@@ -255,9 +297,28 @@ export function ParentClassesClient({
                               <Eye className="w-3 h-3" />View Details
                             </button>
                           )}
-                          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
-                            <RotateCcw className="w-3 h-3" />Reschedule
-                          </button>
+                            <button
+                              onClick={() => setRescheduleClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                            >
+                              <RotateCcw className="w-3 h-3" />Reschedule
+                            </button>
+                            {rescheduleClass && teacherSlots && (
+                              <RescheduleModal
+                                open={!!rescheduleClass}
+                                onClose={() => setRescheduleClass(null)}
+                                onSuccess={() => window.location.reload()}
+                                classId={rescheduleClass.id}
+                                currentDate={`${rescheduleClass.month} ${rescheduleClass.dateNum}`}
+                                currentTime={rescheduleClass.time}
+                                teacherName={rescheduleClass.teacher}
+                                subject={rescheduleClass.subject}
+                                teacherAvailability={teacherSlots.availability}
+                                teacherBookedSlots={teacherSlots.bookedSlots}
+                                teacherBlockedDates={teacherSlots.blockedDates}
+                              />
+                            )}
+
                         </div>
                       </div>
                     </div>
@@ -371,6 +432,17 @@ export function ParentClassesClient({
             )}
           </div>
         </div>
+      )}
+      {bookingData && (
+        <BookClassModal
+          open={showBookModal}
+          onClose={() => setShowBookModal(false)}
+          onSuccess={() => window.location.reload()}
+          role="PARENT"
+          students={bookingData.students}
+          teachers={bookingData.teachers}
+          packages={bookingData.packages}
+        />
       )}
     </div>
   )

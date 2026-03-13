@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react"
 import { Star, ShieldCheck, X } from "lucide-react"
 import { RatingStars } from "@/components/ui/RatingStars"
+import { useRouter } from "next/navigation"
 
 type TeacherEntry = {
   id: string
@@ -22,79 +23,55 @@ type TeacherEntry = {
 }
 
 function TeacherGridCard({ teacher }: { teacher: TeacherEntry }) {
+  const router = useRouter()
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition-shadow duration-200">
       <div className="h-2 bg-[#0D9488]" />
       <div className="p-5 flex flex-col flex-1">
         <div className="flex justify-center -mt-8 mb-3">
-          <div
-            className={`w-16 h-16 rounded-full ${teacher.avatarBg} flex items-center justify-center border-4 border-white shadow-sm`}
-          >
-            <span className="text-white text-xl font-bold">
-              {teacher.initials}
-            </span>
+          <div className={`w-16 h-16 rounded-full ${teacher.avatarBg} flex items-center justify-center border-4 border-white shadow-sm`}>
+            <span className="text-white text-xl font-bold">{teacher.initials}</span>
           </div>
         </div>
         <div className="text-center mb-3">
           <div className="flex items-center justify-center gap-1.5 flex-wrap">
-            <h3 className="text-base font-bold text-[#1E293B]">
-              {teacher.name}
-            </h3>
-            {teacher.isVerified && (
-              <ShieldCheck className="w-4 h-4 text-[#22C55E] flex-shrink-0" />
-            )}
+            <h3 className="text-base font-bold text-[#1E293B]">{teacher.name}</h3>
+            {teacher.isVerified && <ShieldCheck className="w-4 h-4 text-[#22C55E] flex-shrink-0" />}
           </div>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {teacher.qualification}
-          </p>
+          <p className="text-xs text-gray-500 mt-0.5">{teacher.qualification}</p>
         </div>
         <div className="flex flex-wrap justify-center gap-1 mb-3">
           {teacher.subjects.map((sub, i) => (
-            <span
-              key={sub}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-                teacher.subjectColors[i] ??
-                "bg-gray-100 text-gray-600 border-gray-200"
-              }`}
-            >
+            <span key={sub} className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${teacher.subjectColors[i] ?? "bg-gray-100 text-gray-600 border-gray-200"}`}>
               {sub}
             </span>
           ))}
         </div>
         <div className="flex justify-center mb-3">
-          {teacher.rating > 0 ? (
-            <RatingStars
-              rating={teacher.rating}
-              count={teacher.reviews}
-              size="sm"
-            />
-          ) : (
-            <span className="text-xs text-gray-400">No ratings yet</span>
-          )}
+          {teacher.rating > 0 ? <RatingStars rating={teacher.rating} count={teacher.reviews} size="sm" /> : <span className="text-xs text-gray-400">No ratings yet</span>}
         </div>
-        <p className="text-center text-xl font-bold text-[#0D9488] mb-1">
-          {teacher.price}
-        </p>
-        <p className="text-center text-xs text-gray-500 mb-0.5">
-          {teacher.experience}
-        </p>
-        <p className="text-center text-xs text-gray-400 mb-4">
-          {teacher.availability}
-        </p>
+        <p className="text-center text-xl font-bold text-[#0D9488] mb-1">{teacher.price}</p>
+        <p className="text-center text-xs text-gray-500 mb-0.5">{teacher.experience}</p>
+        <p className="text-center text-xs text-gray-400 mb-4">{teacher.availability}</p>
         <div className="border-t border-gray-100 mb-4" />
         <div className="flex flex-col gap-2 mt-auto">
-          <button className="w-full text-center px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-[#1E293B] hover:bg-gray-50 hover:border-[#0D9488] hover:text-[#0D9488] transition-colors">
-            View Profile
+          <button
+            onClick={() => router.push(`/parent/teachers/${teacher.id}`)}
+            className="w-full text-center px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-[#1E293B] hover:bg-gray-50 hover:border-[#0D9488] hover:text-[#0D9488] transition-colors"
+          >
+            View Profile & Availability
           </button>
-          {teacher.isExistingTeacher ? (
-            <button className="w-full px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-semibold hover:bg-teal-700 transition-colors shadow-sm">
-              Book Class
-            </button>
-          ) : (
-            <button className="w-full px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
-              Book Trial
-            </button>
-          )}
+          <button
+            onClick={() => router.push(`/parent/teachers/${teacher.id}`)}
+            className={`w-full px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm ${
+              teacher.isExistingTeacher
+                ? "bg-[#0D9488] text-white hover:bg-teal-700"
+                : "bg-[#F59E0B] text-[#1E293B] hover:bg-amber-400"
+            }`}
+          >
+            {teacher.isExistingTeacher ? "Book Class" : "Book Trial"}
+          </button>
         </div>
       </div>
     </div>

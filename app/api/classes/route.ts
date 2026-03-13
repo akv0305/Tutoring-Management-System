@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
+import { evaluateReschedulePolicy, evaluateCancelPolicy } from "@/lib/policyEngine"
 
 // GET /api/classes
 export async function GET(req: NextRequest) {
@@ -131,12 +132,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    if (!["ADMIN", "COORDINATOR"].includes(session.user.role)) {
+    if (!["ADMIN", "COORDINATOR", "PARENT"].includes(session.user.role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
-
+    
     const body = await req.json()
     const { studentId, teacherId, subjectId, packageId, scheduledAt, duration, topicCovered, meetingLink, isTrial } = body
+
+    // Parents can only book for their own children
+    if (session.user.role === "PARENT") {
+      const parent = await prisma.parentProfile.findUnique({
+        where: { userId: session.user.id },
+        include: { students: { select: { id: true } } },
+      })
+      if (!parent || !parent.students.some((s) => s.id === studentId)) {
+        return NextResponse.json({ error: "You can only book classes for your own children" }, { status: 403 })
+      }
+    }
 
     if (!studentId || !teacherId || !subjectId || !scheduledAt) {
       return NextResponse.json({ error: "studentId, teacherId, subjectId, and scheduledAt are required" }, { status: 400 })
@@ -320,25 +332,53 @@ export async function PATCH(req: NextRequest) {
         }
         break
 
-      case "reschedule":
-        if (!["SCHEDULED", "CONFIRMED"].includes(existingClass.status)) {
-          return NextResponse.json({ error: "Can only reschedule a scheduled or confirmed class" }, { status: 400 })
+        case "reschedule": {
+          if (!["SCHEDULED", "CONFIRMED"].includes(existingClass.status)) {
+            return NextResponse.json({ error: "Can only reschedule a scheduled or confirmed class" }, { status: 400 })
+          }
+          if (!updates.scheduledAt) {
+            return NextResponse.json({ error: "New scheduledAt is required" }, { status: 400 })
+          }
+        
+          // Policy check
+          const settings = await prisma.platformSettings.findFirst()
+          if (settings) {
+            const result = evaluateReschedulePolicy(
+              existingClass.scheduledAt,
+              new Date(),
+              existingClass.rescheduleCount,
+              settings
+            )
+            if (!result.allowed) {
+              return NextResponse.json({ error: result.reason || result.message }, { status: 400 })
+            }
+          }
+        
+          // Conflict check for new time
+          const newDate = new Date(updates.scheduledAt)
+          const dur = existingClass.duration
+          const newEnd = new Date(newDate.getTime() + dur * 60000)
+          const conflict = await prisma.class.findFirst({
+            where: {
+              teacherId: existingClass.teacherId,
+              id: { not: existingClass.id },
+              status: { in: ["SCHEDULED", "CONFIRMED"] },
+              scheduledAt: { lt: newEnd },
+              AND: { scheduledAt: { gte: new Date(newDate.getTime() - dur * 60000) } },
+            },
+          })
+          if (conflict) {
+            return NextResponse.json({ error: "Teacher has a conflict at the new time" }, { status: 409 })
+          }
+        
+          updateData = {
+            scheduledAt: newDate,
+            status: "SCHEDULED",
+            rescheduleCount: { increment: 1 },
+          }
+          break
         }
-        if (!updates.scheduledAt) {
-          return NextResponse.json({ error: "New scheduledAt is required" }, { status: 400 })
-        }
-        updateData = {
-          scheduledAt: new Date(updates.scheduledAt),
-          status: "SCHEDULED",
-        }
-        break
-
-      default:
-        // Direct field updates (admin only)
-        if (session.user.role !== "ADMIN") {
-          return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-        }
-        updateData = updates
+        
     }
 
     const updated = await prisma.class.update({
