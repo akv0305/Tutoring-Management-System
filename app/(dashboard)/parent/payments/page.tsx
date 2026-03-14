@@ -17,10 +17,16 @@ export default async function PaymentsPage() {
   const studentIds = parent.students.map((s) => s.id)
   const childName = parent.students[0]?.firstName ?? "your child"
 
+  // Fetch payments WITH latest refund request status
   const paymentsRaw = await prisma.payment.findMany({
     where: { studentId: { in: studentIds } },
     include: {
       package: { select: { name: true } },
+      refundRequests: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { id: true, status: true, refundAmount: true },
+      },
     },
     orderBy: { createdAt: "desc" },
   })
@@ -40,21 +46,31 @@ export default async function PaymentsPage() {
     FAILED: "failed",
   }
 
-  const payments = paymentsRaw.map((p) => ({
-    id: p.id,
-    txnId: `TXN-${p.id.slice(-4).toUpperCase()}`,
-    description: p.package?.name ?? "Direct Payment",
-    amount: `$${Number(p.amount)}`,
-    amountNum: Number(p.amount),
-    date: p.createdAt.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }),
-    method: p.method.replace("_", " "),
-    methodIcon: methodIconMap[p.method] ?? "bank",
-    status: statusMap[p.status] ?? p.status.toLowerCase(),
-  }))
+  const payments = paymentsRaw.map((p) => {
+    const latestRefund = p.refundRequests[0] ?? null
+    // "none" | "pending" | "approved" | "rejected" | "processed"
+    const refundStatus = latestRefund
+      ? latestRefund.status.toLowerCase()
+      : "none"
+
+    return {
+      id: p.id,
+      txnId: `TXN-${p.id.slice(-4).toUpperCase()}`,
+      description: p.package?.name ?? "Direct Payment",
+      amount: `$${Number(p.amount)}`,
+      amountNum: Number(p.amount),
+      date: p.createdAt.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      method: p.method.replace("_", " "),
+      methodIcon: methodIconMap[p.method] ?? "bank",
+      status: statusMap[p.status] ?? p.status.toLowerCase(),
+      studentId: p.studentId,
+      refundStatus,
+    }
+  })
 
   const completedTotal = payments
     .filter((p) => p.status === "completed")
@@ -86,7 +102,11 @@ export default async function PaymentsPage() {
     where: { id: { in: studentIds } },
     include: {
       coordinator: {
-        include: { user: { select: { firstName: true, lastName: true, email: true } } },
+        include: {
+          user: {
+            select: { firstName: true, lastName: true, email: true },
+          },
+        },
       },
     },
   })
@@ -94,7 +114,8 @@ export default async function PaymentsPage() {
   const coordinatorName = student?.coordinator
     ? `${student.coordinator.user.firstName} ${student.coordinator.user.lastName}`
     : "your coordinator"
-  const coordinatorEmail = student?.coordinator?.user.email ?? "support@expertguru.net"
+  const coordinatorEmail =
+    student?.coordinator?.user.email ?? "support@expertguru.net"
 
   return (
     <ParentPaymentsClient

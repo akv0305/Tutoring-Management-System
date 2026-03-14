@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getSession } from "@/lib/auth-utils"
+import bcrypt from "bcryptjs"
 
 // GET /api/teachers — public fields for parents, full fields for admin
 export async function GET(req: NextRequest) {
@@ -175,6 +176,106 @@ export async function GET(req: NextRequest) {
     })
   } catch (error) {
     console.error("GET /api/teachers error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
+// POST /api/teachers — admin can create a new teacher
+export async function POST(req: NextRequest) {
+  try {
+    const session = await getSession()
+    if (!session?.user || session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Admin only" }, { status: 403 })
+    }
+
+    const body = await req.json()
+    const {
+      firstName, lastName, email, password, phone,
+      qualification, bio, experience,
+      compensationRate, studentFacingRate,
+      subjectIds, timezone,
+    } = body
+
+    if (!firstName || !lastName || !email || !password) {
+      return NextResponse.json(
+        { error: "First name, last name, email, and password are required." },
+        { status: 400 }
+      )
+    }
+    if (!compensationRate || !studentFacingRate) {
+      return NextResponse.json(
+        { error: "Compensation rate and student-facing rate are required." },
+        { status: 400 }
+      )
+    }
+
+    // Check duplicate email
+    const existingUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    })
+    if (existingUser) {
+      return NextResponse.json(
+        { error: "A user with this email already exists." },
+        { status: 409 }
+      )
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12)
+
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: email.toLowerCase().trim(),
+          passwordHash,
+          role: "TEACHER",
+          status: "ACTIVE",
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          phone: phone?.trim() || null,
+        },
+      })
+
+      const teacherProfile = await tx.teacherProfile.create({
+        data: {
+          userId: user.id,
+          qualification: qualification?.trim() || null,
+          bio: bio?.trim() || null,
+          experience: experience ?? 0,
+          compensationRate,
+          studentFacingRate,
+          timezone: timezone || "America/New_York",
+          status: "ACTIVE",
+        },
+      })
+
+      // Link subjects
+      if (subjectIds && Array.isArray(subjectIds) && subjectIds.length > 0) {
+        for (const subjectId of subjectIds) {
+          await tx.teacherSubject.create({
+            data: {
+              teacherId: teacherProfile.id,
+              subjectId,
+            },
+          })
+        }
+      }
+
+      return { user, teacherProfile }
+    })
+
+    return NextResponse.json(
+      {
+        message: "Teacher created successfully",
+        teacher: {
+          id: result.teacherProfile.id,
+          name: `${result.user.firstName} ${result.user.lastName}`,
+          email: result.user.email,
+        },
+      },
+      { status: 201 }
+    )
+  } catch (error) {
+    console.error("POST /api/teachers error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

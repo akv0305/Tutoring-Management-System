@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react"
 import { Info, Eye, Phone, Mail, UserCheck } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { ConvertStudentModal } from "@/components/modals/ConvertStudentModal"
 
 type OnboardingStudent = {
   id: string
@@ -44,6 +45,7 @@ export function OnboardingClient({
 }) {
   const [activeTab, setActiveTab] = useState<string>("all")
   const [search, setSearch] = useState("")
+  const [convertStudent, setConvertStudent] = useState<OnboardingStudent | null>(null)
 
   const filtered = useMemo(() => {
     return students.filter((s) => {
@@ -129,105 +131,58 @@ export function OnboardingClient({
           <table className="min-w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                {[
-                  "Student",
-                  "Parent",
-                  "Email / Phone",
-                  "Grade",
-                  "Subjects",
-                  "Timezone",
-                  "Status",
-                  "Registered",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
+                {["Student", "Parent", "Email / Phone", "Grade", "Subjects", "Timezone", "Status", "Registered", "Actions"].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filtered.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={9}
-                    className="text-center py-10 text-gray-400 text-sm"
-                  >
-                    No students found.
-                  </td>
+                  <td colSpan={9} className="text-center py-10 text-gray-400 text-sm">No students found.</td>
                 </tr>
               )}
               {filtered.map((s) => (
-                <tr
-                  key={s.id}
-                  className="hover:bg-gray-50/60 transition-colors"
-                >
+                <tr key={s.id} className="hover:bg-gray-50/60 transition-colors">
                   <td className="px-4 py-3">
-                    <p className="font-semibold text-[#1E293B]">
-                      {s.studentName}
-                    </p>
+                    <p className="font-semibold text-[#1E293B]">{s.studentName}</p>
                     {s.trialDate && (
                       <p className="text-[10px] text-gray-400">
-                        Trial: {s.trialDate}
-                        {s.trialRating ? ` · ${s.trialRating}★` : ""}
+                        Trial: {s.trialDate}{s.trialRating ? ` · ${s.trialRating}★` : ""}
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                    {s.parentName}
-                  </td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{s.parentName}</td>
                   <td className="px-4 py-3">
                     <p className="text-gray-600 text-xs">{s.email}</p>
                     <p className="text-gray-400 text-xs">{s.phone}</p>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                    {s.grade}
-                  </td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{s.grade}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {s.subjects.map((sub) => (
-                        <span
-                          key={sub}
-                          className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-50 text-teal-700 border border-teal-200"
-                        >
-                          {sub}
-                        </span>
+                        <span key={sub} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-50 text-teal-700 border border-teal-200">{sub}</span>
                       ))}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{s.timezone}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={s.status} size="sm" />
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
-                    {s.registered}
-                  </td>
+                  <td className="px-4 py-3"><StatusBadge status={s.status} size="sm" /></td>
+                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{s.registered}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button
-                        title="View"
-                        className="p-1.5 rounded-md text-[#0D9488] hover:bg-teal-50 transition-colors"
-                      >
+                      <button title="View" className="p-1.5 rounded-md text-[#0D9488] hover:bg-teal-50 transition-colors">
                         <Eye className="w-3.5 h-3.5" />
                       </button>
-                      <button
-                        title="Call"
-                        className="p-1.5 rounded-md text-[#1E3A5F] hover:bg-blue-50 transition-colors"
-                      >
+                      <button title="Call" className="p-1.5 rounded-md text-[#1E3A5F] hover:bg-blue-50 transition-colors">
                         <Phone className="w-3.5 h-3.5" />
                       </button>
-                      <button
-                        title="Email"
-                        className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
-                      >
+                      <button title="Email" className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors">
                         <Mail className="w-3.5 h-3.5" />
                       </button>
-                      {s.status === "trial_completed" && (
+                      {s.status !== "converted" && (
                         <button
-                          title="Convert"
+                          title="Convert to Active Student"
+                          onClick={() => setConvertStudent(s)}
                           className="p-1.5 rounded-md text-[#22C55E] hover:bg-green-50 transition-colors"
                         >
                           <UserCheck className="w-3.5 h-3.5" />
@@ -240,7 +195,6 @@ export function OnboardingClient({
             </tbody>
           </table>
         </div>
-        {/* Footer */}
         <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
           Showing {filtered.length} of {students.length} students
         </div>
@@ -251,36 +205,30 @@ export function OnboardingClient({
         <div className="flex gap-3">
           <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-sm font-semibold text-blue-800 mb-2">
-              Onboarding Workflow
-            </h3>
+            <h3 className="text-sm font-semibold text-blue-800 mb-2">Onboarding Workflow</h3>
             <ol className="list-decimal list-inside space-y-1 text-sm text-blue-700">
-              <li>
-                <span className="font-medium">New Lead</span> – Student
-                registers on the platform. Contact the family within 24 hours.
-              </li>
-              <li>
-                <span className="font-medium">Trial Scheduled</span> – A trial
-                class is booked with a suitable teacher. Confirm date/time with
-                the family.
-              </li>
-              <li>
-                <span className="font-medium">Trial Completed</span> – Trial
-                class done. Collect feedback and rating; follow up on conversion.
-              </li>
-              <li>
-                <span className="font-medium">Converted</span> – Student
-                purchases a package and becomes an active student in your bucket.
-              </li>
+              <li><span className="font-medium">New Lead</span> – Student registers on the platform. Contact the family within 24 hours.</li>
+              <li><span className="font-medium">Trial Scheduled</span> – A trial class is booked with a suitable teacher. Confirm date/time with the family.</li>
+              <li><span className="font-medium">Trial Completed</span> – Trial class done. Collect feedback and rating; follow up on conversion.</li>
+              <li><span className="font-medium">Converted</span> – Student purchases a package and becomes an active student in your bucket.</li>
             </ol>
             <p className="text-xs text-blue-500 mt-3">
-              Auto-assignment rule: New registrations are distributed to
-              coordinators with available slots (bucket size &lt; 50). Students
-              are sorted by registration date.
+              Auto-assignment rule: New registrations are distributed to coordinators with available slots (bucket size &lt; 50). Students are sorted by registration date.
             </p>
           </div>
         </div>
       </div>
+
+      {/* Convert Student Modal */}
+      {convertStudent && (
+        <ConvertStudentModal
+          open={!!convertStudent}
+          onClose={() => setConvertStudent(null)}
+          onSuccess={() => window.location.reload()}
+          studentId={convertStudent.id}
+          studentName={convertStudent.studentName}
+        />
+      )}
     </div>
   )
 }

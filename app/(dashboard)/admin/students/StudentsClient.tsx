@@ -1,9 +1,10 @@
 "use client"
 
-import React from "react"
-import { UserCog, Download, Eye, Pencil, UserX } from "lucide-react"
+import React, { useState } from "react"
+import { UserCog, Download, Eye, Pencil, UserX, UserPlus } from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { AddStudentModal } from "@/components/modals/AddStudentModal"
 
 type Student = Record<string, unknown> & {
   id: string
@@ -134,12 +135,26 @@ function MiniKPI({
 }
 
 export function StudentsClient({ students, kpis }: { students: Student[]; kpis: KPIs }) {
+  const [showAddModal, setShowAddModal] = useState(false)
+
+  const handleStudentAdded = () => {
+    // Reload the page to pick up fresh server-side data
+    window.location.reload()
+  }
+
   return (
     <div className="space-y-5">
       {/* Header row */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-[#1E293B]">Student Management</h1>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
+          >
+            <UserPlus className="w-4 h-4" />
+            Add Student
+          </button>
           <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
             <UserCog className="w-4 h-4" />
             Bulk Assign Coordinator
@@ -167,6 +182,13 @@ export function StudentsClient({ students, kpis }: { students: Student[]; kpis: 
         searchPlaceholder="Search students..."
         pageSize={10}
         selectable
+      />
+
+      {/* Add Student Modal */}
+      <AddStudentModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={handleStudentAdded}
       />
     </div>
   )

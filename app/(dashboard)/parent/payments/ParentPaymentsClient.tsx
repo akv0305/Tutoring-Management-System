@@ -11,9 +11,11 @@ import {
   Info,
   Banknote,
   Smartphone,
+  XCircle,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { RefundRequestModal } from "@/components/modals/RefundRequestModal"
 
 type Payment = {
   id: string
@@ -25,6 +27,8 @@ type Payment = {
   method: string
   methodIcon: string
   status: string
+  studentId: string
+  refundStatus: string // "none" | "pending" | "approved" | "rejected" | "processed"
 }
 
 type Counts = {
@@ -50,6 +54,74 @@ const METHOD_ICONS: Record<string, React.ReactNode> = {
   upi: <Smartphone className="w-4 h-4 text-[#F59E0B]" />,
 }
 
+function RefundActionCell({
+  payment,
+  onRequestRefund,
+}: {
+  payment: Payment
+  onRequestRefund: (p: Payment) => void
+}) {
+  // Payment already fully refunded (DB status)
+  if (payment.status === "refunded") {
+    return <span className="text-xs text-gray-400">Refunded</span>
+  }
+
+  // Only completed payments can have refund actions
+  if (payment.status !== "completed") {
+    if (payment.status === "pending") {
+      return <span className="text-xs text-gray-400">Awaiting confirmation</span>
+    }
+    return null
+  }
+
+  // Refund status-based rendering
+  switch (payment.refundStatus) {
+    case "pending":
+      return (
+        <span className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-medium">
+          <Clock className="w-3.5 h-3.5" />
+          Refund Pending
+        </span>
+      )
+
+    case "approved":
+      return (
+        <span className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-medium">
+          <CheckCircle className="w-3.5 h-3.5" />
+          Refund Approved
+        </span>
+      )
+
+    case "rejected":
+      return (
+        <span className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 border border-red-200 text-red-400 rounded-lg text-xs font-medium">
+          <XCircle className="w-3.5 h-3.5" />
+          Refund Rejected
+        </span>
+      )
+
+    case "processed":
+      return (
+        <span className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 border border-green-200 text-[#22C55E] rounded-lg text-xs font-medium">
+          <CheckCircle className="w-3.5 h-3.5" />
+          Refund Processed
+        </span>
+      )
+
+    default:
+      // "none" — no refund requested yet, show the Refund button
+      return (
+        <button
+          onClick={() => onRequestRefund(payment)}
+          className="flex items-center gap-1 px-2.5 py-1.5 border border-red-200 text-[#EF4444] rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Refund
+        </button>
+      )
+  }
+}
+
 export function ParentPaymentsClient({
   childName,
   payments,
@@ -66,6 +138,7 @@ export function ParentPaymentsClient({
   coordinatorEmail: string
 }) {
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all")
+  const [refundPayment, setRefundPayment] = useState<Payment | null>(null)
 
   const filtered = useMemo(
     () =>
@@ -232,14 +305,18 @@ export function ParentPaymentsClient({
                       <StatusBadge status={p.status} />
                     </td>
                     <td className="px-4 py-3">
-                      {p.status === "completed" ? (
-                        <button className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
-                          <Download className="w-3.5 h-3.5" />
-                          Invoice
-                        </button>
-                      ) : (
-                        <span className="text-gray-300 text-sm">—</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {p.status === "completed" && (
+                          <button className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
+                            <Download className="w-3.5 h-3.5" />
+                            Invoice
+                          </button>
+                        )}
+                        <RefundActionCell
+                          payment={p}
+                          onRequestRefund={setRefundPayment}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -318,6 +395,23 @@ export function ParentPaymentsClient({
           ))}
         </div>
       </div>
+
+      {/* Refund Modal */}
+      {refundPayment && (
+        <RefundRequestModal
+          open={true}
+          onClose={() => setRefundPayment(null)}
+          onSuccess={() => {
+            setRefundPayment(null)
+            window.location.reload()
+          }}
+          paymentId={refundPayment.id}
+          studentId={refundPayment.studentId}
+          paymentAmount={refundPayment.amountNum}
+          packageName={refundPayment.description}
+          paymentDate={refundPayment.date}
+        />
+      )}
     </div>
   )
 }

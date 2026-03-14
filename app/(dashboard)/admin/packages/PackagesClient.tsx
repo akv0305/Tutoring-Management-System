@@ -4,6 +4,7 @@ import React, { useState } from "react"
 import { Plus, Pencil, Copy, ToggleRight, AlertCircle, Star, Eye } from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { CreatePackageTemplateModal } from "@/components/modals/CreatePackageTemplateModal"
 
 /* ─── Types ─── */
 
@@ -42,6 +43,8 @@ type KPIs = {
   activePurchased: number
   totalRevenue: number
 }
+
+type SubjectOption = { id: string; name: string }
 
 /* ─── Template columns ─── */
 
@@ -219,19 +222,29 @@ export function PackagesClient({
   templates,
   purchased,
   kpis,
+  subjects,
 }: {
   templates: Template[]
   purchased: Purchased[]
   kpis: KPIs
+  subjects: SubjectOption[]
 }) {
   const [activeTab, setActiveTab] = useState<"templates" | "purchased">("templates")
+  const [showCreateModal, setShowCreateModal] = useState(false)
+
+  const handleTemplateCreated = () => {
+    window.location.reload()
+  }
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-[#1E293B]">Package Management</h1>
-        <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm">
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
+        >
           <Plus className="w-4 h-4" />
           {activeTab === "templates" ? "Create Template" : "Create Package"}
         </button>
@@ -296,6 +309,14 @@ export function PackagesClient({
           pageSize={10}
         />
       )}
+
+      {/* Create Template Modal */}
+      <CreatePackageTemplateModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={handleTemplateCreated}
+        subjects={subjects}
+      />
     </div>
   )
 }

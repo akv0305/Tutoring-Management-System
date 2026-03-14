@@ -5,7 +5,7 @@ export default async function PackagesPage() {
   // Fetch templates
   const templatesRaw = await prisma.packageTemplate.findMany({
     include: {
-      subject: { select: { name: true } },
+      subject: { select: { id: true, name: true } },
       _count: { select: { packages: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -64,5 +64,12 @@ export default async function PackagesPage() {
     totalRevenue: purchased.reduce((sum, p) => sum + Number(p.totalPrice.replace("$", "")), 0),
   }
 
-  return <PackagesClient templates={templates} purchased={purchased} kpis={kpis} />
+  // Fetch subjects for the create modal
+  const subjectsRaw = await prisma.subject.findMany({
+    where: { status: "ACTIVE" },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  })
+
+  return <PackagesClient templates={templates} purchased={purchased} kpis={kpis} subjects={subjectsRaw} />
 }

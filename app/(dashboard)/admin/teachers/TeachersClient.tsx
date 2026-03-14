@@ -1,10 +1,11 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import { UserPlus, Eye, Pencil, DollarSign, UserX } from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
+import { AddTeacherModal } from "@/components/modals/AddTeacherModal"
 
 type Teacher = Record<string, unknown> & {
   id: string
@@ -27,6 +28,8 @@ type KPIs = {
   onLeave: number
   avgRating: string
 }
+
+type SubjectOption = { id: string; name: string; category: string }
 
 const columns = [
   {
@@ -120,13 +123,30 @@ function MiniKPI({ label, value, valueClass = "text-[#1E293B]" }: { label: strin
   )
 }
 
-export function TeachersClient({ teachers, kpis }: { teachers: Teacher[]; kpis: KPIs }) {
+export function TeachersClient({
+  teachers,
+  kpis,
+  subjects,
+}: {
+  teachers: Teacher[]
+  kpis: KPIs
+  subjects: SubjectOption[]
+}) {
+  const [showAddModal, setShowAddModal] = useState(false)
+
+  const handleTeacherAdded = () => {
+    window.location.reload()
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-[#1E293B]">Teacher Management</h1>
-        <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm">
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
+        >
           <UserPlus className="w-4 h-4" />
           Add Teacher
         </button>
@@ -155,6 +175,14 @@ export function TeachersClient({ teachers, kpis }: { teachers: Teacher[]; kpis: 
         searchable
         searchPlaceholder="Search teachers..."
         pageSize={10}
+      />
+
+      {/* Add Teacher Modal */}
+      <AddTeacherModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={handleTeacherAdded}
+        subjects={subjects}
       />
     </div>
   )

@@ -6,7 +6,7 @@ export default async function TeachersPage() {
     include: {
       user: { select: { firstName: true, lastName: true, email: true } },
       subjects: {
-        include: { subject: { select: { name: true } } },
+        include: { subject: { select: { id: true, name: true, category: true } } },
       },
       packages: {
         where: { status: "ACTIVE" },
@@ -47,5 +47,12 @@ export default async function TeachersPage() {
     avgRating: `${avgRating} ★`,
   }
 
-  return <TeachersClient teachers={teachers} kpis={kpis} />
+  // Fetch subjects for the AddTeacher modal
+  const subjectsRaw = await prisma.subject.findMany({
+    where: { status: "ACTIVE" },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, category: true },
+  })
+
+  return <TeachersClient teachers={teachers} kpis={kpis} subjects={subjectsRaw} />
 }
