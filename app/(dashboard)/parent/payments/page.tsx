@@ -4,6 +4,9 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentPaymentsClient } from "./ParentPaymentsClient"
 
+// Prevent Next.js from caching this page — always fetch fresh data
+export const dynamic = "force-dynamic"
+
 export default async function PaymentsPage() {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
@@ -47,8 +50,7 @@ export default async function PaymentsPage() {
   }
 
   const payments = paymentsRaw.map((p) => {
-    const latestRefund = p.refundRequests[0] ?? null
-    // "none" | "pending" | "approved" | "rejected" | "processed"
+    const latestRefund = p.refundRequests?.[0] ?? null
     const refundStatus = latestRefund
       ? latestRefund.status.toLowerCase()
       : "none"

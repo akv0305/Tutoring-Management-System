@@ -1,9 +1,10 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import { UserPlus, Eye, Pencil, Settings, Info } from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { AddCoordinatorModal } from "@/components/modals/AddCoordinatorModal"
 
 type Coordinator = Record<string, unknown> & {
   id: string
@@ -105,15 +106,24 @@ function MiniKPI({ label, value, valueClass = "text-[#1E293B]" }: { label: strin
 }
 
 export function CoordinatorsClient({ coordinators }: { coordinators: Coordinator[] }) {
+  const [showAddModal, setShowAddModal] = useState(false)
+
   const totalSlots = coordinators.reduce((s, c) => s + c.availableSlots, 0)
   const activeCount = coordinators.filter((c) => c.status === "active").length
+
+  const handleCoordinatorAdded = () => {
+    window.location.reload()
+  }
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-[#1E293B]">Coordinator Management</h1>
-        <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm">
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
+        >
           <UserPlus className="w-4 h-4" />
           Add Coordinator
         </button>
@@ -152,6 +162,13 @@ export function CoordinatorsClient({ coordinators }: { coordinators: Coordinator
           </p>
         </div>
       </div>
+
+      {/* Add Coordinator Modal */}
+      <AddCoordinatorModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={handleCoordinatorAdded}
+      />
     </div>
   )
 }

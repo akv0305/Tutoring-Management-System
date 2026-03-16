@@ -52,6 +52,7 @@ export function RefundsClient({
     action: "approve" | "reject" | "process"
   } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [pageLoading, setPageLoading] = useState(false)
   const [error, setError] = useState("")
 
   const filteredData =
@@ -84,7 +85,9 @@ export function RefundsClient({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Action failed")
 
-      // Success — reload to reflect changes
+      // Close modal, show page-level loading, then reload
+      setActionModal(null)
+      setPageLoading(true)
       window.location.reload()
     } catch (err: unknown) {
       const message =
@@ -101,6 +104,16 @@ export function RefundsClient({
     setActionModal({ refund, action })
     setError("")
     setLoading(false)
+  }
+
+  // Page-level loading overlay
+  if (pageLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-[#1E3A5F]" />
+        <span className="ml-3 text-gray-600 text-sm">Updating…</span>
+      </div>
+    )
   }
 
   return (
@@ -177,6 +190,7 @@ export function RefundsClient({
         {tabs.map((tab) => (
           <button
             key={tab.key}
+            type="button"
             onClick={() => setActiveTab(tab.key)}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab.key
@@ -202,93 +216,106 @@ export function RefundsClient({
         ))}
       </div>
 
-      {/* Refunds List */}
+      {/* Refunds List — scrollable container */}
       {filteredData.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
           <RotateCcw className="w-10 h-10 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-400 text-sm">No refund requests found</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[calc(100vh-380px)] overflow-y-auto pr-1">
           {filteredData.map((r) => (
             <div
               key={r.id}
               className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow"
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                {/* Left info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="font-mono text-xs font-semibold text-[#1E3A5F] bg-[#1E3A5F]/5 px-2 py-0.5 rounded">
-                      {r.requestId}
-                    </span>
-                    <span className="font-semibold text-[#1E293B] text-sm">
-                      {r.student}
-                    </span>
-                    <StatusBadge status={r.status} size="sm" />
-                  </div>
-                  <div className="text-sm text-gray-500 space-y-0.5 mt-1">
-                    <div>
-                      Refund:{" "}
-                      <span className="font-bold text-[#EF4444]">
-                        {r.refundAmount}
-                      </span>
-                      <span className="mx-1.5 text-gray-300">|</span>
-                      Original: {r.originalPayment}
-                      <span className="mx-1.5 text-gray-300">|</span>
-                      {r.paymentMethod}
-                    </div>
-                    <div>
-                      Requested: {r.requestedDate}
-                      {r.reviewedBy !== "—" && (
-                        <span className="ml-2">
-                          · Reviewed by {r.reviewedBy}
-                          {r.reviewedAt && ` on ${r.reviewedAt}`}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-gray-600 italic text-xs mt-1">
-                      &quot;{r.reason}&quot;
-                    </div>
-                  </div>
-                </div>
+              {/* Top row: info + status */}
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="font-mono text-xs font-semibold text-[#1E3A5F] bg-[#1E3A5F]/5 px-2 py-0.5 rounded">
+                  {r.requestId}
+                </span>
+                <span className="font-semibold text-[#1E293B] text-sm">
+                  {r.student}
+                </span>
+                <StatusBadge status={r.status} size="sm" />
+              </div>
 
-                {/* Action buttons */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {r.status === "pending" && (
-                    <>
-                      <button
-                        onClick={() => openAction(r, "approve")}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors"
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => openAction(r, "reject")}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#EF4444] text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        Reject
-                      </button>
-                    </>
-                  )}
-                  {r.status === "approved" && (
-                    <button
-                      onClick={() => openAction(r, "process")}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#22C55E] text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors"
-                    >
-                      <DollarSign className="w-3.5 h-3.5" />
-                      Mark Processed
-                    </button>
-                  )}
-                  {(r.status === "rejected" || r.status === "processed") && (
-                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                      <Eye className="w-3.5 h-3.5" />
-                      View only
+              {/* Details */}
+              <div className="text-sm text-gray-500 space-y-0.5 mb-3">
+                <div>
+                  Refund:{" "}
+                  <span className="font-bold text-[#EF4444]">
+                    {r.refundAmount}
+                  </span>
+                  <span className="mx-1.5 text-gray-300">|</span>
+                  Original: {r.originalPayment}
+                  <span className="mx-1.5 text-gray-300">|</span>
+                  {r.paymentMethod}
+                </div>
+                <div>
+                  Requested: {r.requestedDate}
+                  {r.reviewedBy !== "—" && (
+                    <span className="ml-2">
+                      · Reviewed by {r.reviewedBy}
+                      {r.reviewedAt && ` on ${r.reviewedAt}`}
                     </span>
                   )}
                 </div>
+                <div className="text-gray-600 italic text-xs mt-1">
+                  &quot;{r.reason}&quot;
+                </div>
+              </div>
+
+              {/* Action buttons — always visible at bottom of card */}
+              <div className="flex items-center gap-2 pt-2 border-t border-gray-50">
+                {r.status === "pending" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        openAction(r, "approve")
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors cursor-pointer"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        openAction(r, "reject")
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#EF4444] text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Reject
+                    </button>
+                  </>
+                )}
+                {r.status === "approved" && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      openAction(r, "process")
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#22C55E] text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors cursor-pointer"
+                  >
+                    <DollarSign className="w-3.5 h-3.5" />
+                    Mark Processed
+                  </button>
+                )}
+                {(r.status === "rejected" || r.status === "processed") && (
+                  <span className="text-xs text-gray-400 flex items-center gap-1">
+                    <Eye className="w-3.5 h-3.5" />
+                    View only
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -308,8 +335,16 @@ export function RefundsClient({
 
       {/* Confirmation Modal */}
       {actionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActionModal(null)
+          }}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-5">
               <h3 className="text-lg font-semibold text-[#1E293B] mb-1">
                 {actionModal.action === "approve" && "Approve Refund"}
@@ -370,16 +405,18 @@ export function RefundsClient({
 
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={() => setActionModal(null)}
                   disabled={loading}
-                  className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                  className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleAction}
                   disabled={loading}
-                  className={`flex-1 py-2.5 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 transition-colors ${
+                  className={`flex-1 py-2.5 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 transition-colors cursor-pointer ${
                     actionModal.action === "reject"
                       ? "bg-[#EF4444] hover:bg-red-600"
                       : actionModal.action === "process"

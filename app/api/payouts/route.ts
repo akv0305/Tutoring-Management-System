@@ -11,16 +11,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const where: any = {}
+    const where: Record<string, unknown> = {}
 
     if (session.user.role === "TEACHER") {
-      const teacherProfile = await prisma.teacherProfile.findUnique({
+      const tp = await prisma.teacherProfile.findUnique({
         where: { userId: session.user.id },
       })
-      if (!teacherProfile) {
-        return NextResponse.json({ error: "Teacher profile not found" }, { status: 404 })
-      }
-      where.teacherId = teacherProfile.id
+      if (!tp) return NextResponse.json({ error: "Teacher profile not found" }, { status: 404 })
+      where.teacherId = tp.id
     }
 
     if (!["ADMIN", "TEACHER"].includes(session.user.role)) {
@@ -30,7 +28,6 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const status = searchParams.get("status")
     const teacherId = searchParams.get("teacherId")
-
     if (status) where.status = status.toUpperCase()
     if (teacherId && session.user.role === "ADMIN") where.teacherId = teacherId
 
@@ -44,7 +41,7 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     })
 
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
     const mapped = payouts.map((po) => ({
       id: po.id,
@@ -59,6 +56,9 @@ export async function GET(req: NextRequest) {
       grossFormatted: `$${Number(po.grossAmount).toLocaleString()}`,
       deductions: Number(po.deductions),
       deductionsFormatted: `$${Number(po.deductions).toLocaleString()}`,
+      bonus: Number(po.bonus),
+      bonusFormatted: `$${Number(po.bonus).toLocaleString()}`,
+      adminNotes: po.adminNotes ?? "",
       netAmount: Number(po.netAmount),
       netFormatted: `$${Number(po.netAmount).toLocaleString()}`,
       status: po.status,
@@ -72,9 +72,9 @@ export async function GET(req: NextRequest) {
       processing: mapped.filter((p) => p.status === "PROCESSING").length,
       paid: mapped.filter((p) => p.status === "PAID").length,
       onHold: mapped.filter((p) => p.status === "ON_HOLD").length,
-      totalGross: mapped.reduce((sum, p) => sum + p.grossAmount, 0),
-      totalNet: mapped.reduce((sum, p) => sum + p.netAmount, 0),
-      totalPaid: mapped.filter((p) => p.status === "PAID").reduce((sum, p) => sum + p.netAmount, 0),
+      totalGross: mapped.reduce((s, p) => s + p.grossAmount, 0),
+      totalNet: mapped.reduce((s, p) => s + p.netAmount, 0),
+      totalPaid: mapped.filter((p) => p.status === "PAID").reduce((s, p) => s + p.netAmount, 0),
     }
 
     return NextResponse.json({ payouts: mapped, total: mapped.length, summary })
@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/payouts — generate a payout for a teacher
+// POST /api/payouts
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -96,18 +96,22 @@ export async function POST(req: NextRequest) {
     const { teacherId, periodMonth, periodYear } = body
 
     if (!teacherId || !periodMonth || !periodYear) {
-      return NextResponse.json({ error: "teacherId, periodMonth, and periodYear are required" }, { status: 400 })
+      return NextResponse.json(
+        { error: "teacherId, periodMonth, and periodYear are required" },
+        { status: 400 }
+      )
     }
 
-    // Check for duplicate
-    const existing = await prisma.payout.findUnique({
-      where: { teacherId_periodMonth_periodYear: { teacherId, periodMonth, periodYear } },
+    const existing = await prisma.payout.findFirst({
+      where: { teacherId, periodMonth, periodYear },
     })
     if (existing) {
-      return NextResponse.json({ error: "Payout already exists for this teacher and period" }, { status: 409 })
+      return NextResponse.json(
+        { error: "Payout already exists for this teacher and period" },
+        { status: 409 }
+      )
     }
 
-    // Get teacher compensation rate
     const teacher = await prisma.teacherProfile.findUnique({
       where: { id: teacherId },
       include: { user: { select: { firstName: true, lastName: true } } },
@@ -116,37 +120,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Teacher not found" }, { status: 404 })
     }
 
-    // Count completed classes for the period
-    const startDate = new Date(periodYear, periodMonth - 1, 1)
-    const endDate = new Date(periodYear, periodMonth, 1)
+    const periodStart = new Date(periodYear, periodMonth - 1, 1)
+    const periodEnd = new Date(periodYear, periodMonth, 0)
 
     const completedClasses = await prisma.class.count({
       where: {
         teacherId,
         status: "COMPLETED",
-        completedAt: { gte: startDate, lt: endDate },
+        completedAt: { gte: periodStart, lt: new Date(periodYear, periodMonth, 1) },
       },
     })
 
     if (completedClasses === 0) {
-      return NextResponse.json({ error: "No completed classes found for this period" }, { status: 400 })
+      return NextResponse.json(
+        { error: "No completed classes found for this period" },
+        { status: 400 }
+      )
     }
 
     const rate = Number(teacher.compensationRate)
     const gross = completedClasses * rate
-    const deductions = 0
-    const net = gross - deductions
 
     const payout = await prisma.payout.create({
       data: {
         teacherId,
         periodMonth,
         periodYear,
+        periodStartDate: periodStart,
+        periodEndDate: periodEnd,
         classesCompleted: completedClasses,
         compensationRate: rate,
         grossAmount: gross,
-        deductions,
-        netAmount: net,
+        deductions: 0,
+        bonus: 0,
+        netAmount: gross,
         status: "PENDING",
       },
     })
@@ -159,7 +166,7 @@ export async function POST(req: NextRequest) {
         period: `${periodMonth}/${periodYear}`,
         classes: completedClasses,
         gross,
-        net,
+        net: gross,
         status: payout.status,
       },
     }, { status: 201 })
@@ -169,7 +176,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/payouts — approve, process, pay, or hold a payout
+// PATCH /api/payouts
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -178,7 +185,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { id, action, ...updates } = body
+    const { id, action, deductions, bonus, adminNotes } = body
 
     if (!id) {
       return NextResponse.json({ error: "Payout id is required" }, { status: 400 })
@@ -189,7 +196,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Payout not found" }, { status: 404 })
     }
 
-    let updateData: any = {}
+    let updateData: Record<string, unknown> = {}
 
     switch (action) {
       case "process":
@@ -220,16 +227,32 @@ export async function PATCH(req: NextRequest) {
         updateData = { status: "PENDING" }
         break
 
-      case "update_deductions":
-        if (updates.deductions === undefined) {
-          return NextResponse.json({ error: "deductions amount is required" }, { status: 400 })
+      case "update_adjustments": {
+        if (!["PENDING", "PROCESSING"].includes(existing.status)) {
+          return NextResponse.json(
+            { error: "Can only adjust pending or processing payouts" },
+            { status: 400 }
+          )
         }
-        const newNet = Number(existing.grossAmount) - Number(updates.deductions)
-        updateData = { deductions: updates.deductions, netAmount: newNet }
+        const newDed = deductions !== undefined ? Number(deductions) : Number(existing.deductions)
+        const newBon = bonus !== undefined ? Number(bonus) : Number(existing.bonus)
+        const gross = Number(existing.grossAmount)
+        const newNet = gross - newDed + newBon
+
+        updateData = {
+          deductions: newDed,
+          bonus: newBon,
+          adminNotes: adminNotes ?? existing.adminNotes,
+          netAmount: newNet,
+        }
         break
+      }
 
       default:
-        return NextResponse.json({ error: "Invalid action. Use: process, pay, hold, release, update_deductions" }, { status: 400 })
+        return NextResponse.json(
+          { error: "Invalid action. Use: process, pay, hold, release, update_adjustments" },
+          { status: 400 }
+        )
     }
 
     const updated = await prisma.payout.update({
@@ -241,12 +264,14 @@ export async function PATCH(req: NextRequest) {
     })
 
     return NextResponse.json({
-      message: `Payout ${action}ed successfully`,
+      message: `Payout ${action} successful`,
       payout: {
         id: updated.id,
         teacher: `${updated.teacher.user.firstName} ${updated.teacher.user.lastName}`,
         status: updated.status,
         netAmount: Number(updated.netAmount),
+        deductions: Number(updated.deductions),
+        bonus: Number(updated.bonus),
       },
     })
   } catch (error) {

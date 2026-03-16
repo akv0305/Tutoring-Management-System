@@ -28,7 +28,7 @@ type Payment = {
   methodIcon: string
   status: string
   studentId: string
-  refundStatus: string // "none" | "pending" | "approved" | "rejected" | "processed"
+  refundStatus: string
 }
 
 type Counts = {
@@ -63,18 +63,27 @@ function RefundActionCell({
 }) {
   // Payment already fully refunded (DB status)
   if (payment.status === "refunded") {
-    return <span className="text-xs text-gray-400">Refunded</span>
+    return (
+      <span className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 border border-green-200 text-[#22C55E] rounded-lg text-xs font-medium">
+        <CheckCircle className="w-3.5 h-3.5" />
+        Refunded
+      </span>
+    )
   }
 
   // Only completed payments can have refund actions
   if (payment.status !== "completed") {
     if (payment.status === "pending") {
-      return <span className="text-xs text-gray-400">Awaiting confirmation</span>
+      return (
+        <span className="text-xs text-gray-400 italic">
+          Awaiting confirmation
+        </span>
+      )
     }
     return null
   }
 
-  // Refund status-based rendering
+  // Refund status-based rendering — anything other than "none" means a refund exists
   switch (payment.refundStatus) {
     case "pending":
       return (
@@ -108,16 +117,25 @@ function RefundActionCell({
         </span>
       )
 
-    default:
-      // "none" — no refund requested yet, show the Refund button
+    case "none":
+      // No refund requested yet — show the Refund button
       return (
         <button
+          type="button"
           onClick={() => onRequestRefund(payment)}
-          className="flex items-center gap-1 px-2.5 py-1.5 border border-red-200 text-[#EF4444] rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
+          className="flex items-center gap-1 px-2.5 py-1.5 border border-red-200 text-[#EF4444] rounded-lg text-xs font-medium hover:bg-red-50 transition-colors cursor-pointer"
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          Refund
+          Request Refund
         </button>
+      )
+
+    default:
+      // Safety: any unknown status = don't show refund button
+      return (
+        <span className="text-xs text-gray-400 italic">
+          Refund: {payment.refundStatus}
+        </span>
       )
   }
 }
@@ -202,6 +220,7 @@ export function ParentPaymentsClient({
         {FILTER_TABS.map((t) => (
           <button
             key={t.key}
+            type="button"
             onClick={() => setActiveFilter(t.key)}
             className={[
               "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
@@ -236,7 +255,10 @@ export function ParentPaymentsClient({
               {filtered.length} record{filtered.length !== 1 ? "s" : ""} found
             </p>
           </div>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50"
+          >
             <Download className="w-4 h-4" />
             Export
           </button>
@@ -290,7 +312,7 @@ export function ParentPaymentsClient({
                     <td className="px-4 py-3 text-sm font-bold text-[#1E293B]">
                       {p.amount}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
+                    <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
                       {p.date}
                     </td>
                     <td className="px-4 py-3">
@@ -305,9 +327,12 @@ export function ParentPaymentsClient({
                       <StatusBadge status={p.status} />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
                         {p.status === "completed" && (
-                          <button className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                          >
                             <Download className="w-3.5 h-3.5" />
                             Invoice
                           </button>

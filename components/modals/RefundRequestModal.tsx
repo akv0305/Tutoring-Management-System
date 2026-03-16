@@ -62,7 +62,7 @@ export function RefundRequestModal({
         body: JSON.stringify({
           paymentId,
           studentId,
-          refundAmount: refundAmount,
+          refundAmount,
           reason: reason.trim(),
         }),
       })
@@ -70,7 +70,8 @@ export function RefundRequestModal({
       if (!res.ok) throw new Error(data.error || "Refund request failed")
       setSuccess(true)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Something went wrong"
+      const message =
+        err instanceof Error ? err.message : "Something went wrong"
       setError(message)
     } finally {
       setLoading(false)
@@ -80,6 +81,7 @@ export function RefundRequestModal({
   const handleClose = () => {
     if (success) {
       onSuccess()
+      return
     }
     setRefundType("full")
     setPartialAmount("")
@@ -90,27 +92,37 @@ export function RefundRequestModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
-        {/* Header — fixed */}
-        <div className="flex items-center justify-between p-4 border-b shrink-0">
-          <h2 className="text-lg font-semibold text-[#1E293B]">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !loading) handleClose()
+      }}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+          <h2 className="text-base font-semibold text-[#1E293B]">
             Request Refund
           </h2>
           <button
+            type="button"
             onClick={handleClose}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            disabled={loading}
+            className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            <X className="w-5 h-5 text-gray-500" />
+            <X className="w-4 h-4 text-gray-500" />
           </button>
         </div>
 
         {/* Scrollable body */}
-        <div className="overflow-y-auto flex-1 p-4 space-y-4">
+        <div className="overflow-y-auto flex-1 px-4 py-3 space-y-3">
           {success ? (
-            <div className="text-center py-6">
-              <CheckCircle className="w-12 h-12 text-[#22C55E] mx-auto mb-3" />
-              <h3 className="text-lg font-semibold text-[#1E293B] mb-1">
+            <div className="text-center py-4">
+              <CheckCircle className="w-10 h-10 text-[#22C55E] mx-auto mb-2" />
+              <h3 className="text-base font-semibold text-[#1E293B] mb-1">
                 Refund Requested
               </h3>
               <p className="text-sm text-gray-600 mb-1">
@@ -129,7 +141,7 @@ export function RefundRequestModal({
               <div className="bg-gray-50 rounded-lg p-3 text-sm">
                 <div className="flex justify-between mb-1">
                   <span className="text-gray-500">Package</span>
-                  <span className="font-medium text-[#1E293B]">
+                  <span className="font-medium text-[#1E293B] text-right max-w-[60%] truncate">
                     {packageName}
                   </span>
                 </div>
@@ -147,7 +159,7 @@ export function RefundRequestModal({
 
               {/* Refund type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
                   Refund Type
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -158,13 +170,13 @@ export function RefundRequestModal({
                       setPartialAmount("")
                     }}
                     className={[
-                      "p-2.5 rounded-lg border text-sm font-medium transition-all",
+                      "p-2 rounded-lg border text-sm font-medium transition-all text-center",
                       refundType === "full"
                         ? "border-[#1E3A5F] bg-[#1E3A5F]/5 text-[#1E3A5F]"
                         : "border-gray-200 bg-white text-gray-600 hover:border-gray-300",
                     ].join(" ")}
                   >
-                    <DollarSign className="w-4 h-4 mx-auto mb-1" />
+                    <DollarSign className="w-4 h-4 mx-auto mb-0.5" />
                     Full Refund
                     <div className="text-xs mt-0.5 opacity-75">
                       ${paymentAmount.toFixed(2)}
@@ -174,13 +186,13 @@ export function RefundRequestModal({
                     type="button"
                     onClick={() => setRefundType("partial")}
                     className={[
-                      "p-2.5 rounded-lg border text-sm font-medium transition-all",
+                      "p-2 rounded-lg border text-sm font-medium transition-all text-center",
                       refundType === "partial"
                         ? "border-[#1E3A5F] bg-[#1E3A5F]/5 text-[#1E3A5F]"
                         : "border-gray-200 bg-white text-gray-600 hover:border-gray-300",
                     ].join(" ")}
                   >
-                    <DollarSign className="w-4 h-4 mx-auto mb-1" />
+                    <DollarSign className="w-4 h-4 mx-auto mb-0.5" />
                     Partial Refund
                     <div className="text-xs mt-0.5 opacity-75">
                       Custom amount
@@ -192,7 +204,7 @@ export function RefundRequestModal({
               {/* Partial amount */}
               {refundType === "partial" && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Refund Amount
                   </label>
                   <div className="relative">
@@ -215,13 +227,13 @@ export function RefundRequestModal({
 
               {/* Reason */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
                   Reason for Refund
                 </label>
                 <textarea
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  rows={3}
+                  rows={2}
                   placeholder="Please explain why you're requesting a refund..."
                   className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-[#1E3A5F] focus:border-[#1E3A5F] resize-none outline-none"
                 />
@@ -229,7 +241,7 @@ export function RefundRequestModal({
 
               {/* Error */}
               {error && (
-                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-2.5 text-sm text-red-700">
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-2 text-sm text-red-700">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -238,30 +250,34 @@ export function RefundRequestModal({
           )}
         </div>
 
-        {/* Footer — fixed */}
-        <div className="border-t p-4 shrink-0">
+        {/* Footer */}
+        <div className="border-t px-4 py-3 shrink-0">
           {success ? (
             <button
+              type="button"
               onClick={handleClose}
-              className="w-full py-2.5 bg-[#1E3A5F] text-white rounded-lg text-sm font-medium hover:bg-[#1E3A5F]/90 transition-colors"
+              className="w-full py-2 bg-[#1E3A5F] text-white rounded-lg text-sm font-medium hover:bg-[#1E3A5F]/90 transition-colors"
             >
               Done
             </button>
           ) : (
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={handleClose}
-                className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                disabled={loading}
+                className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleSubmit}
                 disabled={loading}
-                className="flex-1 py-2.5 bg-[#EF4444] text-white rounded-lg text-sm font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 py-2 bg-[#EF4444] text-white rounded-lg text-sm font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
               >
                 {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                Request Refund
+                Submit Request
               </button>
             </div>
           )}

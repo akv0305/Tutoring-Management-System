@@ -115,6 +115,12 @@ enum PayoutStatus {
   ON_HOLD
 }
 
+enum PayoutPeriodType {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
 enum RefundStatus {
   PENDING
   APPROVED
@@ -432,23 +438,30 @@ model Payment {
 
 // ─── 10. PAYOUTS MASTER ─────────────────────────────────
 
-model Payout {
-  id              String       @id @default(cuid())
-  teacherId       String
-  teacher         TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  periodMonth     Int          // 1-12
-  periodYear      Int
-  classesCompleted Int
-  compensationRate Decimal     @db.Decimal(10, 2)
-  grossAmount     Decimal      @db.Decimal(10, 2)
-  deductions      Decimal      @default(0) @db.Decimal(10, 2)
-  netAmount       Decimal      @db.Decimal(10, 2)
-  status          PayoutStatus @default(PENDING)
-  paidAt          DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+// ─── 10. PAYOUTS MASTER ─────────────────────────────────
 
-  @@unique([teacherId, periodMonth, periodYear])
+model Payout {
+  id               String           @id @default(cuid())
+  teacherId        String
+  teacher          TeacherProfile   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  periodType       PayoutPeriodType @default(MONTHLY)
+  periodStartDate  DateTime         @db.Date
+  periodEndDate    DateTime         @db.Date
+  periodMonth      Int
+  periodYear       Int
+  classesCompleted Int
+  compensationRate Decimal          @db.Decimal(10, 2)
+  grossAmount      Decimal          @db.Decimal(10, 2)
+  deductions       Decimal          @default(0) @db.Decimal(10, 2)
+  bonus            Decimal          @default(0) @db.Decimal(10, 2)
+  netAmount        Decimal          @db.Decimal(10, 2)
+  adminNotes       String?
+  status           PayoutStatus     @default(PENDING)
+  paidAt           DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([teacherId, periodStartDate, periodEndDate])
   @@map("payouts")
 }
 
