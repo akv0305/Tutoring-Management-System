@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
+import Link from "next/link"
 import { GraduationCap, Menu, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -67,18 +68,18 @@ export function Navbar() {
 
         {/* ── Desktop CTA Buttons ── */}
         <div className="hidden md:flex items-center gap-3">
-          <button
-            type="button"
+          <Link
+            href="/login"
             className="px-5 py-2 rounded-lg text-sm font-semibold border-2 border-[#1E3A5F] text-[#1E3A5F] bg-white hover:bg-[#1E3A5F]/5 transition-colors"
           >
             Log In
-          </button>
-          <button
-            type="button"
+          </Link>
+          <Link
+            href="/login"
             className="px-5 py-2 rounded-lg text-sm font-semibold bg-[#0D9488] text-white hover:bg-[#0b7a70] transition-colors shadow-sm hover:shadow-md"
           >
             Get Started
-          </button>
+          </Link>
         </div>
 
         {/* ── Mobile Hamburger ── */}
@@ -109,18 +110,20 @@ export function Navbar() {
             ))}
           </ul>
           <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-gray-100">
-            <button
-              type="button"
-              className="w-full py-2.5 rounded-lg text-sm font-semibold border-2 border-[#1E3A5F] text-[#1E3A5F] hover:bg-[#1E3A5F]/5 transition-colors"
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold border-2 border-[#1E3A5F] text-[#1E3A5F] hover:bg-[#1E3A5F]/5 transition-colors text-center"
             >
               Log In
-            </button>
-            <button
-              type="button"
-              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#0D9488] text-white hover:bg-[#0b7a70] transition-colors"
+            </Link>
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-[#0D9488] text-white hover:bg-[#0b7a70] transition-colors text-center"
             >
               Get Started
-            </button>
+            </Link>
           </div>
         </div>
       )}
