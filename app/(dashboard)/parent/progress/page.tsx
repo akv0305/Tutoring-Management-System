@@ -204,7 +204,7 @@ export default function ProgressPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-[#1E293B]">Progress &amp; Performance</h1>
+        <h1 className="text-2xl font-bold text-[#1E293B]">Progress &amp; Performance (Demo)</h1>
         <p className="text-sm text-gray-500 mt-1">Track Alex&apos;s learning journey and achievements</p>
       </div>
 

@@ -29,12 +29,12 @@ export default async function ClassesPage() {
 
   const now = new Date()
 
-  // Upcoming
+  // Upcoming — include PENDING_PAYMENT so parents can see reserved classes
   const upcoming = allClasses
     .filter(
       (c) =>
         c.scheduledAt >= now &&
-        ["SCHEDULED", "CONFIRMED"].includes(c.status)
+        ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
     )
     .map((c) => {
       const dt = c.scheduledAt
@@ -43,7 +43,7 @@ export default async function ClassesPage() {
       const initials = `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`
       // Can join if class starts within 15 minutes
       const canJoin = dt.getTime() - now.getTime() < 15 * 60000 && dt.getTime() > now.getTime() - 60 * 60000
-      
+
       return {
         id: c.id,
         dayLabel: dt.toLocaleDateString("en-US", { weekday: "long" }),
@@ -103,21 +103,21 @@ export default async function ClassesPage() {
       reason: c.cancelReason ?? c.status.toLowerCase().replace("_", " "),
     }))
 
-  // Month stats
+  // Month stats — include PENDING_PAYMENT in scheduled count
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
   const monthClasses = allClasses.filter(
     (c) => c.scheduledAt >= monthStart && c.scheduledAt <= monthEnd
   )
   const monthStats = {
-    scheduled: monthClasses.filter((c) => ["SCHEDULED", "CONFIRMED"].includes(c.status)).length,
+    scheduled: monthClasses.filter((c) => ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)).length,
     completed: monthClasses.filter((c) => c.status === "COMPLETED").length,
     cancelled: monthClasses.filter((c) =>
       ["CANCELLED_STUDENT", "CANCELLED_TEACHER", "NO_SHOW_STUDENT", "NO_SHOW_TEACHER"].includes(c.status)
     ).length,
   }
 
-  // Calendar class dates this month
+  // Calendar class dates this month — include PENDING_PAYMENT
   const classDates = [
     ...new Set(
       allClasses
@@ -125,7 +125,7 @@ export default async function ClassesPage() {
           (c) =>
             c.scheduledAt >= monthStart &&
             c.scheduledAt <= monthEnd &&
-            ["SCHEDULED", "CONFIRMED"].includes(c.status)
+            ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
         )
         .map((c) => c.scheduledAt.getDate())
     ),

@@ -234,61 +234,92 @@ export function ParentClassesClient({
                 {upcoming.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-6">No upcoming classes scheduled.</p>
                 ) : (
-                  upcoming.map((cls) => (
-                    <div key={cls.id} className="flex gap-4 p-4 rounded-xl border border-gray-100 border-l-4 border-l-[#0D9488] bg-gray-50/40 hover:bg-gray-50 transition-colors">
-                      <div className="flex-shrink-0 w-14 text-center">
-                        <div className="bg-[#1E3A5F] text-white rounded-lg py-1.5 px-2">
-                          <p className="text-xs font-medium uppercase">{cls.month}</p>
-                          <p className="text-2xl font-bold leading-tight">{cls.dateNum}</p>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">{cls.dayLabel}</p>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2 flex-wrap">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="text-sm font-semibold text-[#1E293B]">{cls.subject}</h3>
-                              {cls.isTrial && (
-                                <span className="px-2 py-0.5 bg-[#F59E0B]/10 text-[#B45309] text-xs font-semibold rounded-full border border-[#F59E0B]/30">TRIAL</span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{cls.time}</span>
-                              <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{cls.duration}</span>
-                            </div>
+                  upcoming.map((cls) => {
+                    const isPending = cls.status === "pending_payment"
+
+                    return (
+                      <div
+                        key={cls.id}
+                        className={[
+                          "flex gap-4 p-4 rounded-xl border border-gray-100 border-l-4 hover:bg-gray-50 transition-colors",
+                          isPending
+                            ? "border-l-amber-400 bg-amber-50/30"
+                            : "border-l-[#0D9488] bg-gray-50/40",
+                        ].join(" ")}
+                      >
+                        <div className="flex-shrink-0 w-14 text-center">
+                          <div className="bg-[#1E3A5F] text-white rounded-lg py-1.5 px-2">
+                            <p className="text-xs font-medium uppercase">{cls.month}</p>
+                            <p className="text-2xl font-bold leading-tight">{cls.dateNum}</p>
                           </div>
-                          <StatusBadge status={cls.status} />
+                          <p className="text-xs text-gray-500 mt-1">{cls.dayLabel}</p>
                         </div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <div className="w-7 h-7 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-xs font-bold">{cls.teacherInitials}</div>
-                          <span className="text-xs text-gray-600 font-medium">{cls.teacher}</span>
-                        </div>
-                        <div className="flex items-center gap-2 mt-3 flex-wrap">
-                          {cls.canJoin ? (
-                            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors">
-                              <Video className="w-3 h-3" />Join Class
-                            </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 flex-wrap">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="text-sm font-semibold text-[#1E293B]">{cls.subject}</h3>
+                                {cls.isTrial && (
+                                  <span className="px-2 py-0.5 bg-[#F59E0B]/10 text-[#B45309] text-xs font-semibold rounded-full border border-[#F59E0B]/30">TRIAL</span>
+                                )}
+                                {isPending && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full border border-amber-300">
+                                    <Clock className="w-3 h-3" />Payment Pending
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{cls.time}</span>
+                                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{cls.duration}</span>
+                              </div>
+                            </div>
+                            {isPending ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-600 text-xs font-medium rounded-full border border-amber-200">
+                                <Clock className="w-3 h-3" />Awaiting Payment
+                              </span>
+                            ) : (
+                              <StatusBadge status={cls.status} />
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <div className="w-7 h-7 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-xs font-bold">{cls.teacherInitials}</div>
+                            <span className="text-xs text-gray-600 font-medium">{cls.teacher}</span>
+                          </div>
+                          {isPending ? (
+                            <div className="mt-3">
+                              <p className="text-xs text-amber-600">
+                                Your coordinator will contact you with a payment link. Class will be confirmed once payment is verified.
+                              </p>
+                            </div>
                           ) : (
-                            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors">
-                              <Eye className="w-3 h-3" />View Details
-                            </button>
+                            <div className="flex items-center gap-2 mt-3 flex-wrap">
+                              {cls.canJoin ? (
+                                <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors">
+                                  <Video className="w-3 h-3" />Join Class
+                                </button>
+                              ) : (
+                                <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors">
+                                  <Eye className="w-3 h-3" />View Details
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setRescheduleClass(cls)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                              >
+                                <RotateCcw className="w-3 h-3" />Reschedule
+                              </button>
+                              <button
+                                onClick={() => setCancelClass(cls)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
+                              >
+                                <XCircle className="w-3 h-3" />Cancel
+                              </button>
+                            </div>
                           )}
-                          <button
-                            onClick={() => setRescheduleClass(cls)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
-                          >
-                            <RotateCcw className="w-3 h-3" />Reschedule
-                          </button>
-                          <button
-                            onClick={() => setCancelClass(cls)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
-                          >
-                            <XCircle className="w-3 h-3" />Cancel
-                          </button>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </div>
@@ -336,7 +367,7 @@ export function ParentClassesClient({
                       {cls.subject}  <span className="text-gray-500 font-normal">{cls.topic}</span>
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {cls.teacher} · {cls.date} · {cls.duration}
+                      {cls.teacher}  {cls.date}  {cls.duration}
                     </p>
                   </div>
                   <StatusBadge status="completed" />
@@ -362,7 +393,6 @@ export function ParentClassesClient({
                   >
                     <Eye className="w-4 h-4" />
                   </button>
-
                 </div>
               ))
             )}
@@ -404,7 +434,7 @@ export function ParentClassesClient({
         </div>
       )}
 
-      {/* ═══ MODALS ═══ */}
+      {/*  MODALS  */}
 
       {/* Book Class Modal */}
       {bookingData && (

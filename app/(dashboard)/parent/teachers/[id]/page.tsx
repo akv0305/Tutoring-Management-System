@@ -31,7 +31,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   const bookedClasses = await prisma.class.findMany({
     where: {
       teacherId: teacher.id,
-      status: { in: ["SCHEDULED", "CONFIRMED"] },
+      status: { in: ["PENDING_PAYMENT","SCHEDULED", "CONFIRMED"] },
       scheduledAt: { gte: now, lte: fourWeeksLater },
     },
     select: { scheduledAt: true, duration: true },

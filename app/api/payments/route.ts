@@ -130,10 +130,8 @@ export async function PATCH(req: NextRequest) {
     let canConfirm = isAdmin
 
     if (!isAdmin && session.user.role === "COORDINATOR") {
-      // Check if platform setting allows coordinator to confirm
       const settings = await prisma.platformSettings.findFirst({ where: { id: "default" } })
       if (settings?.coordinatorCanConfirmPayments) {
-        // Also verify this payment belongs to coordinator's student
         const coord = await prisma.coordinatorProfile.findFirst({
           where: { user: { email: session.user.email! } },
         })
@@ -163,6 +161,7 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "Only pending payments can be confirmed" }, { status: 400 })
       }
 
+      // Update payment status
       const updated = await prisma.payment.update({
         where: { id },
         data: {
@@ -176,8 +175,52 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
+      // Find linked BookingOrder and update its classes to SCHEDULED
+      const bookingOrder = await prisma.bookingOrder.findUnique({
+        where: { paymentId: payment.id },
+      })
+
+      let classesConfirmed = 0
+
+      if (bookingOrder) {
+        // Update BookingOrder status to PAID
+        await prisma.bookingOrder.update({
+          where: { id: bookingOrder.id },
+          data: { status: "PAID" },
+        })
+
+        // Update all PENDING_PAYMENT classes in this order to SCHEDULED
+        const result = await prisma.class.updateMany({
+          where: {
+            bookingOrderId: bookingOrder.id,
+            status: "PENDING_PAYMENT",
+          },
+          data: { status: "SCHEDULED" },
+        })
+
+        classesConfirmed = result.count
+
+        // Send notification to the parent
+        const student = await prisma.student.findUnique({
+          where: { id: bookingOrder.studentId },
+          include: { parent: { include: { user: { select: { id: true } } } } },
+        })
+
+        if (student) {
+          await prisma.notification.create({
+            data: {
+              userId: student.parent.user.id,
+              type: "PAYMENT",
+              title: "Payment Confirmed — Classes Scheduled",
+              message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) has been confirmed. ${classesConfirmed} class${classesConfirmed > 1 ? "es are" : " is"} now scheduled.`,
+            },
+          })
+        }
+      }
+
       return NextResponse.json({
         message: "Payment confirmed",
+        classesConfirmed,
         payment: {
           id: updated.id,
           student: `${updated.student.firstName} ${updated.student.lastName}`,
@@ -194,6 +237,7 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "Only pending payments can be rejected" }, { status: 400 })
       }
 
+      // Update payment status
       const updated = await prisma.payment.update({
         where: { id },
         data: {
@@ -204,8 +248,56 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
+      // Find linked BookingOrder and cancel its classes
+      const bookingOrder = await prisma.bookingOrder.findUnique({
+        where: { paymentId: payment.id },
+      })
+
+      let classesCancelled = 0
+
+      if (bookingOrder) {
+        // Update BookingOrder status to CANCELLED
+        await prisma.bookingOrder.update({
+          where: { id: bookingOrder.id },
+          data: { status: "CANCELLED" },
+        })
+
+        // Cancel all PENDING_PAYMENT classes in this order
+        const result = await prisma.class.updateMany({
+          where: {
+            bookingOrderId: bookingOrder.id,
+            status: "PENDING_PAYMENT",
+          },
+          data: {
+            status: "CANCELLED_STUDENT",
+            cancelledAt: new Date(),
+            cancelReason: reason || "Payment rejected",
+          },
+        })
+
+        classesCancelled = result.count
+
+        // Send notification to the parent
+        const student = await prisma.student.findUnique({
+          where: { id: bookingOrder.studentId },
+          include: { parent: { include: { user: { select: { id: true } } } } },
+        })
+
+        if (student) {
+          await prisma.notification.create({
+            data: {
+              userId: student.parent.user.id,
+              type: "PAYMENT",
+              title: "Payment Rejected — Classes Cancelled",
+              message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) was rejected. ${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled. ${reason ? "Reason: " + reason : ""}`,
+            },
+          })
+        }
+      }
+
       return NextResponse.json({
         message: "Payment rejected",
+        classesCancelled,
         payment: {
           id: updated.id,
           student: `${updated.student.firstName} ${updated.student.lastName}`,

@@ -19,6 +19,8 @@ import {
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
+import Link from "next/link"
+
 
 type UpcomingClass = {
   id: string
@@ -88,12 +90,12 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
-          <button className="px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
+          <Link href="/parent/classes" className="px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
             Book a Class
-          </button>
-          <button className="px-4 py-2 rounded-lg border border-white text-white text-sm font-semibold hover:bg-white/10 transition-colors">
+          </Link>
+          <Link href="/parent/teachers" className="px-4 py-2 rounded-lg border border-white text-white text-sm font-semibold hover:bg-white/10 transition-colors">
             Browse Teachers
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -248,19 +250,20 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
             <div className="flex flex-col gap-3">
               {[
-                { icon: Search,       label: "Browse Teachers" },
-                { icon: CalendarPlus, label: "Schedule a Class" },
-                { icon: Package,      label: "Buy Package" },
-                { icon: CreditCard,   label: "Make Payment" },
-                { icon: Gift,         label: "Refer a Friend" },
-              ].map(({ icon: Icon, label }) => (
-                <button
+                { icon: Search,       label: "Browse Teachers",  href: "/parent/teachers" },
+                { icon: CalendarPlus, label: "Schedule a Class", href: "/parent/classes" },
+                { icon: Package,      label: "Buy Package",      href: "/parent/packages" },
+                { icon: CreditCard,   label: "Make Payment",     href: "/parent/payments" },
+                { icon: Gift,         label: "Refer a Friend",   href: "/parent/referrals" },
+              ].map(({ icon: Icon, label, href }) => (
+                <Link
                   key={label}
+                  href={href}
                   className="w-full inline-flex items-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:bg-gray-50 hover:border-[#0D9488] hover:text-[#0D9488] transition-colors"
                 >
                   <Icon className="w-4 h-4 text-[#0D9488]" />
                   {label}
-                </button>
+                </Link>
               ))}
             </div>
           </div>

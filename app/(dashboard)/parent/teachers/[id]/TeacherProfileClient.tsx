@@ -45,7 +45,6 @@ function getWeekDates(weekOffset: number): Date[] {
   })
 }
 
-
 function generateSlots(startTime: string, endTime: string): string[] {
   const slots: string[] = []
   const [sh, sm] = startTime.split(":").map(Number)
@@ -87,6 +86,8 @@ export function TeacherProfileClient({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
+  const [pendingPayment, setPendingPayment] = useState(false)
+  const [bookingOrderRef, setBookingOrderRef] = useState("")
 
   const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset])
 
@@ -146,45 +147,89 @@ export function TeacherProfileClient({
     }
 
     setLoading(true)
-    const results: { ok: boolean; msg: string }[] = []
 
-    for (const slot of selectedSlots) {
-      const scheduledAt = new Date(`${slot.date}T${slot.time}:00Z`).toISOString()
-      try {
-        const res = await fetch("/api/classes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            studentId,
-            teacherId: teacher.id,
-            subjectId,
-            packageId: packageId || null,
-            scheduledAt,
-            duration: 60,
-            isTrial: false,
-          }),
-        })
-        const data = await res.json()
-        results.push({ ok: res.ok, msg: data.error || "OK" })
-      } catch {
-        results.push({ ok: false, msg: "Network error" })
+    // Build array of ISO timestamps for all selected slots
+    const slots = selectedSlots.map(
+      (slot) => new Date(`${slot.date}T${slot.time}:00Z`).toISOString()
+    )
+
+    try {
+      const res = await fetch("/api/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId,
+          teacherId: teacher.id,
+          subjectId,
+          packageId: packageId || null,
+          slots,
+          duration: 60,
+          isTrial: false,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || "Booking failed")
+        setLoading(false)
+        return
       }
+
+      // Check if this was a pending payment booking
+      if (data.pendingPayment) {
+        setPendingPayment(true)
+        setBookingOrderRef(data.orderRef || "")
+      }
+
+      setSuccess(true)
+    } catch {
+      setError("Network error. Please try again.")
     }
 
     setLoading(false)
-    const failures = results.filter((r) => !r.ok)
-    if (failures.length > 0 && failures.length === results.length) {
-      setError(`Booking failed: ${failures[0].msg}`)
-    } else if (failures.length > 0) {
-      setError(`${results.length - failures.length} of ${results.length} classes booked. Some failed: ${failures[0].msg}`)
-      setSuccess(true)
-    } else {
-      setSuccess(true)
-    }
   }
 
   // ── SUCCESS SCREEN ──
   if (success) {
+    // Pending payment success
+    if (pendingPayment) {
+      return (
+        <div className="max-w-md mx-auto mt-20 text-center space-y-4">
+          <Clock className="w-16 h-16 text-amber-500 mx-auto" />
+          <h2 className="text-2xl font-bold text-[#1E293B]">Classes Reserved!</h2>
+          {bookingOrderRef && (
+            <p className="text-sm font-medium text-gray-500">
+              Booking Ref: <span className="font-bold text-[#1E293B]">{bookingOrderRef}</span>
+            </p>
+          )}
+          <p className="text-gray-500">
+            {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} reserved with {teacher.name}.
+          </p>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 text-left">
+            <p className="font-semibold mb-1">What happens next?</p>
+            <p>Your coordinator will contact you with a payment link. Classes will be confirmed once payment is received and verified by the admin.</p>
+            <p className="mt-2 text-xs text-amber-600">The selected time slots are held for you until payment is confirmed or rejected.</p>
+          </div>
+          {error && <p className="text-sm text-amber-600">{error}</p>}
+          <div className="flex justify-center gap-3 pt-4">
+            <button
+              onClick={() => router.push("/parent/classes")}
+              className="px-5 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors"
+            >
+              View My Classes
+            </button>
+            <button
+              onClick={() => router.push("/parent/teachers")}
+              className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              Back to Teachers
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Direct booking success (trial classes)
     return (
       <div className="max-w-md mx-auto mt-20 text-center space-y-4">
         <CheckCircle className="w-16 h-16 text-[#22C55E] mx-auto" />
@@ -213,9 +258,6 @@ export function TeacherProfileClient({
 
   // ── CONFIRMATION STEP ──
   if (step === "confirm") {
-    const noPackage = !packageId
-    const needsMore = packageId && selectedSlots.length > totalRemaining
-
     return (
       <div className="max-w-2xl mx-auto space-y-6">
         <button onClick={() => setStep("browse")} className="flex items-center gap-1 text-sm text-[#0D9488] hover:underline">
@@ -248,7 +290,7 @@ export function TeacherProfileClient({
             <label className="block text-sm font-medium text-gray-700 mb-1">Student *</label>
             <select value={studentId} onChange={(e) => { setStudentId(e.target.value); setPackageId(""); }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
-              <option value="">Select student…</option>
+              <option value="">Select student</option>
               {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
@@ -258,7 +300,7 @@ export function TeacherProfileClient({
             <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
             <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setPackageId(""); }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
-              <option value="">Select subject…</option>
+              <option value="">Select subject</option>
               {teacher.subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
@@ -333,7 +375,7 @@ export function TeacherProfileClient({
               disabled={loading || !studentId || !subjectId || (!!packageId && selectedSlots.length > totalRemaining)}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
             >
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking…</> : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>}
+              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</> : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>}
             </button>
           </div>
         </div>
@@ -423,7 +465,6 @@ export function TeacherProfileClient({
 
             {/* Time slot rows */}
             {(() => {
-              // Collect all unique time slots across all availability entries
               const allSlots = new Set<string>()
               teacher.availability.forEach((a) => {
                 generateSlots(a.startTime, a.endTime).forEach((s) => allSlots.add(s))
@@ -443,7 +484,6 @@ export function TeacherProfileClient({
                     const isBlocked = blockedSet.has(dateStr)
                     const isBooked = bookedSet.has(`${dateStr}_${timeSlot}`)
 
-                    // Check if this time falls within the availability window
                     const inWindow = avail && timeSlot >= avail.startTime && timeSlot < avail.endTime
 
                     const unavailable = !inWindow || isPast || isPastToday || isBlocked || isBooked
@@ -454,7 +494,7 @@ export function TeacherProfileClient({
                         <div key={dayIdx} className={`py-2 rounded-md text-center text-xs ${
                           isBooked ? "bg-red-50 text-red-300 line-through" : "bg-gray-50 text-gray-300"
                         }`}>
-                          {isBooked ? "Booked" : inWindow ? "Past" : "—"}
+                          {isBooked ? "Booked" : inWindow ? "Past" : ""}
                         </div>
                       )
                     }
@@ -500,7 +540,7 @@ export function TeacherProfileClient({
               {selectedSlots
                 .sort((a, b) => a.date.localeCompare(b.date))
                 .map((s) => `${new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${formatTime(s.time)}`)
-                .join(" • ")}
+                .join(" · ")}
             </p>
           </div>
           <div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { X, CalendarPlus, Loader2, AlertTriangle, CheckCircle } from "lucide-react"
+import { X, CalendarPlus, Loader2, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 
 type Student = { id: string; name: string }
 type Teacher = { id: string; name: string; subjects: { id: string; name: string }[] }
@@ -39,6 +39,8 @@ export function BookClassModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
+  const [pendingPayment, setPendingPayment] = useState(false)
+  const [bookingOrderRef, setBookingOrderRef] = useState("")
 
   // Reset form when modal opens
   useEffect(() => {
@@ -55,6 +57,8 @@ export function BookClassModal({
       setMeetingLink("")
       setError("")
       setSuccess(false)
+      setPendingPayment(false)
+      setBookingOrderRef("")
     }
   }, [open, preselectedStudentId])
 
@@ -107,7 +111,7 @@ export function BookClassModal({
           teacherId,
           subjectId,
           packageId: packageId || null,
-          scheduledAt,
+          slots: [scheduledAt],
           duration,
           isTrial,
           topicCovered: topic || null,
@@ -119,11 +123,18 @@ export function BookClassModal({
         setError(data.error || "Failed to book class")
         return
       }
+
+      // Check if booking is pending payment
+      if (data.pendingPayment) {
+        setPendingPayment(true)
+        setBookingOrderRef(data.orderRef || "")
+      }
+
       setSuccess(true)
       setTimeout(() => {
         onSuccess()
         onClose()
-      }, 1500)
+      }, pendingPayment ? 3000 : 1500)
     } catch {
       setError("Network error. Please try again.")
     } finally {
@@ -157,11 +168,27 @@ export function BookClassModal({
 
         {/* Success state */}
         {success ? (
-          <div className="p-10 text-center">
-            <CheckCircle className="w-12 h-12 text-[#22C55E] mx-auto" />
-            <p className="text-lg font-semibold text-[#1E293B] mt-3">Class Booked!</p>
-            <p className="text-sm text-gray-500 mt-1">The class has been scheduled successfully.</p>
-          </div>
+          pendingPayment ? (
+            <div className="p-10 text-center space-y-3">
+              <Clock className="w-12 h-12 text-amber-500 mx-auto" />
+              <p className="text-lg font-semibold text-[#1E293B]">Class Reserved!</p>
+              {bookingOrderRef && (
+                <p className="text-xs font-medium text-gray-500">
+                  Ref: <span className="font-bold text-[#1E293B]">{bookingOrderRef}</span>
+                </p>
+              )}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 text-left">
+                <p className="font-semibold mb-1">What happens next?</p>
+                <p>Your coordinator will contact you with a payment link. The class will be confirmed once payment is received and verified.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="p-10 text-center">
+              <CheckCircle className="w-12 h-12 text-[#22C55E] mx-auto" />
+              <p className="text-lg font-semibold text-[#1E293B] mt-3">Class Booked!</p>
+              <p className="text-sm text-gray-500 mt-1">The class has been scheduled successfully.</p>
+            </div>
+          )
         ) : (
           <div className="p-5 space-y-4">
             {/* Error banner */}

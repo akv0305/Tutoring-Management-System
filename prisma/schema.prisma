@@ -84,6 +84,7 @@ enum PackageStatus {
 }
 
 enum ClassStatus {
+  PENDING_PAYMENT
   SCHEDULED
   CONFIRMED
   COMPLETED
@@ -127,6 +128,13 @@ enum RefundStatus {
   REJECTED
   PROCESSED
 }
+
+enum BookingOrderStatus {
+  PENDING_PAYMENT
+  PAID
+  CANCELLED
+}
+
 
 enum NotificationType {
   CLASS
@@ -224,6 +232,7 @@ model TeacherProfile {
   packages          Package[]
   classes           Class[]
   payouts           Payout[]
+  bookingOrders     BookingOrder[]
 
   @@map("teacher_profiles")
 }
@@ -274,6 +283,7 @@ model Student {
   classes         Class[]
   payments        Payment[]
   refundRequests  RefundRequest[]
+  bookingOrders   BookingOrder[]
 
   @@map("students")
 }
@@ -295,6 +305,7 @@ model Subject {
   packages      Package[]
   classes       Class[]
   packageTemplates PackageTemplate[]
+  bookingOrders    BookingOrder[]
 
   @@map("subjects")
   
@@ -376,6 +387,7 @@ model Package {
   // Relations
   classes         Class[]
   payments        Payment[]
+  bookingOrders   BookingOrder[]
 
   @@map("packages")
 }
@@ -392,6 +404,8 @@ model Class {
   subject       Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   packageId     String?
   package       Package?    @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  bookingOrderId String?
+  bookingOrder   BookingOrder? @relation(fields: [bookingOrderId], references: [id], onDelete: SetNull)
   scheduledAt   DateTime
   duration      Int         @default(60)  // minutes
   timezone      String      @default("America/New_York")
@@ -411,6 +425,33 @@ model Class {
 
   @@map("classes")
 }
+
+// ─── 8a. BOOKING ORDERS ─────────────────────────────────
+
+model BookingOrder {
+  id           String             @id @default(cuid())
+  orderRef     String             @unique
+  studentId    String
+  student      Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  packageId    String?
+  package      Package?           @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  teacherId    String
+  teacher      TeacherProfile     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId    String
+  subject      Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  totalClasses Int
+  totalAmount  Decimal            @db.Decimal(10, 2)
+  status       BookingOrderStatus @default(PENDING_PAYMENT)
+  paymentId    String?            @unique
+  payment      Payment?           @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  classes      Class[]
+
+  @@map("booking_orders")
+}
+
 
 // ─── 9. PAYMENTS MASTER ─────────────────────────────────
 
@@ -432,6 +473,7 @@ model Payment {
 
   // Relations
   refundRequests RefundRequest[]
+  bookingOrder   BookingOrder?
 
   @@map("payments")
 }
