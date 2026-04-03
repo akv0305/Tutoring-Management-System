@@ -23,7 +23,7 @@ const navItems = [
   { label: "Payments",        icon: CreditCard,      href: "/parent/payments" },
   { label: "Progress",        icon: TrendingUp,      href: "/parent/progress" },
   { label: "Referrals",       icon: Gift,            href: "/parent/referrals" },
-  { label: "Notifications",   icon: Bell,            href: "/parent/notifications", badge: 3 },
+  { label: "Notifications",   icon: Bell,            href: "/parent/notifications" },
 ]
 
 export default function ParentLayout({
@@ -55,7 +55,6 @@ export default function ParentLayout({
           title="Parent Dashboard"
           subtitle="My Children"
           userName={userName}
-          notificationCount={3}
         />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>

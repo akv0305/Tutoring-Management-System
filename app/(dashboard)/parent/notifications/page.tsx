@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useEffect, useCallback } from "react"
 import {
   Bell,
   Calendar,
@@ -10,6 +10,7 @@ import {
   AlertCircle,
   BookOpen,
   X,
+  Loader2,
 } from "lucide-react"
 
 /* ─── Types ─── */
@@ -19,94 +20,10 @@ type Notification = {
   id: string
   type: NotifType
   title: string
-  subtitle: string
+  message: string
   timestamp: string
   isUnread: boolean
 }
-
-/* ─── Data ─── */
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  {
-    id: "n1",
-    type: "class",
-    title: "Class Tomorrow at 10 AM",
-    subtitle: "Mathematics with Dr. Ananya Sharma on Mar 11, 9am EST",
-    timestamp: "30 min ago",
-    isUnread: true,
-  },
-  {
-    id: "n2",
-    type: "payment",
-    title: "Payment Confirmed",
-    subtitle: "Your payment of $240 for 8-Class Math Pack has been received",
-    timestamp: "2 hours ago",
-    isUnread: true,
-  },
-  {
-    id: "n3",
-    type: "class",
-    title: "Class Completed",
-    subtitle: "Today's Physics session with Prof. Vikram Rao is marked complete. Leave a rating!",
-    timestamp: "4 hours ago",
-    isUnread: true,
-  },
-  {
-    id: "n4",
-    type: "system",
-    title: "Profile Updated",
-    subtitle: "Your contact details were updated successfully",
-    timestamp: "Yesterday",
-    isUnread: false,
-  },
-  {
-    id: "n5",
-    type: "class",
-    title: "Class Rescheduled",
-    subtitle: "Your Mar 9 Physics class was moved to Mar 12, 11 AM EST",
-    timestamp: "2 days ago",
-    isUnread: false,
-  },
-  {
-    id: "n6",
-    type: "payment",
-    title: "Invoice Available",
-    subtitle: "Invoice #INV-2024-005 is ready to download",
-    timestamp: "3 days ago",
-    isUnread: false,
-  },
-  {
-    id: "n7",
-    type: "system",
-    title: "New Teacher Assigned",
-    subtitle: "Dr. Ananya Sharma has been assigned to Alex for Mathematics",
-    timestamp: "5 days ago",
-    isUnread: false,
-  },
-  {
-    id: "n8",
-    type: "class",
-    title: "Trial Class Booked",
-    subtitle: "Trial booked with Prof. Vikram Rao on Mar 5, 10 AM EST",
-    timestamp: "7 days ago",
-    isUnread: false,
-  },
-  {
-    id: "n9",
-    type: "class",
-    title: "Class Cancelled",
-    subtitle: "Your Mar 4 SAT Prep session was cancelled. Please reschedule.",
-    timestamp: "8 days ago",
-    isUnread: true,
-  },
-  {
-    id: "n10",
-    type: "system",
-    title: "Welcome to Expert Guru",
-    subtitle: "Your account has been set up. Explore your dashboard!",
-    timestamp: "10 days ago",
-    isUnread: false,
-  },
-]
 
 /* ─── Icon & style config per type ─── */
 const TYPE_CONFIG: Record<NotifType, { icon: React.ComponentType<{ className?: string }>; borderColor: string; iconBg: string; iconColor: string }> = {
@@ -141,25 +58,87 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 ]
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState<Notification[]>([])
   const [activeTab, setActiveTab] = useState<FilterTab>("all")
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  const unreadCount = useMemo(() => notifications.filter((n) => n.isUnread).length, [notifications])
+  // Fetch notifications from API
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notifications?limit=100")
+      if (!res.ok) return
+      const data = await res.json()
+      setNotifications(data.notifications || [])
+    } catch {
+      // Silently fail
+    }
+  }, [])
 
-  function markAllRead() {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isUnread: false })))
+  useEffect(() => {
+    setLoading(true)
+    fetchNotifications().finally(() => setLoading(false))
+  }, [fetchNotifications])
+
+  const unreadCount = useMemo(() => notifications.filter(n => n.isUnread).length, [notifications])
+
+  // Mark all as read
+  async function markAllRead() {
+    setActionLoading("mark_all")
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_all_read" }),
+      })
+      if (res.ok) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, isUnread: false })))
+      }
+    } catch {
+      // Silently fail
+    }
+    setActionLoading(null)
   }
 
-  function markOneRead(id: string) {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isUnread: false } : n))
-    )
+  // Mark one as read
+  async function markOneRead(id: string) {
+    setActionLoading(id)
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_read", id }),
+      })
+      if (res.ok) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, isUnread: false } : n))
+        )
+      }
+    } catch {
+      // Silently fail
+    }
+    setActionLoading(null)
   }
 
-  function dismissOne(id: string) {
-    setNotifications((prev) => prev.filter((n) => n.id !== id))
+  // Dismiss one notification
+  async function dismissOne(id: string) {
+    setActionLoading(id)
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss", id }),
+      })
+      if (res.ok) {
+        setNotifications((prev) => prev.filter((n) => n.id !== id))
+      }
+    } catch {
+      // Silently fail
+    }
+    setActionLoading(null)
   }
 
+  // Filter logic
   const filtered = useMemo(() => {
     switch (activeTab) {
       case "unread":
@@ -183,6 +162,14 @@ export default function NotificationsPage() {
     system: notifications.filter((n) => n.type === "system").length,
   }
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 text-gray-300 animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -195,10 +182,14 @@ export default function NotificationsPage() {
         </div>
         <button
           onClick={markAllRead}
-          disabled={unreadCount === 0}
+          disabled={unreadCount === 0 || actionLoading === "mark_all"}
           className="flex items-center gap-1.5 px-4 py-2 border border-[#0D9488] text-[#0D9488] rounded-xl text-sm font-medium hover:bg-[#0D9488]/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <CheckCircle className="w-4 h-4" />
+          {actionLoading === "mark_all" ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <CheckCircle className="w-4 h-4" />
+          )}
           Mark All Read
         </button>
       </div>
@@ -240,7 +231,7 @@ export default function NotificationsPage() {
         ) : (
           <div className="divide-y divide-gray-50">
             {filtered.map((notif) => {
-              const cfg = TYPE_CONFIG[notif.type]
+              const cfg = TYPE_CONFIG[notif.type] || TYPE_CONFIG.system
               const TypeIcon = cfg.icon
               return (
                 <div
@@ -270,20 +261,26 @@ export default function NotificationsPage() {
                         {/* Dismiss button */}
                         <button
                           onClick={() => dismissOne(notif.id)}
+                          disabled={actionLoading === notif.id}
                           className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-gray-600 rounded transition-all ml-1"
                           title="Dismiss"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          {actionLoading === notif.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <X className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{notif.subtitle}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{notif.message}</p>
 
                     {/* Mark as read if unread */}
                     {notif.isUnread && (
                       <button
                         onClick={() => markOneRead(notif.id)}
-                        className="mt-1.5 text-xs font-medium text-[#0D9488] hover:text-[#0D9488]/80 transition-colors"
+                        disabled={actionLoading === notif.id}
+                        className="mt-1.5 text-xs font-medium text-[#0D9488] hover:text-[#0D9488]/80 transition-colors disabled:opacity-50"
                       >
                         Mark as read
                       </button>
@@ -312,11 +309,15 @@ export default function NotificationsPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <BookOpen className="w-3.5 h-3.5 text-[#0D9488]" />
-            Class alerts: <span className="font-semibold text-[#1E293B]">On</span>
+            <span>Classes</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <CreditCard className="w-3.5 h-3.5 text-[#22C55E]" />
-            Payment alerts: <span className="font-semibold text-[#1E293B]">On</span>
+            <span>Payments</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            <Settings className="w-3.5 h-3.5 text-[#1E3A5F]" />
+            <span>System</span>
           </div>
         </div>
       </div>

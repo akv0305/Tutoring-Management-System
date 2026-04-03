@@ -53,7 +53,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <TopBar
           title="Admin Dashboard"
           userName={userName}
-          notificationCount={8}
         />
         <main className="flex-1 overflow-y-auto p-6">
           {children}

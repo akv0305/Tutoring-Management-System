@@ -396,7 +396,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/classes — update class status (confirm, complete, cancel, rate, etc.)
+// PATCH /api/classes — update a class (confirm, complete, cancel, reschedule, rate, meeting link, notes, etc.)
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -405,277 +405,603 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { id, action, ...updates } = body
+    const { classId, action } = body
 
-    if (!id) {
-      return NextResponse.json({ error: "Class id is required" }, { status: 400 })
+    if (!classId || !action) {
+      return NextResponse.json(
+        { error: "classId and action are required" },
+        { status: 400 }
+      )
     }
 
-    const existingClass = await prisma.class.findUnique({
-      where: { id },
-      include: { package: true },
+    // Fetch the class with relations
+    const classRecord = await prisma.class.findUnique({
+      where: { id: classId },
+      include: {
+        student: { select: { id: true, firstName: true, lastName: true, parentId: true } },
+        teacher: {
+          include: { user: { select: { id: true, firstName: true, lastName: true } } },
+        },
+        subject: { select: { name: true } },
+        package: { select: { id: true, classesUsed: true, classesIncluded: true } },
+      },
     })
 
-    if (!existingClass) {
+    if (!classRecord) {
       return NextResponse.json({ error: "Class not found" }, { status: 404 })
     }
 
-    let updateData: any = {}
+    const userRole = session.user.role
+    const userId = session.user.id
 
-    switch (action) {
-      case "confirm_payment": {
-        if (existingClass.status !== "PENDING_PAYMENT") {
-          return NextResponse.json(
-            { error: "Can only confirm payment for a pending-payment class" },
-            { status: 400 }
-          )
-        }
-        if (!["ADMIN", "COORDINATOR"].includes(session.user.role)) {
-          return NextResponse.json(
-            { error: "Only admin or coordinator can confirm payment" },
-            { status: 403 }
-          )
-        }
-        updateData = { status: "SCHEDULED" }
-        break
+    // ──────────────────────────────────────────────
+    // ACTION: confirm
+    // ──────────────────────────────────────────────
+    if (action === "confirm") {
+      if (!["ADMIN", "COORDINATOR", "TEACHER"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (classRecord.status !== "SCHEDULED") {
+        return NextResponse.json({ error: "Only scheduled classes can be confirmed" }, { status: 400 })
       }
 
-      case "reject_payment": {
-        if (existingClass.status !== "PENDING_PAYMENT") {
-          return NextResponse.json(
-            { error: "Can only reject payment for a pending-payment class" },
-            { status: 400 }
-          )
-        }
-        if (!["ADMIN", "COORDINATOR"].includes(session.user.role)) {
-          return NextResponse.json(
-            { error: "Only admin or coordinator can reject payment" },
-            { status: 403 }
-          )
-        }
-        updateData = {
-          status: "CANCELLED_STUDENT",
-          cancelledAt: new Date(),
-          cancelReason:
-            updates.cancelReason || "Payment not completed — slot released",
-        }
-        break
-      }
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: { status: "CONFIRMED" },
+      })
 
-      case "confirm":
-        if (existingClass.status !== "SCHEDULED") {
-          return NextResponse.json(
-            { error: "Can only confirm a scheduled class" },
-            { status: 400 }
-          )
-        }
-        updateData = {
-          status: "CONFIRMED",
-          meetingLink: updates.meetingLink || existingClass.meetingLink,
-        }
-        break
-
-      case "complete":
-        if (!["SCHEDULED", "CONFIRMED"].includes(existingClass.status)) {
-          return NextResponse.json(
-            { error: "Can only complete a scheduled or confirmed class" },
-            { status: 400 }
-          )
-        }
-        updateData = {
-          status: "COMPLETED",
-          completedAt: new Date(),
-          topicCovered: updates.topicCovered || existingClass.topicCovered,
-          sessionNotes: updates.sessionNotes || existingClass.sessionNotes,
-        }
-        // Update package usage
-        if (existingClass.packageId && existingClass.package) {
-          await prisma.package.update({
-            where: { id: existingClass.packageId },
-            data: { classesUsed: { increment: 1 } },
-          })
-          const updatedPkg = await prisma.package.findUnique({
-            where: { id: existingClass.packageId },
-          })
-          if (
-            updatedPkg &&
-            updatedPkg.classesUsed >= updatedPkg.classesIncluded
-          ) {
-            await prisma.package.update({
-              where: { id: existingClass.packageId },
-              data: { status: "EXHAUSTED" },
-            })
-          }
-        }
-        break
-
-      case "cancel_student":
-        if (
-          !["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(
-            existingClass.status
-          )
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                "Can only cancel a pending, scheduled, or confirmed class",
-            },
-            { status: 400 }
-          )
-        }
-        updateData = {
-          status: "CANCELLED_STUDENT",
-          cancelledAt: new Date(),
-          cancelReason:
-            updates.cancelReason || "Cancelled by student/parent",
-        }
-        break
-
-      case "cancel_teacher":
-        if (
-          !["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(
-            existingClass.status
-          )
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                "Can only cancel a pending, scheduled, or confirmed class",
-            },
-            { status: 400 }
-          )
-        }
-        updateData = {
-          status: "CANCELLED_TEACHER",
-          cancelledAt: new Date(),
-          cancelReason: updates.cancelReason || "Cancelled by teacher",
-        }
-        break
-
-      case "no_show_student":
-        updateData = { status: "NO_SHOW_STUDENT" }
-        break
-
-      case "no_show_teacher":
-        updateData = { status: "NO_SHOW_TEACHER" }
-        break
-
-      case "rate":
-        if (session.user.role !== "PARENT") {
-          return NextResponse.json(
-            { error: "Only parents can rate classes" },
-            { status: 403 }
-          )
-        }
-        if (existingClass.status !== "COMPLETED") {
-          return NextResponse.json(
-            { error: "Can only rate a completed class" },
-            { status: 400 }
-          )
-        }
-        if (
-          !updates.parentRating ||
-          updates.parentRating < 1 ||
-          updates.parentRating > 5
-        ) {
-          return NextResponse.json(
-            { error: "Rating must be between 1 and 5" },
-            { status: 400 }
-          )
-        }
-        updateData = {
-          parentRating: updates.parentRating,
-          parentFeedback: updates.parentFeedback || null,
-        }
-        break
-
-      case "reschedule": {
-        if (!["SCHEDULED", "CONFIRMED"].includes(existingClass.status)) {
-          return NextResponse.json(
-            { error: "Can only reschedule a scheduled or confirmed class" },
-            { status: 400 }
-          )
-        }
-        if (!updates.scheduledAt) {
-          return NextResponse.json(
-            { error: "New scheduledAt is required" },
-            { status: 400 }
-          )
-        }
-
-        // Policy check
-        const settings = await prisma.platformSettings.findFirst()
-        if (settings) {
-          const result = evaluateReschedulePolicy(
-            existingClass.scheduledAt,
-            new Date(),
-            existingClass.rescheduleCount,
-            settings
-          )
-          if (!result.allowed) {
-            return NextResponse.json(
-              { error: result.reason || result.message },
-              { status: 400 }
-            )
-          }
-        }
-
-        // Conflict check for new time
-        const newDate = new Date(updates.scheduledAt)
-        const dur = existingClass.duration
-        const newEnd = new Date(newDate.getTime() + dur * 60000)
-        const conflict = await prisma.class.findFirst({
-          where: {
-            teacherId: existingClass.teacherId,
-            id: { not: existingClass.id },
-            status: { in: ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"] },
-            scheduledAt: { lt: newEnd },
-            AND: {
-              scheduledAt: {
-                gte: new Date(newDate.getTime() - dur * 60000),
-              },
-            },
-          },
-        })
-        if (conflict) {
-          return NextResponse.json(
-            { error: "Teacher has a conflict at the new time" },
-            { status: 409 }
-          )
-        }
-
-        updateData = {
-          scheduledAt: newDate,
-          status: "SCHEDULED",
-          rescheduleCount: { increment: 1 },
-        }
-        break
-      }
+      return NextResponse.json({
+        message: "Class confirmed",
+        classId: updated.id,
+        status: updated.status,
+      })
     }
 
-    const updated = await prisma.class.update({
-      where: { id },
-      data: updateData,
-      include: {
-        student: { select: { firstName: true, lastName: true } },
-        teacher: {
-          include: { user: { select: { firstName: true, lastName: true } } },
-        },
-        subject: { select: { name: true } },
-      },
-    })
+    // ──────────────────────────────────────────────
+    // ACTION: complete
+    // ──────────────────────────────────────────────
+    if (action === "complete") {
+      if (!["ADMIN", "COORDINATOR", "TEACHER"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (!["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "Only scheduled or confirmed classes can be completed" }, { status: 400 })
+      }
 
-    return NextResponse.json({
-      message: `Class ${action || "updated"} successfully`,
-      class: {
-        id: updated.id,
-        student: `${updated.student.firstName} ${updated.student.lastName}`,
-        teacher: `${updated.teacher.user.firstName} ${updated.teacher.user.lastName}`,
-        subject: updated.subject.name,
+      const { topicCovered, sessionNotes } = body
+
+      const updateData: any = {
+        status: "COMPLETED",
+        completedAt: new Date(),
+      }
+      if (topicCovered !== undefined) updateData.topicCovered = topicCovered
+      if (sessionNotes !== undefined) updateData.sessionNotes = sessionNotes
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: updateData,
+      })
+
+      // Update package usage if linked to a package
+      if (classRecord.packageId && classRecord.package) {
+        await prisma.package.update({
+          where: { id: classRecord.packageId },
+          data: { classesUsed: { increment: 1 } },
+        })
+      }
+
+      // Notify parent
+      if (classRecord.student.parentId) {
+        const parent = await prisma.parentProfile.findUnique({
+          where: { id: classRecord.student.parentId },
+          select: { userId: true },
+        })
+        if (parent) {
+          await prisma.notification.create({
+            data: {
+              userId: parent.userId,
+              type: "CLASS",
+              title: "Class Completed",
+              message: `${classRecord.subject.name} class with ${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName} for ${classRecord.student.firstName} has been completed.`,
+            },
+          })
+        }
+      }
+
+      return NextResponse.json({
+        message: "Class marked as completed",
+        classId: updated.id,
         status: updated.status,
-        scheduledAt: updated.scheduledAt.toISOString(),
-      },
-    })
+        completedAt: updated.completedAt?.toISOString(),
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: cancel_student
+    // ──────────────────────────────────────────────
+    if (action === "cancel_student") {
+      if (!["ADMIN", "COORDINATOR", "PARENT"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (!["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "This class cannot be cancelled" }, { status: 400 })
+      }
+
+      const { reason } = body
+
+      // Evaluate cancellation policy for non-pending classes
+      if (["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        const settings = await prisma.platformSettings.findFirst()
+        if (settings) {
+          const policy = evaluateCancelPolicy(classRecord.scheduledAt, new Date(), {
+            rescheduleWindowHours: settings.rescheduleWindowHours,
+            rescheduleLateFeePercent: Number(settings.rescheduleLateFeePercent),
+            rescheduleHardCutoffHours: settings.rescheduleHardCutoffHours,
+            cancelFreeWindowHours: settings.cancelFreeWindowHours,
+            cancelLateFeePercent: Number(settings.cancelLateFeePercent),
+            cancelHardCutoffHours: settings.cancelHardCutoffHours,
+            cancelHardCutoffFeePercent: Number(settings.cancelHardCutoffFeePercent),
+            maxReschedulesPerClass: settings.maxReschedulesPerClass,
+          })
+          if (!policy.allowed) {
+            return NextResponse.json({ error: policy.message || "Cancellation not allowed" }, { status: 400 })
+          }
+        }
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: {
+          status: "CANCELLED_STUDENT",
+          cancelledAt: new Date(),
+          cancelReason: reason || "Cancelled by student/parent",
+        },
+      })
+
+      // Notify teacher
+      await prisma.notification.create({
+        data: {
+          userId: classRecord.teacher.user.id,
+          type: "CLASS",
+          title: "Class Cancelled",
+          message: `${classRecord.student.firstName} ${classRecord.student.lastName}'s ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} has been cancelled by the student.`,
+        },
+      })
+
+      return NextResponse.json({
+        message: "Class cancelled by student",
+        classId: updated.id,
+        status: updated.status,
+      })
+    }
+
+
+    // ──────────────────────────────────────────────
+    // ACTION: cancel_teacher
+    // ──────────────────────────────────────────────
+    if (action === "cancel_teacher") {
+      if (!["ADMIN", "COORDINATOR", "TEACHER"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (!["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "This class cannot be cancelled" }, { status: 400 })
+      }
+
+      const { reason } = body
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: {
+          status: "CANCELLED_TEACHER",
+          cancelledAt: new Date(),
+          cancelReason: reason || "Cancelled by teacher",
+        },
+      })
+
+      // Notify parent
+      if (classRecord.student.parentId) {
+        const parent = await prisma.parentProfile.findUnique({
+          where: { id: classRecord.student.parentId },
+          select: { userId: true },
+        })
+        if (parent) {
+          await prisma.notification.create({
+            data: {
+              userId: parent.userId,
+              type: "CLASS",
+              title: "Class Cancelled by Teacher",
+              message: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName} has cancelled the ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}.`,
+            },
+          })
+        }
+      }
+
+      return NextResponse.json({
+        message: "Class cancelled by teacher",
+        classId: updated.id,
+        status: updated.status,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: no_show_student
+    // ──────────────────────────────────────────────
+    if (action === "no_show_student") {
+      if (!["ADMIN", "COORDINATOR", "TEACHER"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (!["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "Invalid class status for no-show" }, { status: 400 })
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: { status: "NO_SHOW_STUDENT" },
+      })
+
+      return NextResponse.json({
+        message: "Student marked as no-show",
+        classId: updated.id,
+        status: updated.status,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: no_show_teacher
+    // ──────────────────────────────────────────────
+    if (action === "no_show_teacher") {
+      if (!["ADMIN", "COORDINATOR"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (!["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "Invalid class status for no-show" }, { status: 400 })
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: { status: "NO_SHOW_TEACHER" },
+      })
+
+      return NextResponse.json({
+        message: "Teacher marked as no-show",
+        classId: updated.id,
+        status: updated.status,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: rate
+    // ──────────────────────────────────────────────
+    if (action === "rate") {
+      if (!["ADMIN", "COORDINATOR", "PARENT"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (classRecord.status !== "COMPLETED") {
+        return NextResponse.json({ error: "Only completed classes can be rated" }, { status: 400 })
+      }
+
+      const { rating, feedback } = body
+      if (!rating || rating < 1 || rating > 5) {
+        return NextResponse.json({ error: "Rating must be between 1 and 5" }, { status: 400 })
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: {
+          parentRating: rating,
+          parentFeedback: feedback || null,
+        },
+      })
+
+      // Update teacher's average rating
+      const allRatings = await prisma.class.findMany({
+        where: {
+          teacherId: classRecord.teacherId,
+          parentRating: { not: null },
+        },
+        select: { parentRating: true },
+      })
+      const avgRating =
+        allRatings.reduce((sum, c) => sum + (c.parentRating as number), 0) / allRatings.length
+      await prisma.teacherProfile.update({
+        where: { id: classRecord.teacherId },
+        data: { rating: Math.round(avgRating * 10) / 10 },
+      })
+
+      // Notify teacher
+      await prisma.notification.create({
+        data: {
+          userId: classRecord.teacher.user.id,
+          type: "CLASS",
+          title: "New Rating Received",
+          message: `${classRecord.student.firstName}'s parent rated your ${classRecord.subject.name} class ${rating}/5 stars.${feedback ? ` Feedback: "${feedback}"` : ""}`,
+        },
+      })
+
+      return NextResponse.json({
+        message: "Class rated successfully",
+        classId: updated.id,
+        rating: updated.parentRating,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: reschedule
+    // ──────────────────────────────────────────────
+    if (action === "reschedule") {
+      if (!["ADMIN", "COORDINATOR", "PARENT", "TEACHER"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (!["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "Only scheduled or confirmed classes can be rescheduled" }, { status: 400 })
+      }
+
+      const { newScheduledAt, reason } = body
+      if (!newScheduledAt) {
+        return NextResponse.json({ error: "newScheduledAt is required" }, { status: 400 })
+      }
+
+      // Evaluate reschedule policy
+      const settings = await prisma.platformSettings.findFirst()
+      if (settings) {
+        const rescheduleCount = classRecord.rescheduleCount ?? 0
+        const policy = evaluateReschedulePolicy(classRecord.scheduledAt, new Date(), rescheduleCount, {
+          rescheduleWindowHours: settings.rescheduleWindowHours,
+          rescheduleLateFeePercent: Number(settings.rescheduleLateFeePercent),
+          rescheduleHardCutoffHours: settings.rescheduleHardCutoffHours,
+          cancelFreeWindowHours: settings.cancelFreeWindowHours,
+          cancelLateFeePercent: Number(settings.cancelLateFeePercent),
+          cancelHardCutoffHours: settings.cancelHardCutoffHours,
+          cancelHardCutoffFeePercent: Number(settings.cancelHardCutoffFeePercent),
+          maxReschedulesPerClass: settings.maxReschedulesPerClass,
+        })
+        if (!policy.allowed) {
+          return NextResponse.json({ error: policy.message || "Reschedule not allowed by policy" }, { status: 400 })
+        }
+      }
+
+      // Check for conflicts at new time
+      const newDate = new Date(newScheduledAt)
+      const classDuration = classRecord.duration || 60
+      const newEnd = new Date(newDate.getTime() + classDuration * 60000)
+
+      const conflict = await prisma.class.findFirst({
+        where: {
+          teacherId: classRecord.teacherId,
+          id: { not: classId },
+          status: { in: ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"] },
+          scheduledAt: { lt: newEnd },
+          AND: {
+            scheduledAt: {
+              gte: new Date(newDate.getTime() - classDuration * 60000 + 1),
+            },
+          },
+        },
+      })
+
+      if (conflict) {
+        return NextResponse.json(
+          { error: "Teacher has a scheduling conflict at the new time" },
+          { status: 409 }
+        )
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: {
+          scheduledAt: newDate,
+          status: "SCHEDULED",
+          cancelReason: reason ? `Rescheduled: ${reason}` : null,
+          rescheduleCount: { increment: 1 },
+        },
+      })
+
+      // Notify the other party
+      const initiator = ["PARENT"].includes(userRole) ? "student" : "teacher"
+      if (initiator === "student") {
+        await prisma.notification.create({
+          data: {
+            userId: classRecord.teacher.user.id,
+            type: "CLASS",
+            title: "Class Rescheduled",
+            message: `${classRecord.student.firstName}'s ${classRecord.subject.name} class has been rescheduled to ${newDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`,
+          },
+        })
+      } else if (classRecord.student.parentId) {
+        const parent = await prisma.parentProfile.findUnique({
+          where: { id: classRecord.student.parentId },
+          select: { userId: true },
+        })
+        if (parent) {
+          await prisma.notification.create({
+            data: {
+              userId: parent.userId,
+              type: "CLASS",
+              title: "Class Rescheduled by Teacher",
+              message: `${classRecord.teacher.user.firstName} has rescheduled the ${classRecord.subject.name} class to ${newDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`,
+            },
+          })
+        }
+      }
+
+      return NextResponse.json({
+        message: "Class rescheduled successfully",
+        classId: updated.id,
+        newScheduledAt: updated.scheduledAt.toISOString(),
+        status: updated.status,
+      })
+    }
+
+
+    // ──────────────────────────────────────────────
+    // ACTION: update_meeting_link
+    // ──────────────────────────────────────────────
+    if (action === "update_meeting_link") {
+      // Only the assigned teacher, admin, or coordinator can update the meeting link
+      if (userRole === "TEACHER") {
+        const teacherProfile = await prisma.teacherProfile.findUnique({
+          where: { userId },
+        })
+        if (!teacherProfile || teacherProfile.id !== classRecord.teacherId) {
+          return NextResponse.json({ error: "You can only update meeting links for your own classes" }, { status: 403 })
+        }
+      } else if (!["ADMIN", "COORDINATOR"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+
+      if (!["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "Meeting link can only be set for upcoming classes" }, { status: 400 })
+      }
+
+      const { meetingLink, generateJitsi } = body
+
+      let finalLink: string
+
+      if (generateJitsi) {
+        // Auto-generate a Jitsi Meet room URL
+        const shortId = classId.slice(-8)
+        const roomName = `ExpertGuru-${shortId}`
+        finalLink = `https://meet.jit.si/${roomName}`
+      } else if (meetingLink) {
+        finalLink = meetingLink
+      } else {
+        return NextResponse.json(
+          { error: "Provide meetingLink or set generateJitsi: true" },
+          { status: 400 }
+        )
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: { meetingLink: finalLink },
+      })
+
+      // Notify parent that meeting link is available
+      if (classRecord.student.parentId) {
+        const parent = await prisma.parentProfile.findUnique({
+          where: { id: classRecord.student.parentId },
+          select: { userId: true },
+        })
+        if (parent) {
+          await prisma.notification.create({
+            data: {
+              userId: parent.userId,
+              type: "CLASS",
+              title: "Meeting Link Added",
+              message: `A meeting link has been added for ${classRecord.student.firstName}'s ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. You can join from your dashboard.`,
+            },
+          })
+        }
+      }
+
+      return NextResponse.json({
+        message: "Meeting link updated",
+        classId: updated.id,
+        meetingLink: updated.meetingLink,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: update_notes
+    // ──────────────────────────────────────────────
+    if (action === "update_notes") {
+      // Only the assigned teacher, admin, or coordinator can update notes
+      if (userRole === "TEACHER") {
+        const teacherProfile = await prisma.teacherProfile.findUnique({
+          where: { userId },
+        })
+        if (!teacherProfile || teacherProfile.id !== classRecord.teacherId) {
+          return NextResponse.json({ error: "You can only update notes for your own classes" }, { status: 403 })
+        }
+      } else if (!["ADMIN", "COORDINATOR"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+
+      const { topicCovered, sessionNotes } = body
+
+      const updateData: any = {}
+      if (topicCovered !== undefined) updateData.topicCovered = topicCovered
+      if (sessionNotes !== undefined) updateData.sessionNotes = sessionNotes
+
+      if (Object.keys(updateData).length === 0) {
+        return NextResponse.json(
+          { error: "Provide at least one of: topicCovered, sessionNotes" },
+          { status: 400 }
+        )
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: updateData,
+      })
+
+      return NextResponse.json({
+        message: "Class notes updated",
+        classId: updated.id,
+        topicCovered: updated.topicCovered,
+        sessionNotes: updated.sessionNotes,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: confirm_payment
+    // ──────────────────────────────────────────────
+    if (action === "confirm_payment") {
+      if (!["ADMIN", "COORDINATOR"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (classRecord.status !== "PENDING_PAYMENT") {
+        return NextResponse.json({ error: "Class is not pending payment" }, { status: 400 })
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: { status: "SCHEDULED" },
+      })
+
+      return NextResponse.json({
+        message: "Payment confirmed, class scheduled",
+        classId: updated.id,
+        status: updated.status,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // ACTION: reject_payment
+    // ──────────────────────────────────────────────
+    if (action === "reject_payment") {
+      if (!["ADMIN", "COORDINATOR"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+      if (classRecord.status !== "PENDING_PAYMENT") {
+        return NextResponse.json({ error: "Class is not pending payment" }, { status: 400 })
+      }
+
+      const { reason } = body
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: {
+          status: "CANCELLED_STUDENT",
+          cancelledAt: new Date(),
+          cancelReason: reason || "Payment rejected",
+        },
+      })
+
+      return NextResponse.json({
+        message: "Payment rejected, class cancelled",
+        classId: updated.id,
+        status: updated.status,
+      })
+    }
+
+    // ──────────────────────────────────────────────
+    // Unknown action
+    // ──────────────────────────────────────────────
+    return NextResponse.json(
+      { error: `Unknown action: ${action}. Supported: confirm, complete, cancel_student, cancel_teacher, no_show_student, no_show_teacher, rate, reschedule, update_meeting_link, update_notes, confirm_payment, reject_payment` },
+      { status: 400 }
+    )
   } catch (error) {
     console.error("PATCH /api/classes error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

@@ -10,7 +10,6 @@ type TopBarProps = {
   title: string
   subtitle?: string
   userName: string
-  notificationCount: number
 }
 
 function getInitials(name: string): string {
@@ -34,7 +33,7 @@ function getAvatarColor(name: string): string {
   return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]
 }
 
-export function TopBar({ title, subtitle, userName, notificationCount }: TopBarProps) {
+export function TopBar({ title, subtitle, userName }: TopBarProps) {
   const initials = getInitials(userName)
   const avatarBg = getAvatarColor(userName)
 
@@ -59,8 +58,8 @@ export function TopBar({ title, subtitle, userName, notificationCount }: TopBarP
           />
         </div>
 
-        {/* Notification Bell */}
-        <NotificationDropdown count={notificationCount} />
+        {/* Notification Bell — fetches its own data */}
+        <NotificationDropdown />
 
         {/* User Avatar */}
         <button className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors group">

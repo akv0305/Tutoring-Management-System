@@ -1,182 +1,182 @@
 "use client"
 
-import React, { useState, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import {
   Calendar,
-  CheckCircle,
-  AlertTriangle,
-  DollarSign,
-  Star,
-  UserPlus,
-  XCircle,
+  CreditCard,
+  Settings,
   CheckCheck,
+  Bell,
+  Loader2,
+  X,
 } from "lucide-react"
 
-/* ─── Types ─── */
-type FilterKey = "all" | "unread" | "classes" | "payments"
+/* ——— Types ——— */
+type FilterKey = "all" | "unread" | "class" | "payment" | "system"
 
 type Notification = {
   id: string
-  unread: boolean
-  borderColor: string
-  bgColor: string
-  iconBg: string
-  icon: React.ReactNode
-  text: string
-  time: string
-  category: "classes" | "payments" | "general"
+  type: "class" | "payment" | "system"
+  title: string
+  message: string
+  timestamp: string
+  isUnread: boolean
 }
 
-/* ─── Icon wrapper ─── */
-function NotifIcon({ bg, children }: { bg: string; children: React.ReactNode }) {
-  return (
-    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${bg}`}>
-      {children}
-    </div>
-  )
-}
-
-/* ─── Notification data ─── */
-const NOTIFICATIONS: Notification[] = [
-  {
-    id: "n1",
-    unread: true,
+/* ——— Type config ——— */
+const TYPE_CONFIG: Record<
+  Notification["type"],
+  { icon: React.ElementType; borderColor: string; bgUnread: string; iconBg: string; iconColor: string }
+> = {
+  class: {
+    icon: Calendar,
     borderColor: "border-l-blue-500",
-    bgColor: "bg-blue-50",
+    bgUnread: "bg-blue-50",
     iconBg: "bg-blue-100",
-    icon: <NotifIcon bg="bg-blue-100"><Calendar className="w-4 h-4 text-blue-600" /></NotifIcon>,
-    text: "New class scheduled: Noah Martinez — Math Trial, Mar 10, 4:30 PM EST",
-    time: "30 minutes ago",
-    category: "classes",
+    iconColor: "text-blue-600",
   },
-  {
-    id: "n2",
-    unread: true,
+  payment: {
+    icon: CreditCard,
     borderColor: "border-l-green-500",
-    bgColor: "bg-blue-50",
+    bgUnread: "bg-green-50",
     iconBg: "bg-green-100",
-    icon: <NotifIcon bg="bg-green-100"><CheckCircle className="w-4 h-4 text-green-600" /></NotifIcon>,
-    text: "Class completed confirmation: Alex Smith — Math, Mar 10, 9:00 AM",
-    time: "2 hours ago",
-    category: "classes",
+    iconColor: "text-green-600",
   },
-  {
-    id: "n3",
-    unread: true,
-    borderColor: "border-l-amber-500",
-    bgColor: "bg-blue-50",
-    iconBg: "bg-amber-100",
-    icon: <NotifIcon bg="bg-amber-100"><AlertTriangle className="w-4 h-4 text-amber-600" /></NotifIcon>,
-    text: "Reminder: Priya Patel — AP Calculus class at 2:00 PM EST today",
-    time: "4 hours ago",
-    category: "classes",
-  },
-  {
-    id: "n4",
-    unread: true,
-    borderColor: "border-l-green-500",
-    bgColor: "bg-blue-50",
-    iconBg: "bg-green-100",
-    icon: <NotifIcon bg="bg-green-100"><DollarSign className="w-4 h-4 text-green-600" /></NotifIcon>,
-    text: "February 2026 payout of $1,050 has been processed and sent to your account",
-    time: "1 day ago",
-    category: "payments",
-  },
-  {
-    id: "n5",
-    unread: false,
-    borderColor: "border-l-gray-300",
-    bgColor: "bg-white",
+  system: {
+    icon: Settings,
+    borderColor: "border-l-gray-400",
+    bgUnread: "bg-gray-50",
     iconBg: "bg-gray-100",
-    icon: <NotifIcon bg="bg-gray-100"><Calendar className="w-4 h-4 text-gray-500" /></NotifIcon>,
-    text: "Class rescheduled: Maya Johnson — SAT Prep moved from Mar 12 to Mar 14, 2:00 PM",
-    time: "2 days ago",
-    category: "classes",
+    iconColor: "text-gray-600",
   },
-  {
-    id: "n6",
-    unread: false,
-    borderColor: "border-l-gray-300",
-    bgColor: "bg-white",
-    iconBg: "bg-gray-100",
-    icon: <NotifIcon bg="bg-gray-100"><Star className="w-4 h-4 text-gray-500" /></NotifIcon>,
-    text: "New feedback received: Alex Smith's parent rated you 5/5 stars",
-    time: "3 days ago",
-    category: "general",
-  },
-  {
-    id: "n7",
-    unread: false,
-    borderColor: "border-l-gray-300",
-    bgColor: "bg-white",
-    iconBg: "bg-gray-100",
-    icon: <NotifIcon bg="bg-gray-100"><UserPlus className="w-4 h-4 text-gray-500" /></NotifIcon>,
-    text: "New trial student assigned: Emma Wilson — Science, Grade 9",
-    time: "3 days ago",
-    category: "classes",
-  },
-  {
-    id: "n8",
-    unread: false,
-    borderColor: "border-l-red-400",
-    bgColor: "bg-white",
-    iconBg: "bg-red-100",
-    icon: <NotifIcon bg="bg-red-100"><XCircle className="w-4 h-4 text-red-500" /></NotifIcon>,
-    text: "Class cancelled by student: Alex Smith — Math, Mar 4, 9:00 AM (within free window)",
-    time: "6 days ago",
-    category: "classes",
-  },
-  {
-    id: "n9",
-    unread: false,
-    borderColor: "border-l-gray-300",
-    bgColor: "bg-white",
-    iconBg: "bg-gray-100",
-    icon: <NotifIcon bg="bg-gray-100"><CheckCircle className="w-4 h-4 text-gray-500" /></NotifIcon>,
-    text: "Class completed: Priya Patel — AP Calculus, Mar 3",
-    time: "7 days ago",
-    category: "classes",
-  },
-  {
-    id: "n10",
-    unread: false,
-    borderColor: "border-l-gray-300",
-    bgColor: "bg-white",
-    iconBg: "bg-gray-100",
-    icon: <NotifIcon bg="bg-gray-100"><DollarSign className="w-4 h-4 text-gray-500" /></NotifIcon>,
-    text: "January 2026 payout of $980 processed",
-    time: "Feb 1, 2026",
-    category: "payments",
-  },
+}
+
+/* ——— Filter tabs ——— */
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "all",     label: "All" },
+  { key: "unread",  label: "Unread" },
+  { key: "class",   label: "Classes" },
+  { key: "payment", label: "Payments" },
+  { key: "system",  label: "System" },
 ]
 
-const FILTERS: { key: FilterKey; label: string; badge?: number }[] = [
-  { key: "all",      label: "All" },
-  { key: "unread",   label: "Unread", badge: 4 },
-  { key: "classes",  label: "Classes" },
-  { key: "payments", label: "Payments" },
-]
-
-/* ─── Page ─── */
-export default function NotificationsPage() {
+/* ——— Page ——— */
+export default function TeacherNotificationsPage() {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all")
-  const [notifications, setNotifications] = useState<Notification[]>(NOTIFICATIONS)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [markingAll, setMarkingAll] = useState(false)
+
+  /* Fetch notifications from API */
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notifications?limit=100")
+      if (!res.ok) return
+      const data = await res.json()
+      setNotifications(data.notifications || [])
+    } catch {
+      /* silently fail */
+    }
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    fetchNotifications().finally(() => setLoading(false))
+  }, [fetchNotifications])
+
+  /* Computed values */
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => n.isUnread).length,
+    [notifications]
+  )
+
+  const filterCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: notifications.length,
+      unread: notifications.filter((n) => n.isUnread).length,
+      class: notifications.filter((n) => n.type === "class").length,
+      payment: notifications.filter((n) => n.type === "payment").length,
+      system: notifications.filter((n) => n.type === "system").length,
+    }
+    return counts
+  }, [notifications])
 
   const filtered = useMemo(() => {
     return notifications.filter((n) => {
-      if (activeFilter === "all")      return true
-      if (activeFilter === "unread")   return n.unread
-      if (activeFilter === "classes")  return n.category === "classes"
-      if (activeFilter === "payments") return n.category === "payments"
-      return true
+      if (activeFilter === "all") return true
+      if (activeFilter === "unread") return n.isUnread
+      return n.type === activeFilter
     })
   }, [activeFilter, notifications])
 
-  function markAllRead() {
-    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })))
+  /* Actions */
+  async function markAllRead() {
+    setMarkingAll(true)
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_all_read" }),
+      })
+      if (res.ok) {
+        setNotifications((prev) =>
+          prev.map((n) => ({ ...n, isUnread: false }))
+        )
+      }
+    } catch {
+      /* silently fail */
+    } finally {
+      setMarkingAll(false)
+    }
   }
 
-  const unreadCount = notifications.filter((n) => n.unread).length
+  async function markOneRead(id: string) {
+    setActionLoading(id)
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_read", id }),
+      })
+      if (res.ok) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, isUnread: false } : n))
+        )
+      }
+    } catch {
+      /* silently fail */
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function dismissOne(id: string) {
+    setActionLoading(id)
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss", id }),
+      })
+      if (res.ok) {
+        setNotifications((prev) => prev.filter((n) => n.id !== id))
+      }
+    } catch {
+      /* silently fail */
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  /* ——— Loading state ——— */
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 text-gray-300 animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -186,16 +186,18 @@ export default function NotificationsPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B]">Notifications</h1>
           {unreadCount > 0 && (
-            <p className="text-sm text-gray-500 mt-0.5">{unreadCount} unread notification{unreadCount !== 1 ? "s" : ""}</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {unreadCount} unread notification{unreadCount !== 1 ? "s" : ""}
+            </p>
           )}
         </div>
         <button
           onClick={markAllRead}
-          disabled={unreadCount === 0}
+          disabled={unreadCount === 0 || markingAll}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <CheckCheck className="w-4 h-4" />
-          Mark All Read
+          {markingAll ? "Marking..." : "Mark All Read"}
         </button>
       </div>
 
@@ -212,15 +214,15 @@ export default function NotificationsPage() {
             }`}
           >
             {f.label}
-            {f.badge !== undefined && unreadCount > 0 && (
+            {filterCounts[f.key] > 0 && (
               <span
                 className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${
                   activeFilter === f.key
                     ? "bg-white text-[#1E3A5F]"
-                    : "bg-amber-100 text-amber-700"
+                    : "bg-gray-100 text-gray-600"
                 }`}
               >
-                {unreadCount}
+                {filterCounts[f.key]}
               </span>
             )}
           </button>
@@ -230,34 +232,94 @@ export default function NotificationsPage() {
       {/* Notification list */}
       <div className="flex flex-col gap-3">
         {filtered.length === 0 && (
-          <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
-            No notifications in this category.
+          <div className="bg-white rounded-xl border border-gray-100 p-10 flex flex-col items-center justify-center text-center">
+            <Bell className="w-10 h-10 text-gray-200 mb-3" />
+            <p className="text-sm text-gray-400">
+              No notifications in this category.
+            </p>
           </div>
         )}
-        {filtered.map((n) => (
-          <div
-            key={n.id}
-            className={`rounded-lg border border-gray-100 border-l-4 ${n.borderColor} p-4 flex items-start gap-4 transition-colors ${
-              n.unread ? "bg-blue-50" : "bg-white"
-            }`}
-          >
-            {/* Icon */}
-            {n.icon}
+        {filtered.map((n) => {
+          const cfg = TYPE_CONFIG[n.type] || TYPE_CONFIG.system
+          const Icon = cfg.icon
+          const isActioning = actionLoading === n.id
 
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <p className={`text-sm leading-relaxed ${n.unread ? "font-semibold text-[#1E293B]" : "text-gray-600"}`}>
-                {n.text}
-              </p>
-              <p className="text-xs text-gray-400 mt-1">{n.time}</p>
+          return (
+            <div
+              key={n.id}
+              className={`rounded-lg border border-gray-100 border-l-4 ${cfg.borderColor} p-4 flex items-start gap-4 transition-colors ${
+                n.isUnread ? cfg.bgUnread : "bg-white"
+              }`}
+            >
+              {/* Icon */}
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  n.isUnread ? cfg.iconBg : "bg-gray-100"
+                }`}
+              >
+                <Icon
+                  className={`w-4 h-4 ${
+                    n.isUnread ? cfg.iconColor : "text-gray-500"
+                  }`}
+                />
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <p
+                  className={`text-sm leading-relaxed ${
+                    n.isUnread
+                      ? "font-semibold text-[#1E293B]"
+                      : "text-gray-600"
+                  }`}
+                >
+                  {n.title}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">{n.message}</p>
+                <p className="text-xs text-gray-400 mt-1">{n.timestamp}</p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {n.isUnread && (
+                  <button
+                    onClick={() => markOneRead(n.id)}
+                    disabled={isActioning}
+                    className="text-xs text-[#0D9488] hover:text-teal-700 font-medium disabled:opacity-40"
+                  >
+                    {isActioning ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      "Mark read"
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => dismissOne(n.id)}
+                  disabled={isActioning}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded disabled:opacity-40"
+                  title="Dismiss"
+                >
+                  {isActioning ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <X className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+
+              {/* Unread dot */}
+              {n.isUnread && (
+                <div className="w-2 h-2 rounded-full bg-[#0D9488] flex-shrink-0 mt-1.5" />
+              )}
             </div>
+          )
+        })}
+      </div>
 
-            {/* Unread dot */}
-            {n.unread && (
-              <div className="w-2 h-2 rounded-full bg-[#0D9488] flex-shrink-0 mt-1.5" />
-            )}
-          </div>
-        ))}
+      {/* Info strip */}
+      <div className="bg-gray-50 rounded-lg border border-gray-100 px-4 py-3 text-xs text-gray-400 text-center">
+        Notifications are generated automatically when classes are booked, completed, cancelled, or when payments are processed.
       </div>
     </div>
   )

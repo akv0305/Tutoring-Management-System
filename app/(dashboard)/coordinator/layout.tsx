@@ -52,7 +52,6 @@ export default function CoordinatorLayout({
         <TopBar
           title="Coordinator Dashboard"
           userName={userName}
-          notificationCount={5}
         />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>

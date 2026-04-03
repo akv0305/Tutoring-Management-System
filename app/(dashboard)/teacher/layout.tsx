@@ -21,7 +21,7 @@ const navItems = [
   { label: "My Students",     icon: Users,           href: "/teacher/students" },
   { label: "Class History",   icon: BookOpen,        href: "/teacher/history" },
   { label: "Earnings",        icon: Wallet,          href: "/teacher/earnings" },
-  { label: "Notifications",   icon: Bell,            href: "/teacher/notifications", badge: 4 },
+  { label: "Notifications",   icon: Bell,            href: "/teacher/notifications" },
 ]
 
 export default function TeacherLayout({
@@ -52,7 +52,6 @@ export default function TeacherLayout({
         <TopBar
           title="Teacher Dashboard"
           userName={userName}
-          notificationCount={4}
         />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
