@@ -405,7 +405,8 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { classId, action } = body
+    const classId = body.classId || body.id
+    const action = body.action
 
     if (!classId || !action) {
       return NextResponse.json(
@@ -736,7 +737,8 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "Only scheduled or confirmed classes can be rescheduled" }, { status: 400 })
       }
 
-      const { newScheduledAt, reason } = body
+      const newScheduledAt = body.newScheduledAt || body.scheduledAt
+      const reason = body.reason || body.rescheduleReason || ""
       if (!newScheduledAt) {
         return NextResponse.json({ error: "newScheduledAt is required" }, { status: 400 })
       }

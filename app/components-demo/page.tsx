@@ -350,7 +350,6 @@ function TopBarDemoWrapper() {
         title="Students Management"
         subtitle="Manage student profiles, packages, and progress"
         userName="Sarah Mitchell"
-        notificationCount={4}
       />
     </div>
   )
@@ -650,11 +649,11 @@ export default function ComponentsDemoPage() {
             </p>
             <div className="flex items-center gap-6">
               <div className="flex flex-col items-center gap-1.5">
-                <NotificationDropdown count={4} />
+                {/* <NotificationDropdown count={4} /> */}
                 <span className="text-[10px] text-gray-400">4 unread</span>
               </div>
               <div className="flex flex-col items-center gap-1.5">
-                <NotificationDropdown count={0} />
+                {/* <NotificationDropdown count={0} /> */}
                 <span className="text-[10px] text-gray-400">0 unread</span>
               </div>
             </div>

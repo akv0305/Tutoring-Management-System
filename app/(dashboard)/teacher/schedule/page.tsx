@@ -17,7 +17,11 @@ const SUBJECT_COLORS: Record<string, string> = {
 }
 const DEFAULT_COLOR = "bg-gray-500/90 text-white border-gray-700"
 
-export default async function TeacherSchedulePage() {
+export default async function TeacherSchedulePage({
+  searchParams,
+}: {
+  searchParams: { week?: string }
+}) {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "TEACHER") redirect("/unauthorized")
 
@@ -26,12 +30,29 @@ export default async function TeacherSchedulePage() {
   })
   if (!teacher) redirect("/unauthorized")
 
-  // Current week Mon-Sun
+  // Week offset from query param (0 = current week)
+  const weekOffset = parseInt(searchParams.week || "0", 10) || 0
+
+  // Calculate Mon-Sun for the requested week
   const now = new Date()
   const utcDay = now.getUTCDay()
   const mondayOffset = utcDay === 0 ? -6 : 1 - utcDay
-  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + mondayOffset, 0, 0, 0, 0))
-  const weekEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + mondayOffset + 7, 0, 0, 0, 0))
+  const weekStart = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + mondayOffset + weekOffset * 7,
+      0, 0, 0, 0
+    )
+  )
+  const weekEnd = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + mondayOffset + weekOffset * 7 + 7,
+      0, 0, 0, 0
+    )
+  )
 
   const classes = await prisma.class.findMany({
     where: {
@@ -56,12 +77,18 @@ export default async function TeacherSchedulePage() {
       id: c.id,
       label: `${c.student.firstName} ${c.student.lastName}`,
       sublabel: `${c.subject.name} G${c.student.grade}`,
+      subject: c.subject.name,
+      studentName: `${c.student.firstName} ${c.student.lastName}`,
       startSlot: Math.max(0, startSlot),
       duration: 1,
       dayIndex,
       colorClass: SUBJECT_COLORS[c.subject.name] ?? DEFAULT_COLOR,
       isTrial: c.isTrial,
       status: c.status.toLowerCase(),
+      meetingLink: c.meetingLink || null,
+      scheduledAt: c.scheduledAt.toISOString(),
+      time: `${dt.getUTCHours() % 12 || 12}:${String(dt.getUTCMinutes()).padStart(2, "0")} ${dt.getUTCHours() >= 12 ? "PM" : "AM"}`,
+      topicCovered: c.topicCovered || "",
     }
   })
 
@@ -72,32 +99,71 @@ export default async function TeacherSchedulePage() {
     return d.getUTCDate().toString()
   })
 
-  const monthYear = `${weekStart.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })} ${dates[0]}–${dates[6]}, ${weekStart.getUTCFullYear()}`
+  const monthYear = `${weekStart.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  })} ${dates[0]}–${dates[6]}, ${weekStart.getUTCFullYear()}`
 
   // Today's day index for highlighting
   const todayUtcDay = now.getUTCDay()
   const todayIdx = todayUtcDay === 0 ? 6 : todayUtcDay - 1
 
+  // Is this the current week?
+  const isCurrentWeek = weekOffset === 0
+
   // Legend from actual subjects
-  const usedSubjects = [...new Set(blocks.map((b) => {
-    // Extract subject name from sublabel (before " G")
-    const cls = classes.find((c) => c.id === b.id)
-    return cls?.subject.name ?? ""
-  }))]
+  const usedSubjects = [
+    ...new Set(
+      classes.map((c) => c.subject.name)
+    ),
+  ]
   const legend = usedSubjects.filter(Boolean).map((name) => ({
     label: name,
-    cls: (SUBJECT_COLORS[name] ?? DEFAULT_COLOR),
+    cls: SUBJECT_COLORS[name] ?? DEFAULT_COLOR,
   }))
+
+  // Teacher availability + booked slots for reschedule modal
+  const availability = await prisma.teacherAvailability.findMany({
+    where: { teacherId: teacher.id },
+    select: { dayOfWeek: true, startTime: true, endTime: true },
+  })
+
+  const bookedSlots = await prisma.class.findMany({
+    where: {
+      teacherId: teacher.id,
+      status: { in: ["SCHEDULED", "CONFIRMED"] },
+    },
+    select: { scheduledAt: true, duration: true },
+  })
+
+  const bookedSlotsFormatted = bookedSlots.map((b) => ({
+    start: b.scheduledAt.toISOString(),
+    duration: b.duration || 1,
+  }))
+
+  const blockedDatesRaw = await prisma.teacherBlockedDate.findMany({
+    where: { teacherId: teacher.id },
+    select: { blockedDate: true },
+  })
+
+  const teacherBlockedDates = blockedDatesRaw.map((b) =>
+    b.blockedDate.toISOString().split("T")[0]
+  )
 
   return (
     <TeacherScheduleClient
       blocks={blocks}
       dates={dates}
       monthYear={monthYear}
-      todayIdx={todayIdx}
+      todayIdx={isCurrentWeek ? todayIdx : -1}
       legend={legend}
       hasTrial={blocks.some((b) => b.isTrial)}
       teacherTimezone={teacher.timezone}
+      weekOffset={weekOffset}
+      teacherAvailability={availability}
+      teacherBookedSlots={bookedSlotsFormatted}
+      teacherBlockedDates={teacherBlockedDates}
+      teacherName={`${session.user.firstName} ${session.user.lastName}`}
     />
   )
 }

@@ -59,6 +59,7 @@ export default async function ParentDashboard() {
         subject: `${c.subject.name}${c.topicCovered ? ` — ${c.topicCovered}` : ""}`,
         status: c.status.toLowerCase(),
         canJoin: c.status === "CONFIRMED",
+        meetingLink: c.meetingLink || null,
       }))
   ).slice(0, 5)
 

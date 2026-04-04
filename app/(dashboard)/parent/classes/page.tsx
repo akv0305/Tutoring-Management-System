@@ -62,6 +62,7 @@ export default async function ClassesPage() {
         canJoin,
         isTrial: c.isTrial,
         teacherId: c.teacherId,
+        meetingLink: c.meetingLink || null,
       }
     })
 

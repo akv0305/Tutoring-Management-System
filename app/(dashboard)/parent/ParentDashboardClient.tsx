@@ -20,7 +20,7 @@ import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
 import Link from "next/link"
-
+import { ClassDetailsModal } from "@/components/modals/ClassDetailsModal"
 
 type UpcomingClass = {
   id: string
@@ -32,6 +32,7 @@ type UpcomingClass = {
   subject: string
   status: string
   canJoin: boolean
+  meetingLink: string | null
 }
 
 type ActivePackage = {
@@ -73,6 +74,7 @@ type DashboardData = {
 }
 
 export function ParentDashboardClient({ data }: { data: DashboardData }) {
+  const [detailsClass, setDetailsClass] = React.useState<UpcomingClass | null>(null)
   const childList = data.childrenNames.join(" & ")
 
   return (
@@ -173,16 +175,21 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
                       </div>
                       <div className="flex flex-col items-end gap-2 flex-shrink-0">
                         <StatusBadge status={cls.status} size="sm" />
-                        {cls.canJoin ? (
-                          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#0D9488] text-white text-xs font-medium hover:bg-teal-700 transition-colors">
+                        {cls.canJoin && cls.meetingLink ? (
+                          <button
+                            onClick={() => window.open(cls.meetingLink!, "_blank", "noopener,noreferrer")}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#0D9488] text-white text-xs font-medium hover:bg-teal-700 transition-colors"
+                          >
                             <Video className="w-3 h-3" />
                             Join Class
                           </button>
-                        ) : (
-                          <button className="px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 transition-colors">
-                            Details
-                          </button>
-                        )}
+                        ) : null}
+                        <button
+                          onClick={() => setDetailsClass(cls)}
+                          className="px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 transition-colors"
+                        >
+                          Details
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -323,6 +330,27 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
           </div>
         </div>
       </div>
+
+      {/* Class Details Modal */}
+      {detailsClass && (
+        <ClassDetailsModal
+          open={!!detailsClass}
+          onClose={() => setDetailsClass(null)}
+          cls={{
+            id: detailsClass.id,
+            subject: detailsClass.subject,
+            teacher: detailsClass.teacherName,
+            teacherInitials: detailsClass.initials,
+            date: detailsClass.day,
+            time: detailsClass.time,
+            duration: "60 min",
+            status: detailsClass.status,
+            meetingLink: detailsClass.meetingLink,
+            studentName: detailsClass.studentName,
+          }}
+        />
+      )}
+      
     </div>
   )
 }

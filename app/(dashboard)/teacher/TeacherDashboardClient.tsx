@@ -8,9 +8,8 @@ import {
   Wallet,
   Video,
   Clock,
-  CalendarPlus,
+  Users,
   FileText,
-  AlertCircle,
   CheckCircle,
   X,
   Link as LinkIcon,
@@ -562,24 +561,18 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
             <div className="flex flex-col gap-3">
               {[
-                { icon: Clock, label: "Update Availability", href: "/teacher/availability" },
-                { icon: CalendarPlus, label: "Open New Slots", href: "/teacher/availability" },
-                { icon: FileText, label: "Add Class Notes", href: null },
-                { icon: AlertCircle, label: "Report an Issue", href: null },
-              ].map(({ icon: Icon, label, href }) => (
+                { icon: Clock, label: "Update Availability", action: () => { window.location.href = "/teacher/availability" } },
+                { icon: FileText, label: "Add Class Notes", action: () => {
+                    const next = todayClasses.find((c) => ["scheduled", "confirmed", "completed"].includes(c.status))
+                    if (next) setNotesClass(next)
+                  }
+                },
+                { icon: Users, label: "View My Students", action: () => { window.location.href = "/teacher/students" } },
+                { icon: BookOpen, label: "View Class History", action: () => { window.location.href = "/teacher/history" } },
+              ].map(({ icon: Icon, label, action }) => (
                 <button
                   key={label}
-                  onClick={() => {
-                    if (href) {
-                      window.location.href = href
-                    } else if (label === "Add Class Notes") {
-                      // Open notes modal for the first upcoming class
-                      const next = todayClasses.find((c) =>
-                        ["scheduled", "confirmed", "completed"].includes(c.status)
-                      )
-                      if (next) setNotesClass(next)
-                    }
-                  }}
+                  onClick={action}
                   className="w-full inline-flex items-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:bg-gray-50 hover:border-[#0D9488] hover:text-[#0D9488] transition-colors"
                 >
                   <Icon className="w-4 h-4 text-[#0D9488]" />{label}

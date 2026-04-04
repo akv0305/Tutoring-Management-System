@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Plus,
   XCircle,
+  ExternalLink,
 } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
@@ -21,6 +22,7 @@ import { BookClassModal } from "@/components/modals/BookClassModal"
 import { RescheduleModal } from "@/components/modals/RescheduleModal"
 import { CancelClassModal } from "@/components/modals/CancelClassModal"
 import { RateClassModal } from "@/components/modals/RateClassModal"
+import { ClassDetailsModal } from "@/components/modals/ClassDetailsModal"
 
 type UpcomingClass = {
   id: string
@@ -36,6 +38,7 @@ type UpcomingClass = {
   canJoin: boolean
   isTrial: boolean
   teacherId: string
+  meetingLink: string | null
 }
 
 type CompletedClass = {
@@ -176,6 +179,9 @@ export function ParentClassesClient({
   // Rate modal
   const [rateClass, setRateClass] = useState<CompletedClass | null>(null)
 
+  // Details modal
+  const [detailsClass, setDetailsClass] = useState<UpcomingClass | null>(null)
+
   const tabs: { key: Tab; label: string; badge?: number }[] = [
     { key: "upcoming", label: "Upcoming", badge: upcoming.length || undefined },
     { key: "completed", label: "Completed", badge: completed.length || undefined },
@@ -293,15 +299,20 @@ export function ParentClassesClient({
                             </div>
                           ) : (
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
-                              {cls.canJoin ? (
-                                <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors">
+                              {cls.canJoin && cls.meetingLink ? (
+                                <button
+                                  onClick={() => window.open(cls.meetingLink!, "_blank", "noopener,noreferrer")}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors"
+                                >
                                   <Video className="w-3 h-3" />Join Class
                                 </button>
-                              ) : (
-                                <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors">
-                                  <Eye className="w-3 h-3" />View Details
-                                </button>
-                              )}
+                              ) : null}
+                              <button
+                                onClick={() => setDetailsClass(cls)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors"
+                              >
+                                <Eye className="w-3 h-3" />View Details
+                              </button>
                               <button
                                 onClick={() => setRescheduleClass(cls)}
                                 className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
@@ -478,6 +489,26 @@ export function ParentClassesClient({
           scheduledDate={`${cancelClass.month} ${cancelClass.dateNum}`}
           scheduledTime={cancelClass.time}
           cancelledBy="student"
+        />
+      )}
+
+      {/* Class Details Modal */}
+      {detailsClass && (
+        <ClassDetailsModal
+          open={!!detailsClass}
+          onClose={() => setDetailsClass(null)}
+          cls={{
+            id: detailsClass.id,
+            subject: detailsClass.subject,
+            teacher: detailsClass.teacher,
+            teacherInitials: detailsClass.teacherInitials,
+            date: `${detailsClass.dayLabel}, ${detailsClass.month} ${detailsClass.dateNum}`,
+            time: detailsClass.time,
+            duration: detailsClass.duration,
+            status: detailsClass.status,
+            isTrial: detailsClass.isTrial,
+            meetingLink: detailsClass.meetingLink,
+          }}
         />
       )}
 
