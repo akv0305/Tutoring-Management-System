@@ -17,51 +17,17 @@ import {
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { prisma } from "@/lib/prisma"
+import Link from "next/link"
 
 /* ─────────────────── Static data (no DB equivalent yet) ─────────────── */
 
 const quickActions = [
-  { icon: UserPlus,       label: "Add New Student" },
-  { icon: GraduationCap,  label: "Add New Teacher" },
-  { icon: Package,        label: "Create Package" },
-  { icon: CreditCard,     label: "Confirm Payment" },
-  { icon: Wallet,         label: "Process Payout" },
-  { icon: Settings,       label: "Platform Settings" },
-]
-
-const systemAlerts = [
-  {
-    bg: "bg-red-50",
-    border: "border-red-400",
-    Icon: AlertCircle,
-    iconColor: "text-red-500",
-    message: "5 pending refund requests require immediate attention.",
-    time: "2 hours ago",
-  },
-  {
-    bg: "bg-orange-50",
-    border: "border-orange-400",
-    Icon: AlertTriangle,
-    iconColor: "text-orange-500",
-    message: "3 teacher payouts are overdue by more than 7 days.",
-    time: "4 hours ago",
-  },
-  {
-    bg: "bg-blue-50",
-    border: "border-blue-400",
-    Icon: Info,
-    iconColor: "text-blue-500",
-    message: "System maintenance scheduled for March 12, 2026 at 2:00 AM IST.",
-    time: "1 day ago",
-  },
-  {
-    bg: "bg-green-50",
-    border: "border-green-400",
-    Icon: CheckCircle,
-    iconColor: "text-green-500",
-    message: "Monthly revenue target of $45,000 has been exceeded.",
-    time: "2 days ago",
-  },
+  { icon: UserPlus,       label: "Add New Student",   href: "/admin/students" },
+  { icon: GraduationCap,  label: "Add New Teacher",   href: "/admin/teachers" },
+  { icon: Package,        label: "Create Package",    href: "/admin/packages" },
+  { icon: CreditCard,     label: "Confirm Payment",   href: "/admin/payments" },
+  { icon: Wallet,         label: "Process Payout",    href: "/admin/payouts" },
+  { icon: Settings,       label: "Platform Settings", href: "/admin/settings" },
 ]
 
 /* ─────────────────────────── Helper ──────────────────────────────────── */
@@ -81,6 +47,9 @@ export default async function AdminPage() {
     recentPaymentsRaw,
     payoutsRaw,
     subjectStats,
+    pendingRefundsCount,
+    overduePayoutsCount,
+    pendingPaymentsCount,
   ] = await Promise.all([
     prisma.student.count(),
     prisma.teacherProfile.count({ where: { status: "ACTIVE" } }),
@@ -111,7 +80,61 @@ export default async function AdminPage() {
       },
       orderBy: { name: "asc" },
     }),
+    prisma.refundRequest.count({ where: { status: "PENDING" } }),
+    prisma.payout.count({ where: { status: "PENDING" } }),
+    prisma.payment.count({ where: { status: "PENDING" } }),
   ])
+
+  // Build dynamic system alerts
+type SystemAlert = {
+  bg: string
+  border: string
+  Icon: React.ElementType
+  iconColor: string
+  message: string
+}
+
+const systemAlerts: SystemAlert[] = []
+
+if (pendingRefundsCount > 0) {
+  systemAlerts.push({
+    bg: "bg-red-50",
+    border: "border-red-400",
+    Icon: AlertCircle,
+    iconColor: "text-red-500",
+    message: `${pendingRefundsCount} pending refund request${pendingRefundsCount !== 1 ? "s" : ""} require${pendingRefundsCount === 1 ? "s" : ""} immediate attention.`,
+  })
+}
+
+if (overduePayoutsCount > 0) {
+  systemAlerts.push({
+    bg: "bg-orange-50",
+    border: "border-orange-400",
+    Icon: AlertTriangle,
+    iconColor: "text-orange-500",
+    message: `${overduePayoutsCount} teacher payout${overduePayoutsCount !== 1 ? "s" : ""} pending processing.`,
+  })
+}
+
+if (pendingPaymentsCount > 0) {
+  systemAlerts.push({
+    bg: "bg-blue-50",
+    border: "border-blue-400",
+    Icon: Info,
+    iconColor: "text-blue-500",
+    message: `${pendingPaymentsCount} payment${pendingPaymentsCount !== 1 ? "s" : ""} awaiting confirmation.`,
+  })
+}
+
+if (systemAlerts.length === 0) {
+  systemAlerts.push({
+    bg: "bg-green-50",
+    border: "border-green-400",
+    Icon: CheckCircle,
+    iconColor: "text-green-500",
+    message: "All clear! No pending actions at this time.",
+  })
+}
 
   const totalRevenue = revenueResult._sum.amount ?? 0
 
@@ -199,7 +222,7 @@ export default async function AdminPage() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#1E293B]">Recent Payments</h2>
-              <span className="text-xs text-[#0D9488] font-medium cursor-pointer hover:underline">View All →</span>
+                <Link href="/admin/payments" className="text-xs text-[#0D9488] font-medium hover:underline">View All →</Link>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -235,7 +258,7 @@ export default async function AdminPage() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-[#1E293B]">Teacher Payouts Summary</h2>
-              <span className="text-xs text-[#0D9488] font-medium cursor-pointer hover:underline">View All →</span>
+                <Link href="/admin/payouts" className="text-xs text-[#0D9488] font-medium hover:underline">View All →</Link>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -275,13 +298,13 @@ export default async function AdminPage() {
           {/* Quick Actions */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
-            <div className="grid grid-cols-2 gap-3">
-              {quickActions.map(({ icon: Icon, label }) => (
-                <button key={label} className="flex items-center gap-2.5 px-4 py-3 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:border-[#0D9488] hover:text-[#0D9488] hover:bg-teal-50 transition-all duration-150 group">
-                  <Icon className="w-4 h-4 text-gray-400 group-hover:text-[#0D9488] transition-colors flex-shrink-0" />
-                  <span className="text-left leading-tight">{label}</span>
-                </button>
-              ))}
+              <div className="grid grid-cols-2 gap-3">
+                {quickActions.map(({ icon: Icon, label, href }) => (
+                  <Link key={label} href={href} className="flex items-center gap-2.5 px-4 py-3 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:border-[#0D9488] hover:text-[#0D9488] hover:bg-teal-50 transition-all duration-150 group">
+                    <Icon className="w-4 h-4 text-gray-400 group-hover:text-[#0D9488] transition-colors flex-shrink-0" />
+                    <span className="text-left leading-tight">{label}</span>
+                  </Link>
+                ))}
             </div>
           </div>
 
@@ -294,7 +317,6 @@ export default async function AdminPage() {
                   <alert.Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${alert.iconColor}`} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-[#1E293B] leading-snug">{alert.message}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{alert.time}</p>
                   </div>
                 </div>
               ))}

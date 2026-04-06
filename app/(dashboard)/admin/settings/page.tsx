@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import {
   Settings,
   Bell,
@@ -10,11 +10,45 @@ import {
   KeyRound,
   UserX,
   Info,
+  Loader2,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react"
 
-/* ══════════════════════════════════════════════════════════════════
-   INLINE TOGGLE (no @radix-ui/react-switch installed)
-══════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   TYPES
+═══════════════════════════════════════════════════════════════ */
+
+type PlatformSettings = {
+  platformName: string
+  supportEmail: string
+  supportPhone: string
+  defaultTimezone: string
+  currency: string
+  studentFreeWindow: number
+  lateCancelPenalty: number
+  noShowPenalty: number
+  teacherMaxCancellations: number
+  teacherNoShowRatingHit: number
+  rescheduleWindowHours: number
+  rescheduleLateFeePercent: number
+  rescheduleHardCutoffHours: number
+  cancelFreeWindowHours: number
+  cancelLateFeePercent: number
+  cancelHardCutoffHours: number
+  cancelHardCutoffFeePercent: number
+  maxReschedulesPerClass: number
+  trialClassEnabled: boolean
+  lowBalanceThreshold: number
+  minPasswordLength: number
+  passwordResetExpiry: number
+  maxLoginAttempts: number
+  lockoutDuration: number
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INLINE TOGGLE
+═══════════════════════════════════════════════════════════════ */
 function Toggle({
   checked,
   onChange,
@@ -53,9 +87,9 @@ function Toggle({
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    SHARED PRIMITIVES
-══════════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════════════ */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="text-sm font-semibold text-[#1E3A5F] uppercase tracking-wide mb-4">
@@ -75,17 +109,20 @@ function Label({ htmlFor, children }: { htmlFor?: string; children: React.ReactN
 function TextInput({
   id,
   type = "text",
-  defaultValue,
+  value,
+  onChange,
 }: {
   id?: string
   type?: string
-  defaultValue?: string
+  value: string
+  onChange: (v: string) => void
 }) {
   return (
     <input
       id={id}
       type={type}
-      defaultValue={defaultValue}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:ring-2 focus:ring-[#0D9488]/40 focus:border-[#0D9488] transition"
     />
   )
@@ -93,11 +130,13 @@ function TextInput({
 
 function NumberInputWithSuffix({
   id,
-  defaultValue,
+  value,
+  onChange,
   suffix,
 }: {
   id?: string
-  defaultValue?: string
+  value: number
+  onChange: (v: number) => void
   suffix?: string
 }) {
   return (
@@ -105,7 +144,8 @@ function NumberInputWithSuffix({
       <input
         id={id}
         type="number"
-        defaultValue={defaultValue}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
         className="w-28 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:ring-2 focus:ring-[#0D9488]/40 focus:border-[#0D9488] transition text-center font-semibold"
       />
       {suffix && <span className="text-sm text-gray-500">{suffix}</span>}
@@ -116,16 +156,19 @@ function NumberInputWithSuffix({
 function SelectInput({
   id,
   options,
-  defaultValue,
+  value,
+  onChange,
 }: {
   id?: string
   options: string[]
-  defaultValue?: string
+  value: string
+  onChange: (v: string) => void
 }) {
   return (
     <select
       id={id}
-      defaultValue={defaultValue}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:ring-2 focus:ring-[#0D9488]/40 focus:border-[#0D9488] transition"
     >
       {options.map((o) => (
@@ -148,11 +191,18 @@ function InfoBanner({ children }: { children: React.ReactNode }) {
   )
 }
 
-function SaveButton() {
+function SaveButton({ onClick, saving, saved }: { onClick: () => void; saving: boolean; saved: boolean }) {
   return (
-    <div className="flex justify-end pt-4 border-t border-gray-100 mt-6">
-      <button className="px-5 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm">
-        Save Changes
+    <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 mt-6">
+      {saved && (
+        <span className="flex items-center gap-1 text-sm font-medium text-[#22C55E]">
+          <CheckCircle className="w-4 h-4" /> Saved!
+        </span>
+      )}
+      <button onClick={onClick} disabled={saving}
+        className="px-5 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2">
+        {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+        {saving ? "Saving…" : "Save Changes"}
       </button>
     </div>
   )
@@ -175,45 +225,53 @@ function FormRow({
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    TAB 1 — General
-══════════════════════════════════════════════════════════════════ */
-function TabGeneral() {
+═══════════════════════════════════════════════════════════════ */
+function TabGeneral({ s, set, onSave, saving, saved }: {
+  s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+  onSave: () => void; saving: boolean; saved: boolean
+}) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
       <SectionTitle>Platform Information</SectionTitle>
-      <FormRow label="Platform Name"  htmlFor="g-name">
-        <TextInput id="g-name" defaultValue="Expert Guru" />
+      <FormRow label="Platform Name" htmlFor="g-name">
+        <TextInput id="g-name" value={s.platformName} onChange={(v) => set("platformName", v)} />
       </FormRow>
       <FormRow label="Support Email" htmlFor="g-email">
-        <TextInput id="g-email" type="email" defaultValue="support@expertguru.net" />
+        <TextInput id="g-email" type="email" value={s.supportEmail} onChange={(v) => set("supportEmail", v)} />
       </FormRow>
       <FormRow label="Support Phone" htmlFor="g-phone">
-        <TextInput id="g-phone" type="tel" defaultValue="+1 (800) 555-0199" />
+        <TextInput id="g-phone" type="tel" value={s.supportPhone} onChange={(v) => set("supportPhone", v)} />
       </FormRow>
       <FormRow label="Timezone" htmlFor="g-tz">
         <SelectInput
           id="g-tz"
-          defaultValue="EST (Eastern)"
-          options={["EST (Eastern)", "CST (Central)", "MST (Mountain)", "PST (Pacific)", "IST (India Standard)"]}
+          value={s.defaultTimezone}
+          onChange={(v) => set("defaultTimezone", v)}
+          options={["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Asia/Kolkata"]}
         />
       </FormRow>
       <FormRow label="Currency" htmlFor="g-cur">
         <SelectInput
           id="g-cur"
-          defaultValue="USD ($)"
-          options={["USD ($)", "INR (₹)"]}
+          value={s.currency}
+          onChange={(v) => set("currency", v)}
+          options={["USD", "INR"]}
         />
       </FormRow>
-      <SaveButton />
+      <SaveButton onClick={onSave} saving={saving} saved={saved} />
     </div>
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    TAB 2 — Cancellation Policy
-══════════════════════════════════════════════════════════════════ */
-function TabCancellation() {
+═══════════════════════════════════════════════════════════════ */
+function TabCancellation({ s, set, onSave, saving, saved }: {
+  s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+  onSave: () => void; saving: boolean; saved: boolean
+}) {
   const [allowReschedule, setAllowReschedule] = useState(true)
   const [noShowDeduct, setNoShowDeduct] = useState(true)
 
@@ -225,13 +283,13 @@ function TabCancellation() {
       </InfoBanner>
 
       <FormRow label="Free Cancellation Window" htmlFor="c-fcw">
-        <NumberInputWithSuffix id="c-fcw" defaultValue="24" suffix="hours before class" />
+        <NumberInputWithSuffix id="c-fcw" value={s.cancelFreeWindowHours} onChange={(v) => set("cancelFreeWindowHours", v)} suffix="hours before class" />
       </FormRow>
       <FormRow label="Late Cancellation Penalty" htmlFor="c-lcp">
-        <NumberInputWithSuffix id="c-lcp" defaultValue="50" suffix="% of class value deducted from balance" />
+        <NumberInputWithSuffix id="c-lcp" value={s.cancelLateFeePercent} onChange={(v) => set("cancelLateFeePercent", v)} suffix="% of class value deducted from balance" />
       </FormRow>
       <FormRow label="No-Show Penalty (Student)" htmlFor="c-nsp">
-        <NumberInputWithSuffix id="c-nsp" defaultValue="100" suffix="% of class value deducted from balance" />
+        <NumberInputWithSuffix id="c-nsp" value={s.noShowPenalty} onChange={(v) => set("noShowPenalty", v)} suffix="% of class value deducted from balance" />
       </FormRow>
 
       <div className="border border-gray-100 rounded-lg px-4 mb-4">
@@ -244,20 +302,20 @@ function TabCancellation() {
       </div>
 
       <FormRow label="Reschedule Limit" htmlFor="c-rl">
-        <NumberInputWithSuffix id="c-rl" defaultValue="2" suffix="times per class" />
+        <NumberInputWithSuffix id="c-rl" value={s.maxReschedulesPerClass} onChange={(v) => set("maxReschedulesPerClass", v)} suffix="times per class" />
       </FormRow>
       <FormRow label="Min. Reschedule Notice" htmlFor="c-mrn">
-        <NumberInputWithSuffix id="c-mrn" defaultValue="12" suffix="hours before class" />
+        <NumberInputWithSuffix id="c-mrn" value={s.rescheduleWindowHours} onChange={(v) => set("rescheduleWindowHours", v)} suffix="hours before class" />
       </FormRow>
 
       <Divider />
 
       <SectionTitle>Teacher Cancellation Policy</SectionTitle>
       <FormRow label="Max Cancellations/Month" htmlFor="c-tcm">
-        <NumberInputWithSuffix id="c-tcm" defaultValue="3" />
+        <NumberInputWithSuffix id="c-tcm" value={s.teacherMaxCancellations} onChange={(v) => set("teacherMaxCancellations", v)} />
       </FormRow>
       <FormRow label="No-Show Rating Penalty" htmlFor="c-trp">
-        <NumberInputWithSuffix id="c-trp" defaultValue="0.5" suffix="stars deducted per no-show" />
+        <NumberInputWithSuffix id="c-trp" value={s.teacherNoShowRatingHit} onChange={(v) => set("teacherNoShowRatingHit", v)} suffix="stars deducted per no-show" />
       </FormRow>
 
       <div className="border border-gray-100 rounded-lg px-4 mb-4">
@@ -269,17 +327,18 @@ function TabCancellation() {
         />
       </div>
 
-      <SaveButton />
+      <SaveButton onClick={onSave} saving={saving} saved={saved} />
     </div>
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    TAB 3 — Packages & Pricing
-══════════════════════════════════════════════════════════════════ */
-function TabPackages() {
-  const [trialPolicy, setTrialPolicy] = useState(true)
-
+═══════════════════════════════════════════════════════════════ */
+function TabPackages({ s, set, onSave, saving, saved }: {
+  s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+  onSave: () => void; saving: boolean; saved: boolean
+}) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
       <SectionTitle>Default Package Templates</SectionTitle>
@@ -331,25 +390,25 @@ function TabPackages() {
 
       <div className="border border-gray-100 rounded-lg px-4 mb-4">
         <Toggle
-          checked={trialPolicy}
-          onChange={setTrialPolicy}
+          checked={s.trialClassEnabled}
+          onChange={(v) => set("trialClassEnabled", v)}
           label="Trial Class Policy"
           description="1 free trial per subject per student"
         />
       </div>
 
       <FormRow label="Low Balance Alert" htmlFor="p-lba">
-        <NumberInputWithSuffix id="p-lba" defaultValue="2" suffix="classes remaining triggers alert" />
+        <NumberInputWithSuffix id="p-lba" value={s.lowBalanceThreshold} onChange={(v) => set("lowBalanceThreshold", v)} suffix="classes remaining triggers alert" />
       </FormRow>
 
-      <SaveButton />
+      <SaveButton onClick={onSave} saving={saving} saved={saved} />
     </div>
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    TAB 4 — Notifications
-══════════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════════════ */
 const NOTIF_ITEMS = [
   { key: "classReminder",    label: "Class Reminder",               desc: "Send reminder 1 hour before class" },
   { key: "paymentConfirm",   label: "Payment Confirmation",         desc: "Notify parent when payment is confirmed" },
@@ -361,7 +420,7 @@ const NOTIF_ITEMS = [
   { key: "noShowAlert",      label: "No-Show Alert",                desc: "Notify admin when a teacher no-show occurs" },
 ]
 
-function TabNotifications() {
+function TabNotifications({ onSave, saving, saved }: { onSave: () => void; saving: boolean; saved: boolean }) {
   const [toggles, setToggles] = useState<Record<string, boolean>>(
     Object.fromEntries(NOTIF_ITEMS.map((n) => [n.key, true]))
   )
@@ -369,6 +428,10 @@ function TabNotifications() {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
       <SectionTitle>Notification Preferences</SectionTitle>
+
+      <InfoBanner>
+        Notification preferences are stored locally for now. A future update will persist these to the database.
+      </InfoBanner>
 
       <div className="border border-gray-100 rounded-lg divide-y divide-gray-50 mb-6">
         {NOTIF_ITEMS.map((item) => (
@@ -389,23 +452,27 @@ function TabNotifications() {
       <FormRow label="Email Provider" htmlFor="n-ep">
         <SelectInput
           id="n-ep"
-          defaultValue="SendGrid"
+          value="SendGrid"
+          onChange={() => {}}
           options={["SendGrid", "AWS SES", "SMTP"]}
         />
       </FormRow>
       <FormRow label="Sender Email" htmlFor="n-se">
-        <TextInput id="n-se" type="email" defaultValue="notifications@expertguru.net" />
+        <TextInput id="n-se" type="email" value="notifications@expertguru.net" onChange={() => {}} />
       </FormRow>
 
-      <SaveButton />
+      <SaveButton onClick={onSave} saving={saving} saved={saved} />
     </div>
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    TAB 5 — User Management
-══════════════════════════════════════════════════════════════════ */
-function TabUserManagement() {
+═══════════════════════════════════════════════════════════════ */
+function TabUserManagement({ s, set, onSave, saving, saved }: {
+  s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+  onSave: () => void; saving: boolean; saved: boolean
+}) {
   const [requireSpecial, setRequireSpecial] = useState(true)
 
   return (
@@ -413,7 +480,7 @@ function TabUserManagement() {
       <SectionTitle>Password &amp; Access Settings</SectionTitle>
 
       <FormRow label="Min. Password Length" htmlFor="u-mpl">
-        <NumberInputWithSuffix id="u-mpl" defaultValue="8" />
+        <NumberInputWithSuffix id="u-mpl" value={s.minPasswordLength} onChange={(v) => set("minPasswordLength", v)} />
       </FormRow>
 
       <div className="border border-gray-100 rounded-lg px-4 mb-4">
@@ -426,13 +493,13 @@ function TabUserManagement() {
       </div>
 
       <FormRow label="Reset Link Expiry" htmlFor="u-rle">
-        <NumberInputWithSuffix id="u-rle" defaultValue="24" suffix="hours" />
+        <NumberInputWithSuffix id="u-rle" value={s.passwordResetExpiry} onChange={(v) => set("passwordResetExpiry", v)} suffix="hours" />
       </FormRow>
       <FormRow label="Max Login Attempts" htmlFor="u-mla">
-        <NumberInputWithSuffix id="u-mla" defaultValue="5" suffix="before account lock" />
+        <NumberInputWithSuffix id="u-mla" value={s.maxLoginAttempts} onChange={(v) => set("maxLoginAttempts", v)} suffix="before account lock" />
       </FormRow>
       <FormRow label="Account Lock Duration" htmlFor="u-ald">
-        <NumberInputWithSuffix id="u-ald" defaultValue="30" suffix="minutes" />
+        <NumberInputWithSuffix id="u-ald" value={s.lockoutDuration} onChange={(v) => set("lockoutDuration", v)} suffix="minutes" />
       </FormRow>
 
       <Divider />
@@ -453,29 +520,101 @@ function TabUserManagement() {
         </button>
       </div>
 
-      <SaveButton />
+      <SaveButton onClick={onSave} saving={saving} saved={saved} />
     </div>
   )
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    TAB DEFINITIONS
-══════════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════════════ */
 type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users"
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-  { key: "general",       label: "General",              icon: Settings   },
+  { key: "general",       label: "General",              icon: Settings    },
   { key: "cancellation",  label: "Cancellation Policy",  icon: ShieldCheck },
-  { key: "packages",      label: "Packages & Pricing",   icon: Package    },
-  { key: "notifications", label: "Notifications",        icon: Bell       },
-  { key: "users",         label: "User Management",      icon: Users      },
+  { key: "packages",      label: "Packages & Pricing",   icon: Package     },
+  { key: "notifications", label: "Notifications",        icon: Bell        },
+  { key: "users",         label: "User Management",      icon: Users       },
 ]
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    PAGE
-══════════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("general")
+  const [settings, setSettings] = useState<PlatformSettings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/admin/settings")
+        if (res.ok) {
+          const data = await res.json()
+          setSettings(data.settings)
+        } else {
+          setError("Failed to load settings")
+        }
+      } catch {
+        setError("Network error loading settings")
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  const set = (key: keyof PlatformSettings, value: unknown) => {
+    setSettings((prev) => prev ? { ...prev, [key]: value } : prev)
+    setSaved(false)
+  }
+
+  const handleSave = async () => {
+    if (!settings) return
+    setSaving(true)
+    setSaved(false)
+    setError("")
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tab: activeTab, ...settings }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 3000)
+      } else {
+        setError(data.error || "Save failed")
+      }
+    } catch {
+      setError("Network error")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-[#0D9488]" />
+        <span className="ml-3 text-gray-500 text-sm">Loading settings…</span>
+      </div>
+    )
+  }
+
+  if (!settings) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <AlertCircle className="w-10 h-10 text-red-400" />
+        <p className="text-gray-500 text-sm">{error || "Could not load settings"}</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -487,6 +626,12 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {error && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span>
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
         <div className="flex min-w-max">
@@ -496,7 +641,7 @@ export default function SettingsPage() {
             return (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => { setActiveTab(tab.key); setSaved(false); setError("") }}
                 className={`inline-flex items-center gap-2 px-5 py-4 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
                   isActive
                     ? "border-[#0D9488] text-[#0D9488] bg-teal-50/50"
@@ -512,11 +657,11 @@ export default function SettingsPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "general"       && <TabGeneral />}
-      {activeTab === "cancellation"  && <TabCancellation />}
-      {activeTab === "packages"      && <TabPackages />}
-      {activeTab === "notifications" && <TabNotifications />}
-      {activeTab === "users"         && <TabUserManagement />}
+      {activeTab === "general"       && <TabGeneral s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "cancellation"  && <TabCancellation s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "packages"      && <TabPackages s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "notifications" && <TabNotifications onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "users"         && <TabUserManagement s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
     </div>
   )
 }

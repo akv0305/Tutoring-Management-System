@@ -279,3 +279,83 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
+
+// PATCH /api/teachers — admin can update teacher profile
+export async function PATCH(req: NextRequest) {
+  try {
+    const session = await getSession()
+    if (!session?.user || session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Admin only" }, { status: 403 })
+    }
+
+    const body = await req.json()
+    const { id, action, ...updates } = body
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Teacher profile ID is required." },
+        { status: 400 }
+      )
+    }
+
+    const teacher = await prisma.teacherProfile.findUnique({
+      where: { id },
+    })
+
+    if (!teacher) {
+      return NextResponse.json({ error: "Teacher not found" }, { status: 404 })
+    }
+
+    // Action: toggle status
+    if (action === "toggle_status") {
+      const newStatus = teacher.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"
+      const updated = await prisma.teacherProfile.update({
+        where: { id },
+        data: { status: newStatus },
+      })
+      return NextResponse.json({ teacher: updated })
+    }
+
+    // Action: update compensation rate
+    if (action === "update_rate") {
+      const { compensationRate } = updates
+      if (compensationRate === undefined || compensationRate === null || Number(compensationRate) < 0) {
+        return NextResponse.json(
+          { error: "Valid compensation rate is required." },
+          { status: 400 }
+        )
+      }
+      const updated = await prisma.teacherProfile.update({
+        where: { id },
+        data: { compensationRate: Number(compensationRate) },
+      })
+      return NextResponse.json({ teacher: updated })
+    }
+
+    // Generic update (status, qualification, bio, etc.)
+    const allowedFields = ["status", "qualification", "bio", "experience", "compensationRate", "studentFacingRate", "timezone"]
+    const data: Record<string, unknown> = {}
+    for (const key of allowedFields) {
+      if (updates[key] !== undefined) {
+        data[key] = updates[key]
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json(
+        { error: "No valid fields to update." },
+        { status: 400 }
+      )
+    }
+
+    const updated = await prisma.teacherProfile.update({
+      where: { id },
+      data,
+    })
+
+    return NextResponse.json({ teacher: updated })
+  } catch (error) {
+    console.error("PATCH /api/teachers error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
