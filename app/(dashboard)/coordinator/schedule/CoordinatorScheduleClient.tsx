@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { ChevronLeft, ChevronRight, Plus, Users } from "lucide-react"
 import { BookClassModal } from "@/components/modals/BookClassModal"
+import { useRouter } from "next/navigation"
 
 type ClassBlock = {
   id: string
@@ -58,12 +59,14 @@ export function CoordinatorScheduleClient({
   monthYear,
   legend,
   hasTrial,
+  weekStartISO,
 }: {
   classBlocks: ClassBlock[]
   dates: string[]
   monthYear: string
   legend: LegendItem[]
   hasTrial: boolean
+  weekStartISO: string
 }) {
   const [view, setView] = useState<"day" | "week" | "month">("week")
   const [showBookModal, setShowBookModal] = useState(false)
@@ -75,6 +78,32 @@ export function CoordinatorScheduleClient({
 
   const todayJs = new Date().getDay()
   const todayIdx = todayJs === 0 ? 6 : todayJs - 1
+
+  const router = useRouter()
+
+  function navigateWeek(offset: number) {
+    const [y, m, d] = weekStartISO.split("-").map(Number)
+    const date = new Date(Date.UTC(y, m - 1, d + offset * 7))
+    const iso = date.toISOString().split("T")[0]
+    router.push(`/coordinator/schedule?week=${iso}`)
+  }
+
+  function goToday() {
+    router.push("/coordinator/schedule")
+  }
+
+  // Check if we're on the current week
+  const todayMonday = (() => {
+    const now = new Date()
+    const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+    const [y, m, d] = todayISO.split("-").map(Number)
+    const date = new Date(Date.UTC(y, m - 1, d))
+    const day = date.getUTCDay()
+    const diff = day === 0 ? -6 : 1 - day
+    date.setUTCDate(date.getUTCDate() + diff)
+    return date.toISOString().split("T")[0]
+  })()
+  const isCurrentWeek = weekStartISO === todayMonday
 
   // Fetch booking dropdown data when modal opens
   useEffect(() => {
@@ -132,17 +161,17 @@ export function CoordinatorScheduleClient({
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <div className="flex items-center gap-3">
-              <button className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
+              <button onClick={() => navigateWeek(-1)} className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
                 <ChevronLeft className="w-4 h-4 text-gray-600" />
               </button>
               <h2 className="text-base font-semibold text-[#1E293B]">
                 Week of Mon, {monthYear.split(" ")[0]} {dates[0]} – {dates[6]}
               </h2>
-              <button className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
+              <button onClick={() => navigateWeek(1)} className="p-1.5 rounded-md hover:bg-gray-100 transition-colors">
                 <ChevronRight className="w-4 h-4 text-gray-600" />
               </button>
             </div>
-            <button className="text-sm text-[#0D9488] font-medium hover:underline">Today</button>
+            <button onClick={goToday} disabled={isCurrentWeek} className={`text-sm font-medium hover:underline transition-colors ${isCurrentWeek ? "text-gray-300 cursor-default" : "text-[#0D9488]"}`}>Today</button>
           </div>
 
           <div className="overflow-x-auto">

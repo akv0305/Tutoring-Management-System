@@ -16,7 +16,27 @@ const SUBJECT_COLORS: Record<string, string> = {
 }
 const DEFAULT_COLOR = "bg-gray-100 border-gray-400 text-gray-800"
 
-export default async function SchedulePage() {
+/** Parse "YYYY-MM-DD" into year/month/day integers — no timezone issues */
+function parseDateParts(iso: string): [number, number, number] {
+  const [y, m, d] = iso.split("-").map(Number)
+  return [y, m, d]
+}
+
+/** Get Monday of the week for a given YYYY-MM-DD string, returns YYYY-MM-DD */
+function getMondayISO(iso: string): string {
+  const [y, m, d] = parseDateParts(iso)
+  const date = new Date(Date.UTC(y, m - 1, d))
+  const day = date.getUTCDay() // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day
+  date.setUTCDate(date.getUTCDate() + diff)
+  return date.toISOString().split("T")[0]
+}
+
+export default async function SchedulePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ week?: string }>
+}) {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "COORDINATOR") redirect("/unauthorized")
 
@@ -25,18 +45,22 @@ export default async function SchedulePage() {
   })
   if (!coordinator) redirect("/unauthorized")
 
-  // Get current week boundaries (Mon-Sun)
-  const now = new Date()
-  const dayOfWeek = now.getDay() // 0=Sun, 1=Mon...
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-  const weekStart = new Date(now)
-  weekStart.setDate(now.getDate() + mondayOffset)
-  weekStart.setHours(0, 0, 0, 0)
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekStart.getDate() + 7)
-  weekEnd.setHours(0, 0, 0, 0)
+  // Determine which week to show
+  const params = await searchParams
+  let mondayISO: string
+  if (params.week && /^\d{4}-\d{2}-\d{2}$/.test(params.week)) {
+    mondayISO = getMondayISO(params.week)
+  } else {
+    const now = new Date()
+    const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+    mondayISO = getMondayISO(todayISO)
+  }
 
-  // Fetch classes for coordinator's students this week
+  // Build weekStart / weekEnd as proper Date objects for Prisma query
+  const [wy, wm, wd] = parseDateParts(mondayISO)
+  const weekStart = new Date(wy, wm - 1, wd, 0, 0, 0, 0)
+  const weekEnd = new Date(wy, wm - 1, wd + 7, 0, 0, 0, 0)
+
   const classes = await prisma.class.findMany({
     where: {
       student: { coordinatorId: coordinator.id },
@@ -52,10 +76,10 @@ export default async function SchedulePage() {
 
   const classBlocks = classes.map((c) => {
     const dt = new Date(c.scheduledAt)
-    const jsDay = dt.getDay() // 0=Sun
-    const dayIndex = jsDay === 0 ? 6 : jsDay - 1 // 0=Mon...6=Sun
+    const jsDay = dt.getDay()
+    const dayIndex = jsDay === 0 ? 6 : jsDay - 1
     const hour = dt.getHours()
-    const startHour = hour - 8 // grid starts at 8 AM
+    const startHour = hour - 8
 
     return {
       id: c.id,
@@ -71,19 +95,16 @@ export default async function SchedulePage() {
     }
   })
 
-  // Build dates array for the week header
   const dates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart)
-    d.setDate(weekStart.getDate() + i)
+    const d = new Date(wy, wm - 1, wd + i)
     return d.getDate().toString()
   })
 
-  const monthYear = weekStart.toLocaleDateString("en-US", {
+  const monthYear = new Date(wy, wm - 1, wd).toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   })
 
-  // Build legend from actual subjects used
   const usedSubjects = [...new Set(classBlocks.map((b) => b.subject))]
   const legend = usedSubjects.map((name) => ({
     label: name,
@@ -97,6 +118,7 @@ export default async function SchedulePage() {
       monthYear={monthYear}
       legend={legend}
       hasTrial={classBlocks.some((b) => b.isTrial)}
+      weekStartISO={mondayISO}
     />
   )
 }

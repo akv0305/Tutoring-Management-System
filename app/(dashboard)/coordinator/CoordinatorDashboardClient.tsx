@@ -80,9 +80,12 @@ function KanbanCol({
               {item.rating && (
                 <p className="text-xs font-semibold text-amber-500 mt-0.5">{item.rating}</p>
               )}
-              <button className="mt-2 w-full text-xs font-medium px-2 py-1.5 rounded-md border border-[#0D9488] text-[#0D9488] hover:bg-teal-50 transition-colors">
+              <Link
+                href="/coordinator/onboarding"
+                className="mt-2 w-full text-xs font-medium px-2 py-1.5 rounded-md border border-[#0D9488] text-[#0D9488] hover:bg-teal-50 transition-colors block text-center"
+              >
                 {btnLabel}
-              </button>
+              </Link>
             </div>
           ))
         )}
