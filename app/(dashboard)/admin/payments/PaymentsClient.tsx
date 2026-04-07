@@ -16,6 +16,7 @@ type Payment = {
   status: string
   date: string
   confirmedBy: string | null
+  refundedAmount: number
 }
 
 type KPIs = {
@@ -142,7 +143,16 @@ export function PaymentsClient({
       key: "status",
       label: "Status",
       sortable: true,
-      render: (r: Payment) => <StatusBadge status={r.status} size="sm" />,
+      render: (r: Payment) => (
+        <div className="flex flex-col gap-0.5">
+          <StatusBadge status={r.status} size="sm" />
+          {r.status === "refunded" && r.refundedAmount > 0 && r.refundedAmount < r.amountNum && (
+            <span className="text-[10px] text-gray-400">
+              Partial: ${r.refundedAmount.toFixed(2)} of {r.amount}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: "date",

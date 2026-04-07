@@ -13,7 +13,7 @@ import {
   Wallet,
   RotateCcw,
   BarChart3,
-  Settings,
+  Settings, Bell,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -54,6 +54,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "Payouts",         icon: Wallet,          href: "/admin/payouts" },
     { label: "Refund Requests", icon: RotateCcw,       href: "/admin/refunds",       ...(pendingRefunds > 0 && { badge: pendingRefunds }) },
     { label: "Reports",         icon: BarChart3,       href: "/admin/reports" },
+    { label: "Notifications",    icon: Bell,       href: "/admin/notifications" },
     { label: "Settings",        icon: Settings,        href: "/admin/settings" },
   ]
 
@@ -75,6 +76,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <TopBar
           title="Admin Dashboard"
           userName={userName}
+          notificationsHref="/admin/notifications"
         />
         <main className="flex-1 overflow-y-auto p-6">
           {children}

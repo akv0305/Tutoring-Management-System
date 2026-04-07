@@ -29,7 +29,7 @@ const TYPE_CONFIG: Record<
   system: { icon: Settings, bg: "bg-gray-100", color: "text-gray-600" },
 }
 
-export function NotificationDropdown() {
+export function NotificationDropdown({ viewAllHref = "/parent/notifications" }: { viewAllHref?: string }) {
   const [isOpen, setIsOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -240,7 +240,7 @@ export function NotificationDropdown() {
           {/* Footer */}
           <div className="border-t border-gray-100 px-4 py-2.5">
             <a
-              href="/parent/notifications"
+              href={viewAllHref}
               className="block w-full text-xs text-center text-[#1E3A5F] hover:text-[#162d4a] font-medium transition-colors"
             >
               View All Notifications →

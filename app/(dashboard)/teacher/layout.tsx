@@ -52,6 +52,7 @@ export default function TeacherLayout({
         <TopBar
           title="Teacher Dashboard"
           userName={userName}
+          notificationsHref="/teacher/notifications"
         />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
