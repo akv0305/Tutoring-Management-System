@@ -6,11 +6,10 @@ import {
   Calendar,
   UserPlus,
   CreditCard,
-  CheckCircle,
-  XCircle,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import Link from "next/link"
 
 type PipelineItem = {
   name: string
@@ -117,12 +116,12 @@ export function CoordinatorDashboardClient({ data }: { data: DashboardData }) {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
-          <button className="px-4 py-2 rounded-lg bg-white text-[#1E3A5F] text-sm font-semibold hover:bg-gray-100 transition-colors shadow-sm">
-            View Onboarding Queue
-          </button>
-          <button className="px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
-            Confirm Payments
-          </button>
+        <Link href="/coordinator/onboarding" className="px-4 py-2 rounded-lg bg-white text-[#1E3A5F] text-sm font-semibold hover:bg-gray-100 transition-colors shadow-sm">
+          View Onboarding Queue
+        </Link>
+        <Link href="/coordinator/payments" className="px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
+          Confirm Payments
+        </Link>
         </div>
       </div>
 
@@ -172,9 +171,9 @@ export function CoordinatorDashboardClient({ data }: { data: DashboardData }) {
               <h2 className="text-base font-semibold text-[#1E293B]">
                 Today&apos;s Classes — {today}
               </h2>
-              <span className="text-sm text-[#0D9488] font-medium cursor-pointer hover:underline">
+              <Link href="/coordinator/schedule" className="text-sm text-[#0D9488] font-medium hover:underline">
                 View Full Calendar →
-              </span>
+              </Link>
             </div>
             <div className="flex flex-col gap-3">
               {data.todayClasses.length === 0 ? (
@@ -279,16 +278,7 @@ export function CoordinatorDashboardClient({ data }: { data: DashboardData }) {
                         {p.amount}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2 mt-3">
-                      <button className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md bg-green-50 border border-green-200 text-green-700 text-xs font-medium hover:bg-green-100 transition-colors">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        Confirm
-                      </button>
-                      <button className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md bg-red-50 border border-red-200 text-red-600 text-xs font-medium hover:bg-red-100 transition-colors">
-                        <XCircle className="w-3.5 h-3.5" />
-                        Reject
-                      </button>
-                    </div>
+    
                   </div>
                 ))
               )}
