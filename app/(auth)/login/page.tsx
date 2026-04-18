@@ -4,7 +4,7 @@ import React, { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { signIn } from "next-auth/react"
-import { Eye, EyeOff, GraduationCap, Loader2 } from "lucide-react"
+import { Eye, EyeOff, GraduationCap, Loader2, Mail } from "lucide-react"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -13,9 +13,27 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [successMessage, setSuccessMessage] = useState("")
+  const [needsVerification, setNeedsVerification] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [resendDone, setResendDone] = useState(false)
   
   React.useEffect(() => {
-    if (window.location.search.includes("error")) {
+    const params = new URLSearchParams(window.location.search)
+    const verified = params.get("verified")
+    const urlError = params.get("error")
+
+    if (verified === "true") {
+      setSuccessMessage("Email verified successfully! You can now sign in.")
+    } else if (verified === "already") {
+      setSuccessMessage("Your email is already verified. Please sign in.")
+    } else if (urlError === "invalid-token") {
+      setError("This verification link is invalid or has already been used.")
+    } else if (urlError === "verification-failed") {
+      setError("Email verification failed. Please try again or contact support.")
+    }
+
+    if (params.toString()) {
       window.history.replaceState({}, "", "/login")
     }
   }, [])
@@ -23,6 +41,9 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError("")
+    setSuccessMessage("")
+    setNeedsVerification(false)
+    setResendDone(false)
     setIsLoading(true)
 
     try {
@@ -33,6 +54,14 @@ export default function LoginPage() {
       })
 
       if (result?.error) {
+        // Detect verification error from auth response
+        if (result.error.toLowerCase().includes("verify your email")) {
+          setNeedsVerification(true)
+          setError(result.error)
+          setIsLoading(false)
+          return
+        }
+
         // Handle undefined or CSRF errors gracefully
         if (result.error === "undefined" || !result.error || result.error === "CredentialsSignin") {
           // Retry once — CSRF token may have been stale
@@ -98,6 +127,29 @@ export default function LoginPage() {
     }
   }
 
+  async function resendVerification() {
+    setResendLoading(true)
+    setResendDone(false)
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.toLowerCase().trim() }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setResendDone(true)
+        setError("")
+        setSuccessMessage(data.message || "Verification email sent! Please check your inbox.")
+        setNeedsVerification(false)
+      }
+    } catch {
+      setError("Failed to resend verification email. Please try again.")
+    } finally {
+      setResendLoading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen flex">
       {/* Left panel — gradient */}
@@ -109,8 +161,9 @@ export default function LoginPage() {
       >
         <div>
           <div className="flex items-center gap-2.5 mb-16">
-            <GraduationCap className="w-8 h-8 text-[#F59E0B]" />
-            <span className="text-white font-bold text-xl">Expert Guru</span>
+            {/* <GraduationCap className="w-8 h-8 text-[#F59E0B]" />
+            <span className="text-white font-bold text-xl">Expert Guru</span> */}
+            <img src="/images/eglogo_white.png" alt="Expert Guru" className="h-20 w-auto mb-2" />
           </div>
           <h1 className="text-4xl font-bold text-white leading-tight mb-4">
             Empowering students with
@@ -154,12 +207,31 @@ export default function LoginPage() {
             Sign in to continue to your dashboard
           </p>
 
+          {/* Success message */}
+          {successMessage && (
+            <div className="mb-6 p-3 bg-green-50 border border-green-200 rounded-xl">
+              <p className="text-sm text-green-600 font-medium">{successMessage}</p>
+            </div>
+          )}
+
           {/* Error message */}
           {error && (
             <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-xl">
               <p className="text-sm text-red-600 font-medium">{error}</p>
+              {needsVerification && (
+                <button
+                  type="button"
+                  onClick={resendVerification}
+                  disabled={resendLoading}
+                  className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-[#0D9488] hover:text-[#0b7a70] transition-colors disabled:opacity-60"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  {resendLoading ? "Sending..." : "Resend verification email"}
+                </button>
+              )}
             </div>
           )}
+
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email */}
@@ -265,7 +337,7 @@ export default function LoginPage() {
           </p>
 
           {/* Dev helper — remove in production */}
-          <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          {/* <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-xl">
             <p className="text-xs font-semibold text-amber-700 mb-2">
               🔑 Test Accounts (Dev Only)
             </p>
@@ -276,7 +348,7 @@ export default function LoginPage() {
               <p>Parent: jane.smith@email.com</p>
               <p className="font-medium mt-1">Password: Password123!</p>
             </div>
-          </div>
+          </div>  */}
         </div>
       </div>
     </div>

@@ -26,8 +26,16 @@ export const authOptions: NextAuthOptions = {
           throw new Error("No account found with this email")
         }
 
-        if (user.status !== "ACTIVE") {
+        if (user.status === "SUSPENDED") {
           throw new Error("Your account has been suspended. Contact support.")
+        }
+
+        if (user.status === "INACTIVE" && !user.emailVerified) {
+          throw new Error("Please verify your email before signing in. Check your inbox for the verification link.")
+        }
+
+        if (user.status === "INACTIVE" && user.emailVerified) {
+          throw new Error("Your account is currently inactive. Contact support.")
         }
 
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash)

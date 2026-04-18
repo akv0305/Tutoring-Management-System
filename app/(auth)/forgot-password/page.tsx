@@ -62,12 +62,13 @@ export default function ForgotPasswordPage() {
         href="/"
         className="flex items-center gap-2 mb-10 group"
       >
-        <div className="w-9 h-9 rounded-xl bg-[#1E3A5F]/10 flex items-center justify-center group-hover:bg-[#1E3A5F]/20 transition-colors">
+        {/* <div className="w-9 h-9 rounded-xl bg-[#1E3A5F]/10 flex items-center justify-center group-hover:bg-[#1E3A5F]/20 transition-colors">
           <GraduationCap className="w-5 h-5 text-[#0D9488]" />
         </div>
         <span className="text-xl font-bold text-[#1E3A5F] tracking-tight">
           Expert Guru
-        </span>
+        </span> */}
+        <img src="/images/eglogo.png" alt="Expert Guru" className="h-20 w-auto mb-2" />
       </a>
 
       {/* Main card */}

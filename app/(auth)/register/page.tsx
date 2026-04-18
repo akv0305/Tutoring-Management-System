@@ -21,7 +21,6 @@ import {
 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { signIn } from "next-auth/react"
 import { Loader2 } from "lucide-react"
 
 /* ─────────────────────────────────────────────
@@ -741,20 +740,20 @@ function Step3({
 /* ─────────────────────────────────────────────
    Success View
 ───────────────────────────────────────────── */
-function SuccessView({ name, onGoToLogin }: { name: string; onGoToLogin: () => void }) {
+function SuccessView({ name }: { name: string }) {
   return (
     <div className="flex flex-col items-center text-center py-8 gap-4">
-      <div className="w-20 h-20 rounded-full bg-[#22C55E]/10 flex items-center justify-center mb-2">
-        <CheckCircle2 className="w-10 h-10 text-[#22C55E]" />
+      <div className="w-20 h-20 rounded-full bg-[#0D9488]/10 flex items-center justify-center mb-2">
+        <Mail className="w-10 h-10 text-[#0D9488]" />
       </div>
       <div>
         <h2 className="text-xl font-extrabold text-[#1E293B] mb-1">
-          Welcome to Expert Guru!
+          Check Your Email
         </h2>
         <p className="text-sm text-gray-500 max-w-xs mx-auto leading-relaxed">
-          Hi <span className="font-semibold text-[#1E293B]">{name || "there"}</span>! Your
-          account has been created successfully. A coordinator will contact you within 24 hours to
-          schedule your free trial session.
+          Hi <span className="font-semibold text-[#1E293B]">{name || "there"}</span>! We&apos;ve
+          sent a verification link to your email address. Please click the link to activate your
+          account.
         </p>
       </div>
 
@@ -763,10 +762,10 @@ function SuccessView({ name, onGoToLogin }: { name: string; onGoToLogin: () => v
           What happens next?
         </p>
         {[
-          "We verify your account details",
-          "A coordinator reviews your child's needs",
-          "You receive tutor matches within 24h",
-          "Schedule your first free trial class",
+          "Open the verification email in your inbox",
+          "Click the verification link to activate your account",
+          "Log in and a coordinator will be in touch within 24h",
+          "Schedule your child's first free trial class",
         ].map((item, i) => (
           <div key={item} className="flex items-start gap-2.5 mb-2 last:mb-0">
             <div className="w-5 h-5 rounded-full bg-[#0D9488] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -777,16 +776,28 @@ function SuccessView({ name, onGoToLogin }: { name: string; onGoToLogin: () => v
         ))}
       </div>
 
-      <button
-        onClick={onGoToLogin}
+      <p className="text-xs text-gray-400 leading-relaxed">
+        Didn&apos;t receive the email? Check your spam folder or{" "}
+        <a
+          href="/login"
+          className="font-semibold text-[#0D9488] hover:text-[#0b7a70] transition-colors"
+        >
+          try logging in
+        </a>{" "}
+        to resend.
+      </p>
+
+      <a
+        href="/login"
         className="w-full mt-2 h-12 rounded-xl bg-[#0D9488] text-white font-bold text-sm hover:bg-[#0b7a70] transition-all flex items-center justify-center gap-2"
       >
-        Go to Dashboard
+        Go to Login
         <ArrowRight className="w-4 h-4" />
-      </button>
+      </a>
     </div>
   )
 }
+
 
 
 /* ─────────────────────────────────────────────
@@ -866,21 +877,6 @@ export default function RegisterPage() {
     }
   }
 
-  async function handleGoToLogin() {
-    // Try auto sign-in, then redirect
-    const result = await signIn("credentials", {
-      email: step1.email.toLowerCase().trim(),
-      password: step1.password,
-      redirect: false,
-    })
-
-    if (result?.ok) {
-      window.location.href = "/parent"
-    } else {
-      window.location.href = "/login"
-    }
-  }
-
   const stepTitles: Record<number, { heading: string; sub: string }> = {
     1: {
       heading: "Create Your Account",
@@ -922,7 +918,7 @@ export default function RegisterPage() {
 
         <div className="w-full max-w-md">
           {submitted ? (
-            <SuccessView name={step1.fullName} onGoToLogin={handleGoToLogin} />
+            <SuccessView name={step1.fullName} />
           ) : (
             <>
               {/* Page heading */}

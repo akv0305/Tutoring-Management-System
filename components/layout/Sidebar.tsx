@@ -62,7 +62,8 @@ export function Sidebar({ role, navItems, userName, userEmail }: SidebarProps) {
           <div className="w-8 h-8 rounded-lg bg-[#1E3A5F] flex items-center justify-center flex-shrink-0">
             <span className="text-white font-black text-sm">EG</span>
           </div>
-          <span className="text-white font-bold text-lg tracking-tight">Expert Guru</span>
+          {/* <span className="text-white font-bold text-lg tracking-tight">Expert Guru</span> */}
+          <img src="/images/eglogo_white.png" alt="Expert Guru" className="h-8 w-auto" />
         </div>
         <span
           className={cn(

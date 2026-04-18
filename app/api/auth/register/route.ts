@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
+import crypto from "crypto"
 import { prisma } from "@/lib/prisma"
+import { sendEmail } from "@/lib/email"
+import VerifyEmail from "@/emails/verify-email"
 
 export async function POST(req: NextRequest) {
   try {
@@ -73,17 +76,20 @@ export async function POST(req: NextRequest) {
 
     // ─── Create everything in a transaction ───
     const hash = await bcrypt.hash(password, 12)
+    const emailVerifyToken = crypto.randomBytes(32).toString("hex")
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Create parent user
+      // 1. Create parent user (INACTIVE until email is verified)
       const user = await tx.user.create({
         data: {
           email: parentEmail.toLowerCase().trim(),
           passwordHash: hash,
           role: "PARENT",
+          status: "INACTIVE",
           firstName: parentFirstName.trim(),
           lastName: parentLastName.trim(),
           phone: parentPhone?.trim() || null,
+          emailVerifyToken,
         },
       })
 
@@ -141,9 +147,23 @@ export async function POST(req: NextRequest) {
       return { user, student }
     })
 
+    // ─── Send verification email (non-blocking) ───
+    const verifyUrl = `${process.env.NEXTAUTH_URL}/api/auth/verify-email?token=${emailVerifyToken}`
+
+    sendEmail({
+      to: parentEmail.toLowerCase().trim(),
+      subject: "Verify your email — Expert Guru",
+      react: VerifyEmail({
+        parentName: parentFirstName.trim(),
+        verifyUrl,
+      }),
+    }).catch((err) => {
+      console.error("[Register] Failed to send verification email:", err)
+    })
+
     return NextResponse.json(
       {
-        message: "Account created successfully!",
+        message: "Account created! Please check your email to verify your account.",
         userId: result.user.id,
         studentId: result.student.id,
       },
