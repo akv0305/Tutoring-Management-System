@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
+import { sendEmail } from "@/lib/email"
+import PayoutPaid from "@/emails/payout-paid"
+
 
 // GET /api/payouts
 export async function GET(req: NextRequest) {
@@ -259,9 +262,42 @@ export async function PATCH(req: NextRequest) {
       where: { id },
       data: updateData,
       include: {
-        teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
+        teacher: {
+          include: {
+            user: {
+              select: { firstName: true, lastName: true, email: true },
+            },
+          },
+        },
       },
     })
+
+    // Send payout paid email to teacher
+    if (action === "pay" && updated.teacher?.user?.email) {
+      const appUrl = process.env.NEXTAUTH_URL || ""
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+      const period = `${months[updated.periodMonth - 1]} ${updated.periodYear}`
+      const paidFormatted = new Date().toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+
+      sendEmail({
+        to: updated.teacher.user.email,
+        subject: `Payout processed — ${period} — Expert Guru`,
+        react: PayoutPaid({
+          teacherName: updated.teacher.user.firstName,
+          period,
+          netAmount: Number(updated.netAmount).toLocaleString(),
+          paidAt: paidFormatted,
+          dashboardUrl: `${appUrl}/teacher`,
+        }),
+      }).catch((err) =>
+        console.error("[Payout Paid] Teacher email failed:", err)
+      )
+    }    
 
     return NextResponse.json({
       message: `Payout ${action} successful`,

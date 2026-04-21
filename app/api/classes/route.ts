@@ -3,6 +3,14 @@ import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { evaluateReschedulePolicy, evaluateCancelPolicy } from "@/lib/policyEngine"
+import { sendEmail } from "@/lib/email"
+import BookingConfirmation from "@/emails/booking-confirmation"
+import TeacherNewClass from "@/emails/teacher-new-class"
+import ClassCancelled from "@/emails/class-cancelled"
+import ClassRescheduled from "@/emails/class-rescheduled"
+import MeetingLinkShared from "@/emails/meeting-link-shared"
+import ClassCompleted from "@/emails/class-completed"
+
 
 // Generate a unique order reference like "ORD-20260402-A1B2C3"
 function generateOrderRef(): string {
@@ -201,7 +209,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify student exists
-    const student = await prisma.student.findUnique({ where: { id: studentId } })
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        parent: {
+          include: { user: { select: { firstName: true, email: true } } },
+        },
+      },
+    })
     if (!student) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 })
     }
@@ -209,11 +224,20 @@ export async function POST(req: NextRequest) {
     // Verify teacher exists (need rate for amount calculation)
     const teacher = await prisma.teacherProfile.findUnique({
       where: { id: teacherId },
-      include: { user: { select: { firstName: true, lastName: true } } },
+      include: { user: { select: { firstName: true, lastName: true, email: true } } },
     })
     if (!teacher) {
       return NextResponse.json({ error: "Teacher not found" }, { status: 404 })
     }
+
+    // Fetch subject name for emails
+    const subject = await prisma.subject.findUnique({
+      where: { id: subjectId },
+      select: { name: true },
+    })
+    if (!subject) {
+      return NextResponse.json({ error: "Subject not found" }, { status: 404 })
+    }    
 
     const classDuration = duration || 60
     const isTrialClass = isTrial || false
@@ -266,6 +290,73 @@ export async function POST(req: NextRequest) {
           })
         )
       )
+
+      // Mark trial as taken for this student+subject
+      try {
+        const existingLink = await prisma.studentSubject.findFirst({
+          where: { studentId, subjectId },
+        })
+        if (existingLink) {
+          await prisma.studentSubject.update({
+            where: { id: existingLink.id },
+            data: { trialTaken: true },
+          })
+        } else {
+          // No StudentSubject record exists — create one
+          await prisma.studentSubject.create({
+            data: {
+              studentId,
+              subjectId,
+              trialTaken: true,
+            },
+          })
+        }
+      } catch (trialErr) {
+        console.error("[Booking] Failed to update trialTaken:", trialErr)
+      }
+
+      // ─── Send booking emails (non-blocking) ───
+      const appUrl = process.env.NEXTAUTH_URL || ""
+      const teacherFullName = `${teacher.user.firstName} ${teacher.user.lastName}`
+      const studentFullName = `${student.firstName} ${student.lastName}`
+      const formattedSlots = slotList.map((slot) => {
+        const d = new Date(slot)
+        return `${d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+      })
+
+      if (student.parent?.user?.email) {
+        sendEmail({
+          to: student.parent.user.email,
+          subject: `Trial class booked for ${student.firstName} — Expert Guru`,
+          react: BookingConfirmation({
+            parentName: student.parent.user.firstName,
+            studentName: studentFullName,
+            teacherName: teacherFullName,
+            subject: subject.name,
+            scheduledSlots: formattedSlots,
+            duration: classDuration,
+            totalClasses: trialClasses.length,
+            isTrial: true,
+            dashboardUrl: `${appUrl}/parent`,
+          }),
+        }).catch((err) => console.error("[Booking] Parent email failed:", err))
+      }
+
+      sendEmail({
+        to: teacher.user.email,
+        subject: `New trial class assigned — ${studentFullName} — Expert Guru`,
+        react: TeacherNewClass({
+          teacherName: teacher.user.firstName,
+          studentName: studentFullName,
+          studentGrade: student.grade,
+          subject: subject.name,
+          scheduledSlots: formattedSlots,
+          duration: classDuration,
+          totalClasses: trialClasses.length,
+          isTrial: true,
+          dashboardUrl: `${appUrl}/teacher`,
+        }),
+      }).catch((err) => console.error("[Booking] Teacher email failed:", err))      
 
       return NextResponse.json(
         {
@@ -376,6 +467,51 @@ export async function POST(req: NextRequest) {
     } catch (notifyError) {
       console.error("Failed to send booking notifications:", notifyError)
     }
+    
+    // ─── Send booking emails (non-blocking) ───
+    const appUrl = process.env.NEXTAUTH_URL || ""
+    const teacherFullName = `${teacher.user.firstName} ${teacher.user.lastName}`
+    const studentFullName = `${student.firstName} ${student.lastName}`
+    const formattedSlots = slotList.map((slot) => {
+      const d = new Date(slot)
+      return `${d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+    })
+
+    if (student.parent?.user?.email) {
+      sendEmail({
+        to: student.parent.user.email,
+        subject: `Booking confirmed for ${student.firstName} — Expert Guru`,
+        react: BookingConfirmation({
+          parentName: student.parent.user.firstName,
+          studentName: studentFullName,
+          teacherName: teacherFullName,
+          subject: subject.name,
+          scheduledSlots: formattedSlots,
+          duration: classDuration,
+          totalClasses: slotList.length,
+          isTrial: false,
+          orderRef: result.bookingOrder.orderRef,
+          totalAmount: `$${totalAmount.toFixed(2)}`,
+          dashboardUrl: `${appUrl}/parent`,
+        }),
+      }).catch((err) => console.error("[Booking] Parent email failed:", err))
+    }
+
+    sendEmail({
+      to: teacher.user.email,
+      subject: `New classes assigned — ${studentFullName} — Expert Guru`,
+      react: TeacherNewClass({
+        teacherName: teacher.user.firstName,
+        studentName: studentFullName,
+        studentGrade: student.grade,
+        subject: subject.name,
+        scheduledSlots: formattedSlots,
+        duration: classDuration,
+        totalClasses: slotList.length,
+        isTrial: false,
+        dashboardUrl: `${appUrl}/teacher`,
+      }),
+    }).catch((err) => console.error("[Booking] Teacher email failed:", err))    
 
     return NextResponse.json(
       {
@@ -419,9 +555,14 @@ export async function PATCH(req: NextRequest) {
     const classRecord = await prisma.class.findUnique({
       where: { id: classId },
       include: {
-        student: { select: { id: true, firstName: true, lastName: true, parentId: true } },
+        student: {
+          select: {
+            id: true, firstName: true, lastName: true, parentId: true,
+            parent: { select: { user: { select: { firstName: true, email: true } } } },
+          },
+        },
         teacher: {
-          include: { user: { select: { id: true, firstName: true, lastName: true } } },
+          include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
         },
         subject: { select: { name: true } },
         package: { select: { id: true, classesUsed: true, classesIncluded: true } },
@@ -509,6 +650,29 @@ export async function PATCH(req: NextRequest) {
         }
       }
 
+      // Send class completed email to parent
+      if (classRecord.student.parent?.user?.email) {
+        const appUrl = process.env.NEXTAUTH_URL || ""
+        const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+
+        sendEmail({
+          to: classRecord.student.parent.user.email,
+          subject: `Class completed — ${classRecord.student.firstName}'s ${classRecord.subject.name} session — Expert Guru`,
+          react: ClassCompleted({
+            parentName: classRecord.student.parent.user.firstName,
+            studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+            teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+            subject: classRecord.subject.name,
+            scheduledAt: scheduledFormatted,
+            duration: classRecord.duration,
+            topicCovered: topicCovered || classRecord.topicCovered || undefined,
+            sessionNotes: sessionNotes || classRecord.sessionNotes || undefined,
+            isTrial: classRecord.isTrial,
+            dashboardUrl: `${appUrl}/parent`,
+          }),
+        }).catch((err) => console.error("[Complete] Parent email failed:", err))
+      }      
+
       return NextResponse.json({
         message: "Class marked as completed",
         classId: updated.id,
@@ -559,6 +723,23 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
+      // If this was a trial class, reset trialTaken so student can rebook
+      if (classRecord.isTrial) {
+        try {
+          const studentSubjectLink = await prisma.studentSubject.findFirst({
+            where: { studentId: classRecord.student.id, subjectId: classRecord.subjectId },
+          })
+          if (studentSubjectLink) {
+            await prisma.studentSubject.update({
+              where: { id: studentSubjectLink.id },
+              data: { trialTaken: false },
+            })
+          }
+        } catch (trialErr) {
+          console.error("[Cancel] Failed to reset trialTaken:", trialErr)
+        }
+      }
+
       // Notify teacher
       await prisma.notification.create({
         data: {
@@ -568,6 +749,26 @@ export async function PATCH(req: NextRequest) {
           message: `${classRecord.student.firstName} ${classRecord.student.lastName}'s ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} has been cancelled by the student.`,
         },
       })
+
+      // Send cancellation email to teacher
+      const appUrl = process.env.NEXTAUTH_URL || ""
+      const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+
+      sendEmail({
+        to: classRecord.teacher.user.email,
+        subject: `Class cancelled — ${classRecord.student.firstName} ${classRecord.student.lastName} — Expert Guru`,
+        react: ClassCancelled({
+          recipientName: classRecord.teacher.user.firstName,
+          studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+          teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+          subject: classRecord.subject.name,
+          scheduledAt: scheduledFormatted,
+          duration: classRecord.duration,
+          cancelledBy: "student",
+          cancelReason: reason || undefined,
+          dashboardUrl: `${appUrl}/teacher`,
+        }),
+      }).catch((err) => console.error("[Cancel] Teacher email failed:", err))
 
       return NextResponse.json({
         message: "Class cancelled by student",
@@ -599,6 +800,23 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
+            // If this was a trial class, reset trialTaken so student can rebook
+            if (classRecord.isTrial) {
+              try {
+                const studentSubjectLink = await prisma.studentSubject.findFirst({
+                  where: { studentId: classRecord.student.id, subjectId: classRecord.subjectId },
+                })
+                if (studentSubjectLink) {
+                  await prisma.studentSubject.update({
+                    where: { id: studentSubjectLink.id },
+                    data: { trialTaken: false },
+                  })
+                }
+              } catch (trialErr) {
+                console.error("[Cancel] Failed to reset trialTaken:", trialErr)
+              }
+            }      
+
       // Notify parent
       if (classRecord.student.parentId) {
         const parent = await prisma.parentProfile.findUnique({
@@ -615,6 +833,28 @@ export async function PATCH(req: NextRequest) {
             },
           })
         }
+      }
+
+      // Send cancellation email to parent
+      if (classRecord.student.parent?.user?.email) {
+        const appUrl = process.env.NEXTAUTH_URL || ""
+        const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+
+        sendEmail({
+          to: classRecord.student.parent.user.email,
+          subject: `Class cancelled by teacher — ${classRecord.subject.name} — Expert Guru`,
+          react: ClassCancelled({
+            recipientName: classRecord.student.parent.user.firstName,
+            studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+            teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+            subject: classRecord.subject.name,
+            scheduledAt: scheduledFormatted,
+            duration: classRecord.duration,
+            cancelledBy: "teacher",
+            cancelReason: reason || undefined,
+            dashboardUrl: `${appUrl}/parent`,
+          }),
+        }).catch((err) => console.error("[Cancel] Parent email failed:", err))
       }
 
       return NextResponse.json({
@@ -809,6 +1049,28 @@ export async function PATCH(req: NextRequest) {
             message: `${classRecord.student.firstName}'s ${classRecord.subject.name} class has been rescheduled to ${newDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`,
           },
         })
+                // Send reschedule email to teacher
+                const appUrl = process.env.NEXTAUTH_URL || ""
+                const previousFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+                const newFormatted = `${newDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+        
+                sendEmail({
+                  to: classRecord.teacher.user.email,
+                  subject: `Class rescheduled — ${classRecord.student.firstName} ${classRecord.student.lastName} — Expert Guru`,
+                  react: ClassRescheduled({
+                    recipientName: classRecord.teacher.user.firstName,
+                    studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+                    teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+                    subject: classRecord.subject.name,
+                    previousSchedule: previousFormatted,
+                    newSchedule: newFormatted,
+                    duration: classRecord.duration,
+                    rescheduledBy: "student",
+                    reason: reason || undefined,
+                    dashboardUrl: `${appUrl}/teacher`,
+                  }),
+                }).catch((err) => console.error("[Reschedule] Teacher email failed:", err))
+        
       } else if (classRecord.student.parentId) {
         const parent = await prisma.parentProfile.findUnique({
           where: { id: classRecord.student.parentId },
@@ -824,6 +1086,31 @@ export async function PATCH(req: NextRequest) {
             },
           })
         }
+
+        // Send reschedule email to parent
+        if (classRecord.student.parent?.user?.email) {
+          const appUrl = process.env.NEXTAUTH_URL || ""
+          const previousFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+          const newFormatted = `${newDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+
+          sendEmail({
+            to: classRecord.student.parent.user.email,
+            subject: `Class rescheduled by teacher — ${classRecord.subject.name} — Expert Guru`,
+            react: ClassRescheduled({
+              recipientName: classRecord.student.parent.user.firstName,
+              studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+              teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+              subject: classRecord.subject.name,
+              previousSchedule: previousFormatted,
+              newSchedule: newFormatted,
+              duration: classRecord.duration,
+              rescheduledBy: "teacher",
+              reason: reason || undefined,
+              dashboardUrl: `${appUrl}/parent`,
+            }),
+          }).catch((err) => console.error("[Reschedule] Parent email failed:", err))
+        }
+        
       }
 
       return NextResponse.json({
@@ -895,6 +1182,27 @@ export async function PATCH(req: NextRequest) {
           })
         }
       }
+
+      // Send meeting link email to parent
+      if (classRecord.student.parent?.user?.email) {
+        const appUrl = process.env.NEXTAUTH_URL || ""
+        const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+
+        sendEmail({
+          to: classRecord.student.parent.user.email,
+          subject: `Meeting link ready — ${classRecord.student.firstName}'s ${classRecord.subject.name} class — Expert Guru`,
+          react: MeetingLinkShared({
+            parentName: classRecord.student.parent.user.firstName,
+            studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+            teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+            subject: classRecord.subject.name,
+            scheduledAt: scheduledFormatted,
+            duration: classRecord.duration,
+            meetingLink: finalLink,
+            dashboardUrl: `${appUrl}/parent`,
+          }),
+        }).catch((err) => console.error("[MeetingLink] Parent email failed:", err))
+      }      
 
       return NextResponse.json({
         message: "Meeting link updated",

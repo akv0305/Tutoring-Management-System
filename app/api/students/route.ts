@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getSession, requireRole } from "@/lib/auth-utils"
+import { sendEmail } from "@/lib/email"
+import CoordinatorAssigned from "@/emails/coordinator-assigned"
 
 // GET /api/students — filtered by role
 export async function GET(req: NextRequest) {
@@ -230,10 +232,64 @@ export async function PATCH(req: NextRequest) {
       )
     }
 
+    // Check if coordinator is being assigned (for email notification)
+    const previousStudent = await prisma.student.findUnique({
+      where: { id },
+      select: { coordinatorId: true },
+    })
+
     const student = await prisma.student.update({
       where: { id },
       data: updates,
     })
+
+    // Send coordinator-assigned email to parent if coordinator changed
+    if (
+      updates.coordinatorId &&
+      updates.coordinatorId !== previousStudent?.coordinatorId
+    ) {
+      const studentWithParent = await prisma.student.findUnique({
+        where: { id },
+        include: {
+          parent: {
+            include: {
+              user: { select: { firstName: true, email: true } },
+            },
+          },
+          coordinator: {
+            include: {
+              user: {
+                select: { firstName: true, lastName: true, email: true },
+              },
+            },
+          },
+        },
+      })
+
+      if (
+        studentWithParent?.parent?.user?.email &&
+        studentWithParent?.coordinator?.user
+      ) {
+        const appUrl = process.env.NEXTAUTH_URL || ""
+        const coord = studentWithParent.coordinator.user
+
+        sendEmail({
+          to: studentWithParent.parent.user.email,
+          subject: `Coordinator assigned for ${student.firstName} — Expert Guru`,
+          react: CoordinatorAssigned({
+            parentName: studentWithParent.parent.user.firstName,
+            studentName: `${student.firstName} ${student.lastName}`,
+            coordinatorName: `${coord.firstName} ${coord.lastName}`,
+            coordinatorEmail: coord.email,
+            dashboardUrl: `${appUrl}/parent`,
+          }),
+        }).catch((err) =>
+          console.error("[Student Update] Coordinator assigned email failed:", err)
+        )
+      }
+    }
+
+    return NextResponse.json({ student })    
 
     return NextResponse.json({ student })
   } catch (error: any) {

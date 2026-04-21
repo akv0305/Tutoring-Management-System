@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getSession } from "@/lib/auth-utils"
 import bcrypt from "bcryptjs"
+import { sendEmail } from "@/lib/email"
+import WelcomeStaff from "@/emails/welcome-staff"
 
 // GET /api/teachers — public fields for parents, full fields for admin
 export async function GET(req: NextRequest) {
@@ -262,6 +264,22 @@ export async function POST(req: NextRequest) {
 
       return { user, teacherProfile }
     })
+
+    // Send welcome email to new teacher (non-blocking)
+    const appUrl = process.env.NEXTAUTH_URL || ""
+
+    sendEmail({
+      to: result.user.email,
+      subject: "Welcome to Expert Guru — Your Teacher Account",
+      react: WelcomeStaff({
+        name: result.user.firstName,
+        role: "TEACHER",
+        email: result.user.email,
+        loginUrl: `${appUrl}/login`,
+      }),
+    }).catch((err) =>
+      console.error("[Create Teacher] Welcome email failed:", err)
+    )    
 
     return NextResponse.json(
       {

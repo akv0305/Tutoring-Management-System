@@ -7,6 +7,7 @@ const EMAIL_FROM = "Expert Guru <noreply@expertguru.net>"
 
 type SendEmailParams = {
   to: string | string[]
+  cc?: string | string[]
   subject: string
   react: React.ReactElement
   replyTo?: string
@@ -20,6 +21,7 @@ type SendEmailResult = {
 
 export async function sendEmail({
   to,
+  cc,
   subject,
   react,
   replyTo,
@@ -35,6 +37,7 @@ export async function sendEmail({
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to: Array.isArray(to) ? to : [to],
+      cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
       subject,
       react,
       replyTo: replyTo || "info@expertguru.net",

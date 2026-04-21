@@ -4,6 +4,7 @@ import crypto from "crypto"
 import { prisma } from "@/lib/prisma"
 import { sendEmail } from "@/lib/email"
 import VerifyEmail from "@/emails/verify-email"
+import NewRegistrationAlert from "@/emails/new-registration-alert"
 
 export async function POST(req: NextRequest) {
   try {
@@ -160,6 +161,61 @@ export async function POST(req: NextRequest) {
     }).catch((err) => {
       console.error("[Register] Failed to send verification email:", err)
     })
+
+    // ─── Send new registration alert to admin + coordinator (non-blocking) ───
+    const appUrl = process.env.NEXTAUTH_URL || ""
+
+    // Fetch admin email(s)
+    const admins = await prisma.user.findMany({
+      where: { role: "ADMIN", status: "ACTIVE" },
+      select: { email: true, firstName: true },
+    })
+
+    // Fetch assigned coordinator's email (if one was assigned)
+    let coordinatorEmail: string | null = null
+    let coordinatorName: string | null = null
+
+    if (assignedCoordinatorId) {
+      const coordProfile = await prisma.coordinatorProfile.findUnique({
+        where: { id: assignedCoordinatorId },
+        include: {
+          user: { select: { email: true, firstName: true, lastName: true } },
+        },
+      })
+      if (coordProfile) {
+        coordinatorEmail = coordProfile.user.email
+        coordinatorName = `${coordProfile.user.firstName} ${coordProfile.user.lastName}`
+      }
+    }
+
+    // Build CC list: coordinator if assigned and not already an admin
+    const ccList: string[] = []
+    if (coordinatorEmail && !admins.some((a) => a.email === coordinatorEmail)) {
+      ccList.push(coordinatorEmail)
+    }
+
+    // Send to each admin (with coordinator in CC)
+    for (const admin of admins) {
+      sendEmail({
+        to: admin.email,
+        cc: ccList.length > 0 ? ccList : undefined,
+        subject: `New registration — ${childFirstName} ${childLastName} (${parentFirstName} ${parentLastName}) — Expert Guru`,
+        react: NewRegistrationAlert({
+          recipientName: admin.firstName,
+          parentName: `${parentFirstName.trim()} ${parentLastName.trim()}`,
+          parentEmail: parentEmail.toLowerCase().trim(),
+          parentPhone: parentPhone?.trim() || undefined,
+          studentName: `${childFirstName.trim()} ${childLastName.trim()}`,
+          studentGrade: childGrade,
+          subjects: childSubjects || [],
+          coordinatorName: coordinatorName || undefined,
+          scheduleNotes: scheduleNotes?.trim() || undefined,
+          dashboardUrl: `${appUrl}/admin`,
+        }),
+      }).catch((err) =>
+        console.error("[Register] Admin alert email failed:", err)
+      )
+    }    
 
     return NextResponse.json(
       {

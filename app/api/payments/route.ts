@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { sendEmail } from "@/lib/email"
+import PaymentConfirmed from "@/emails/payment-confirmed"
+import PaymentRejected from "@/emails/payment-rejected"
 
 export async function GET(req: NextRequest) {
   try {
@@ -203,7 +206,15 @@ export async function PATCH(req: NextRequest) {
         // Send notification to the parent
         const student = await prisma.student.findUnique({
           where: { id: bookingOrder.studentId },
-          include: { parent: { include: { user: { select: { id: true } } } } },
+          include: {
+            parent: {
+              include: {
+                user: {
+                  select: { id: true, firstName: true, email: true },
+                },
+              },
+            },
+          },
         })
 
         if (student) {
@@ -215,6 +226,33 @@ export async function PATCH(req: NextRequest) {
               message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) has been confirmed. ${classesConfirmed} class${classesConfirmed > 1 ? "es are" : " is"} now scheduled.`,
             },
           })
+          
+          // Send payment confirmed email to parent
+          if (student.parent?.user?.email) {
+            const appUrl = process.env.NEXTAUTH_URL || ""
+            const confirmedFormatted = new Date().toLocaleDateString("en-US", {
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })
+
+            sendEmail({
+              to: student.parent.user.email,
+              subject: `Payment confirmed — ${bookingOrder.orderRef} — Expert Guru`,
+              react: PaymentConfirmed({
+                parentName: student.parent.user.firstName,
+                studentName: `${student.firstName} ${student.lastName}`,
+                orderRef: bookingOrder.orderRef,
+                amount: Number(payment.amount).toLocaleString(),
+                classesScheduled: classesConfirmed,
+                confirmedAt: confirmedFormatted,
+                dashboardUrl: `${appUrl}/parent`,
+              }),
+            }).catch((err) =>
+              console.error("[Payment Confirm] Parent email failed:", err)
+            )
+          }
         }
       }
 
@@ -280,7 +318,15 @@ export async function PATCH(req: NextRequest) {
         // Send notification to the parent
         const student = await prisma.student.findUnique({
           where: { id: bookingOrder.studentId },
-          include: { parent: { include: { user: { select: { id: true } } } } },
+          include: {
+            parent: {
+              include: {
+                user: {
+                  select: { id: true, firstName: true, email: true },
+                },
+              },
+            },
+          },
         })
 
         if (student) {
@@ -292,6 +338,27 @@ export async function PATCH(req: NextRequest) {
               message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) was rejected. ${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled. ${reason ? "Reason: " + reason : ""}`,
             },
           })
+
+          // Send payment rejected email to parent
+          if (student.parent?.user?.email) {
+            const appUrl = process.env.NEXTAUTH_URL || ""
+
+            sendEmail({
+              to: student.parent.user.email,
+              subject: `Payment update — ${bookingOrder.orderRef} — Expert Guru`,
+              react: PaymentRejected({
+                parentName: student.parent.user.firstName,
+                studentName: `${student.firstName} ${student.lastName}`,
+                orderRef: bookingOrder.orderRef,
+                amount: Number(payment.amount).toLocaleString(),
+                classesCancelled: classesCancelled,
+                reason: reason || undefined,
+                dashboardUrl: `${appUrl}/parent`,
+              }),
+            }).catch((err) =>
+              console.error("[Payment Reject] Parent email failed:", err)
+            )
+          }
         }
       }
 

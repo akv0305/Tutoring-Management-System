@@ -13,6 +13,7 @@ type Availability = { dayOfWeek: string; startTime: string; endTime: string }
 type BookedSlot = { start: string; duration: number }
 type PackageOpt = { id: string; label: string; remaining: number; subjectId: string; subjectName: string; studentId: string }
 type Student = { id: string; name: string }
+type TrialEligibility = { studentId: string; subjectId: string; trialTaken: boolean }
 
 type TeacherData = {
   id: string; name: string; initials: string; qualification: string; bio: string
@@ -71,10 +72,12 @@ export function TeacherProfileClient({
   teacher,
   students,
   packages,
+  trialEligibility,
 }: {
   teacher: TeacherData
   students: Student[]
   packages: PackageOpt[]
+  trialEligibility: TrialEligibility[]
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -121,6 +124,17 @@ export function TeacherProfileClient({
   const selectedPackage = packages.find((p) => p.id === packageId)
   const totalRemaining = selectedPackage ? selectedPackage.remaining : 0
 
+  // Check if selected student+subject is eligible for a free trial
+  const isTrialEligible = useMemo(() => {
+    if (!studentId || !subjectId) return false
+    const record = trialEligibility.find(
+      (te) => te.studentId === studentId && te.subjectId === subjectId
+    )
+    // No record means student hasn't been linked to this subject yet — treat as eligible
+    if (!record) return true
+    return !record.trialTaken
+  }, [studentId, subjectId, trialEligibility])
+
   function toggleSlot(dateObj: Date, time: string) {
     const dateStr = dateObj.toISOString().split("T")[0]
     const key = `${dateStr}_${time}`
@@ -141,6 +155,8 @@ export function TeacherProfileClient({
     if (!studentId) return setError("Please select a student.")
     if (!subjectId) return setError("Please select a subject.")
     if (selectedSlots.length === 0) return setError("Please select at least one time slot.")
+
+    if (isTrialEligible && selectedSlots.length > 1) return setError("Only 1 slot can be selected for a trial class.")
 
     if (packageId && selectedSlots.length > totalRemaining) {
       return setError(`Package has only ${totalRemaining} classes remaining but you selected ${selectedSlots.length} slots.`)
@@ -164,7 +180,7 @@ export function TeacherProfileClient({
           packageId: packageId || null,
           slots,
           duration: 60,
-          isTrial: false,
+          isTrial: isTrialEligible,
         }),
       })
       const data = await res.json()
@@ -306,6 +322,18 @@ export function TeacherProfileClient({
           </div>
 
           {/* Package (optional) */}
+          {/* Trial badge */}
+          {isTrialEligible && (
+            <div className="flex items-center gap-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-700">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              <div>
+                <span className="font-semibold">Free Trial Class</span> — This is a complimentary trial session. No payment required.
+              </div>
+            </div>
+          )}
+
+          {/* Package (optional) — hidden for trials */}
+          {!isTrialEligible && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
                 <Package className="w-4 h-4 inline mr-1" />
@@ -329,13 +357,14 @@ export function TeacherProfileClient({
                 </select>
                 {!packageId && (
                     <p className="text-xs text-gray-400 mt-1">Booking without a package — class will not deduct from any balance.</p>
-                )}
-                </>
+                  )}
+                  </>
+              )}
+            </div>
             )}
-          </div>
 
           {/* Balance check */}
-          {packageId && selectedSlots.length > totalRemaining && (
+          {!isTrialEligible && packageId && selectedSlots.length > totalRemaining && (
             <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                 <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                 <div>
@@ -345,17 +374,17 @@ export function TeacherProfileClient({
             </div>
           )}
 
-          {packageId && selectedSlots.length <= totalRemaining && (
+          {!isTrialEligible && packageId && selectedSlots.length <= totalRemaining && (
             <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
                 <CheckCircle className="w-4 h-4 flex-shrink-0" />
                 {selectedSlots.length} of {totalRemaining} package classes will be used. {totalRemaining - selectedSlots.length} will remain.
             </div>
           )}
 
-          {!packageId && (
+          {!isTrialEligible && !packageId && (
             <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
                 <Calendar className="w-4 h-4 flex-shrink-0" />
-                Booking {selectedSlots.length} standalone class{selectedSlots.length > 1 ? "es" : ""} — not linked to any package.
+                Booking {selectedSlots.length} standalone class{selectedSlots.length > 1 ? "es" : ""}  not linked to any package.
             </div>
           )}
 
@@ -375,7 +404,7 @@ export function TeacherProfileClient({
               disabled={loading || !studentId || !subjectId || (!!packageId && selectedSlots.length > totalRemaining)}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
             >
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</> : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>}
+              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</> : <>{isTrialEligible ? "Book Free Trial" : `Book ${selectedSlots.length} Class${selectedSlots.length > 1 ? "es" : ""}`}</>}
             </button>
           </div>
         </div>

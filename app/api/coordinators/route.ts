@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import bcrypt from "bcryptjs"
+import { sendEmail } from "@/lib/email"
+import WelcomeStaff from "@/emails/welcome-staff"
 
 // GET /api/coordinators
 export async function GET(req: NextRequest) {
@@ -99,6 +101,22 @@ export async function POST(req: NextRequest) {
 
       return { user, coordinatorProfile }
     })
+
+    // Send welcome email to new coordinator (non-blocking)
+    const appUrl = process.env.NEXTAUTH_URL || ""
+
+    sendEmail({
+      to: result.user.email,
+      subject: "Welcome to Expert Guru — Your Coordinator Account",
+      react: WelcomeStaff({
+        name: result.user.firstName,
+        role: "COORDINATOR",
+        email: result.user.email,
+        loginUrl: `${appUrl}/login`,
+      }),
+    }).catch((err) =>
+      console.error("[Create Coordinator] Welcome email failed:", err)
+    )    
 
     return NextResponse.json(
       {

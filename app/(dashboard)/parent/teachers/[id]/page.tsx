@@ -57,6 +57,21 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     },
   })
 
+  // Fetch trial eligibility for parent's students
+  // Only for subjects this teacher offers
+  const teacherSubjectIds = teacher.subjects.map((ts) => ts.subject.id)
+  const studentSubjects = await prisma.studentSubject.findMany({
+    where: {
+      studentId: { in: studentIds },
+      subjectId: { in: teacherSubjectIds },
+    },
+    select: {
+      studentId: true,
+      subjectId: true,
+      trialTaken: true,
+    },
+  })
+
   // Class stats
   const completedClasses = await prisma.class.count({
     where: { teacherId: teacher.id, status: "COMPLETED" },
@@ -108,11 +123,19 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
       studentId: p.studentId,
     }))
 
-  return (
-    <TeacherProfileClient
-      teacher={teacherData}
-      students={studentsData}
-      packages={packagesData}
-    />
-  )
+  const trialEligibility = studentSubjects.map((ss) => ({
+    studentId: ss.studentId,
+    subjectId: ss.subjectId,
+    trialTaken: ss.trialTaken,
+  }))  
+
+    return (
+      <TeacherProfileClient
+        teacher={teacherData}
+        students={studentsData}
+        packages={packagesData}
+        trialEligibility={trialEligibility}
+      />
+    )
+  
 }

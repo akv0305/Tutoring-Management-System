@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
+import { sendEmail } from "@/lib/email"
+import RefundUpdate from "@/emails/refund-update"
+
 
 // GET /api/refunds
 export async function GET(req: NextRequest) {
@@ -192,8 +195,26 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await prisma.refundRequest.findUnique({
       where: { id },
-      include: { payment: true },
+      include: {
+        payment: {
+          include: {
+            package: { select: { name: true } },
+          },
+        },
+        student: {
+          include: {
+            parent: {
+              include: {
+                user: {
+                  select: { firstName: true, email: true },
+                },
+              },
+            },
+          },
+        },
+      },
     })
+
     if (!existing) {
       return NextResponse.json({ error: "Refund request not found" }, { status: 404 })
     }
@@ -241,6 +262,35 @@ export async function PATCH(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Invalid action. Use: approve, reject, process" }, { status: 400 })
     }
+
+    // Send refund update email to parent
+    if (
+      existing.student?.parent?.user?.email &&
+      ["approve", "reject", "process"].includes(action)
+    ) {
+      const appUrl = process.env.NEXTAUTH_URL || ""
+      const statusMap: Record<string, "APPROVED" | "REJECTED" | "PROCESSED"> = {
+        approve: "APPROVED",
+        reject: "REJECTED",
+        process: "PROCESSED",
+      }
+
+      sendEmail({
+        to: existing.student.parent.user.email,
+        subject: `Refund ${action === "approve" ? "approved" : action === "process" ? "processed" : "update"} — Expert Guru`,
+        react: RefundUpdate({
+          parentName: existing.student.parent.user.firstName,
+          studentName: `${existing.student.firstName} ${existing.student.lastName}`,
+          refundAmount: Number(existing.refundAmount).toLocaleString(),
+          originalAmount: Number(existing.payment.amount).toLocaleString(),
+          packageName: existing.payment.package?.name || undefined,
+          status: statusMap[action],
+          dashboardUrl: `${appUrl}/parent`,
+        }),
+      }).catch((err) =>
+        console.error(`[Refund ${action}] Parent email failed:`, err)
+      )
+    }    
 
     const updated = await prisma.refundRequest.update({
       where: { id },
