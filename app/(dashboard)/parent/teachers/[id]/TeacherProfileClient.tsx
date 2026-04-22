@@ -208,42 +208,149 @@ export function TeacherProfileClient({
   // ── SUCCESS SCREEN ──
   if (success) {
     // Pending payment success
+    // Pending payment success — show payment options
     if (pendingPayment) {
       return (
-        <div className="max-w-md mx-auto mt-20 text-center space-y-4">
-          <Clock className="w-16 h-16 text-amber-500 mx-auto" />
-          <h2 className="text-2xl font-bold text-[#1E293B]">Classes Reserved!</h2>
-          {bookingOrderRef && (
-            <p className="text-sm font-medium text-gray-500">
-              Booking Ref: <span className="font-bold text-[#1E293B]">{bookingOrderRef}</span>
+        <div className="max-w-lg mx-auto mt-16 space-y-6">
+          <div className="text-center space-y-3">
+            <CheckCircle className="w-16 h-16 text-[#0D9488] mx-auto" />
+            <h2 className="text-2xl font-bold text-[#1E293B]">Classes Reserved!</h2>
+            {bookingOrderRef && (
+              <p className="text-sm font-medium text-gray-500">
+                Booking Ref: <span className="font-bold text-[#1E293B]">{bookingOrderRef}</span>
+              </p>
+            )}
+            <p className="text-gray-500">
+              {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} reserved with {teacher.name}.
+              Choose how you&apos;d like to pay to confirm your booking.
             </p>
-          )}
-          <p className="text-gray-500">
-            {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} reserved with {teacher.name}.
-          </p>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 text-left">
-            <p className="font-semibold mb-1">What happens next?</p>
-            <p>Your coordinator will contact you with a payment link. Classes will be confirmed once payment is received and verified by the admin.</p>
-            <p className="mt-2 text-xs text-amber-600">The selected time slots are held for you until payment is confirmed or rejected.</p>
           </div>
-          {error && <p className="text-sm text-amber-600">{error}</p>}
-          <div className="flex justify-center gap-3 pt-4">
+
+          {error && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />{error}
+            </div>
+          )}
+
+          {/* Payment Options */}
+          <div className="space-y-3">
+            {/* Option 1: Pay Online via CCAvenue */}
+            <button
+              onClick={async () => {
+                setError("")
+                setLoading(true)
+                try {
+                  // We need paymentId — fetch it from the booking order
+                  const orderRes = await fetch(`/api/classes?bookingOrderRef=${bookingOrderRef}`)
+                  const orderData = await orderRes.json()
+
+                  // Find the payment ID from the booking's pending payment
+                  let paymentIdToUse = ""
+
+                  // The booking order has a paymentId — we need to get it
+                  // Fetch from payments API filtered by student
+                  const paymentsRes = await fetch("/api/payments?status=PENDING")
+                  const paymentsData = await paymentsRes.json()
+
+                  if (paymentsData.payments && paymentsData.payments.length > 0) {
+                    // Find the most recent pending payment matching our student
+                    const matchingPayment = paymentsData.payments.find(
+                      (p: { studentId: string }) => p.studentId === studentId
+                    ) || paymentsData.payments[0]
+                    paymentIdToUse = matchingPayment.id
+                  }
+
+                  if (!paymentIdToUse) {
+                    setError("Could not find the pending payment. Please try from your Payments page.")
+                    setLoading(false)
+                    return
+                  }
+
+                  const res = await fetch("/api/payments/ccavenue/initiate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ paymentId: paymentIdToUse }),
+                  })
+                  const data = await res.json()
+
+                  if (!res.ok) {
+                    setError(data.error || "Failed to initiate payment")
+                    setLoading(false)
+                    return
+                  }
+
+                  if (data.paymentUrl) {
+                    window.location.href = data.paymentUrl
+                  }
+                } catch {
+                  setError("Network error. Please try again.")
+                  setLoading(false)
+                }
+              }}
+              disabled={loading}
+              className="w-full flex items-center gap-4 p-5 bg-white border-2 border-[#0D9488] rounded-xl hover:bg-teal-50 transition-all text-left group"
+            >
+              <div className="w-12 h-12 bg-[#0D9488]/10 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-[#0D9488]/20 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-[#0D9488]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-[#1E293B]">Pay Online</p>
+                  <span className="px-2 py-0.5 bg-[#0D9488] text-white text-[10px] font-bold rounded-full uppercase">Recommended</span>
+                </div>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Credit Card, Debit Card, Net Banking, UPI, Wallets
+                </p>
+              </div>
+              {loading ? (
+                <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin flex-shrink-0" />
+              ) : (
+                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0D9488] flex-shrink-0" />
+              )}
+            </button>
+
+            {/* Option 2: Bank Transfer */}
+            <button
+              onClick={() => {
+                router.push("/parent/payments")
+              }}
+              className="w-full flex items-center gap-4 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-left group"
+            >
+              <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-gray-200 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-[#1E293B]">Bank Transfer</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Transfer to our bank account &middot; Admin confirms manually
+                </p>
+              </div>
+              <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 flex-shrink-0" />
+            </button>
+          </div>
+
+          {/* Info note */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+            <p className="font-semibold mb-1">Time slots are reserved</p>
+            <p>Your selected class times are held for you. Classes will be confirmed once payment is received and verified.</p>
+          </div>
+
+          {/* Skip for now */}
+          <div className="text-center">
             <button
               onClick={() => router.push("/parent/classes")}
-              className="px-5 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors"
+              className="text-sm text-gray-400 hover:text-gray-600 hover:underline transition-colors"
             >
-              View My Classes
-            </button>
-            <button
-              onClick={() => router.push("/parent/teachers")}
-              className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-            >
-              Back to Teachers
+              I&apos;ll pay later &middot; View my classes
             </button>
           </div>
         </div>
       )
-    }
+    }    
 
     // Direct booking success (trial classes)
     return (
