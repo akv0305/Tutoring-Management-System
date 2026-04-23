@@ -17,38 +17,89 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Email and password are required")
         }
-
+      
         const user = await prisma.user.findUnique({
           where: { email: credentials.email.toLowerCase().trim() },
         })
-
+      
         if (!user) {
           throw new Error("No account found with this email")
         }
-
+      
+        // ── NEW: Check if account is locked ──
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+          const minutesLeft = Math.ceil(
+            (user.lockedUntil.getTime() - Date.now()) / 60000
+          )
+          throw new Error(
+            `Account temporarily locked. Try again in ${minutesLeft} minute${minutesLeft > 1 ? "s" : ""}.`
+          )
+        }
+      
+        // ── NEW: If lock expired, reset ──
+        if (user.lockedUntil && user.lockedUntil <= new Date()) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { failedLoginAttempts: 0, lockedUntil: null },
+          })
+        }
+      
         if (user.status === "SUSPENDED") {
           throw new Error("Your account has been suspended. Contact support.")
         }
-
+      
         if (user.status === "INACTIVE" && !user.emailVerified) {
-          throw new Error("Please verify your email before signing in. Check your inbox for the verification link.")
+          throw new Error(
+            "Please verify your email before signing in. Check your inbox for the verification link."
+          )
         }
-
+      
         if (user.status === "INACTIVE" && user.emailVerified) {
           throw new Error("Your account is currently inactive. Contact support.")
         }
-
+      
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash)
-
+      
         if (!isValid) {
+          // ── NEW: Increment failed attempts ──
+          const settings = await prisma.platformSettings.findFirst({
+            where: { id: "default" },
+          })
+          const maxAttempts = settings?.maxLoginAttempts ?? 5
+          const lockoutMinutes = settings?.lockoutDuration ?? 30
+          const newAttempts = (user.failedLoginAttempts ?? 0) + 1
+      
+          if (newAttempts >= maxAttempts) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                failedLoginAttempts: newAttempts,
+                lockedUntil: new Date(Date.now() + lockoutMinutes * 60 * 1000),
+              },
+            })
+            throw new Error(
+              `Too many failed attempts. Account locked for ${lockoutMinutes} minutes.`
+            )
+          } else {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { failedLoginAttempts: newAttempts },
+            })
+          }
+      
           throw new Error("Invalid password")
         }
-
+      
+        // ── NEW: Reset failed attempts on successful login ──
         await prisma.user.update({
           where: { id: user.id },
-          data: { lastLoginAt: new Date() },
+          data: {
+            lastLoginAt: new Date(),
+            failedLoginAttempts: 0,
+            lockedUntil: null,
+          },
         })
-
+      
         return {
           id: user.id,
           email: user.email,

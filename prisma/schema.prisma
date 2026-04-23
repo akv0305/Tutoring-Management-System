@@ -175,6 +175,8 @@ model User {
   emailVerifyToken  String?
   resetToken        String?
   resetTokenExpiry  DateTime?
+  failedLoginAttempts Int  @default(0)
+  lockedUntil         DateTime?
   lastLoginAt    DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -191,6 +193,7 @@ model User {
   sentReferrals      Referral[]       @relation("ReferredBy")
   receivedReferrals  Referral[]       @relation("ReferredTo")
 
+  @@index([role, status])
   @@map("users")
 }
 
@@ -427,6 +430,9 @@ model Class {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
+  @@index([teacherId, scheduledAt])
+  @@index([studentId, status])
+  @@index([bookingOrderId])
   @@map("classes")
 }
 
@@ -453,6 +459,7 @@ model BookingOrder {
 
   classes      Class[]
 
+  @@index([studentId, status])
   @@map("booking_orders")
 }
 
@@ -479,6 +486,7 @@ model Payment {
   refundRequests RefundRequest[]
   bookingOrder   BookingOrder?
 
+  @@index([studentId, status])
   @@map("payments")
 }
 
@@ -507,6 +515,7 @@ model Payout {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
+  @@index([teacherId, status])
   @@unique([teacherId, periodStartDate, periodEndDate])
   @@map("payouts")
 }
@@ -627,4 +636,18 @@ model PlatformSettings {
   updatedAt               DateTime @updatedAt
 
   @@map("platform_settings")
+}
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  cc        String?
+  subject   String
+  status    String   // "sent" | "failed" | "skipped"
+  messageId String?
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([to, createdAt])
+  @@map("email_logs")
 }

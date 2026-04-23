@@ -93,6 +93,47 @@ export async function POST(req: NextRequest) {
     const parentUser = payment.student.parent?.user
     const orderRef = bookingOrder?.orderRef || payment.id
 
+    // ── Deduplication: prevent double-initiation within 5 minutes ──
+    if (
+      payment.method === "CCAVENUE" &&
+      payment.bankReference?.startsWith("CCAV_INITIATED_")
+    ) {
+      const initiatedAgo = Date.now() - new Date(payment.updatedAt).getTime()
+      if (initiatedAgo < 5 * 60 * 1000) {
+        // Re-build the payment URL (CCAvenue will resume the session for the same order_id)
+        const dedupeParams: Record<string, string> = {
+          merchant_id: CCAVENUE_MERCHANT_ID,
+          order_id: orderRef,
+          currency: "INR",
+          amount: Number(payment.amount).toFixed(2),
+          redirect_url: `${appUrl}/api/payments/ccavenue/callback`,
+          cancel_url: `${appUrl}/api/payments/ccavenue/callback`,
+          language: "EN",
+          billing_name: parentUser
+            ? `${parentUser.firstName} ${parentUser.lastName}`
+            : "",
+          billing_email: parentUser?.email || "",
+          billing_tel: parentUser?.phone || "",
+          billing_address: "",
+          billing_city: "",
+          billing_state: "",
+          billing_zip: "",
+          billing_country: "India",
+          merchant_param1: payment.id,
+          merchant_param2: bookingOrder?.id || "",
+          merchant_param3: payment.studentId,
+          merchant_param4: session.user.id,
+          merchant_param5: payment.package?.name || "Direct Payment",
+        }
+
+        const dedupeOrderString = buildOrderString(dedupeParams)
+        const dedupeEncRequest = encrypt(dedupeOrderString)
+        const dedupePaymentUrl = buildPaymentUrl(dedupeEncRequest)
+
+        return NextResponse.json({ paymentUrl: dedupePaymentUrl, orderRef })
+      }
+    }
+
     // Determine currency — default INR, can be extended later
     const currency = "INR"
 

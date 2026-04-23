@@ -242,6 +242,37 @@ export async function POST(req: NextRequest) {
     const classDuration = duration || 60
     const isTrialClass = isTrial || false
 
+    // ── Package expiry & balance check ──
+    if (packageId) {
+      const pkg = await prisma.package.findUnique({
+        where: { id: packageId },
+      })
+      if (!pkg) {
+        return NextResponse.json({ error: "Package not found" }, { status: 404 })
+      }
+      if (pkg.status !== "ACTIVE") {
+        return NextResponse.json(
+          { error: `Package is ${pkg.status.toLowerCase()}. Cannot book classes.` },
+          { status: 400 }
+        )
+      }
+      if (new Date() > pkg.expiryDate) {
+        return NextResponse.json(
+          { error: "Package has expired. Please purchase a new package." },
+          { status: 400 }
+        )
+      }
+      const remaining = pkg.classesIncluded - pkg.classesUsed
+      if (!isTrialClass && slotList.length > remaining) {
+        return NextResponse.json(
+          {
+            error: `Only ${remaining} class${remaining !== 1 ? "es" : ""} remaining in this package. You're trying to book ${slotList.length}.`,
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     // Check for scheduling conflicts for ALL slots before creating anything
     for (const slot of slotList) {
       const slotDate = new Date(slot)
@@ -268,7 +299,7 @@ export async function POST(req: NextRequest) {
           { status: 409 }
         )
       }
-    }
+    }    
 
     // ─── TRIAL CLASS: skip BookingOrder/Payment, create directly as SCHEDULED ───
     if (isTrialClass) {
@@ -378,6 +409,31 @@ export async function POST(req: NextRequest) {
     const orderRef = generateOrderRef()
 
     const result = await prisma.$transaction(async (tx) => {
+      // Conflict check INSIDE transaction
+      for (const slot of slotList) {
+        const slotDate = new Date(slot)
+        const slotEnd = new Date(slotDate.getTime() + classDuration * 60000)
+
+        const conflict = await tx.class.findFirst({
+          where: {
+            teacherId,
+            status: { in: ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"] },
+            scheduledAt: { lt: slotEnd },
+            AND: {
+              scheduledAt: {
+                gte: new Date(slotDate.getTime() - classDuration * 60000 + 1),
+              },
+            },
+          },
+        })
+
+        if (conflict) {
+          throw new Error(
+            `Teacher has a scheduling conflict at ${slotDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${slotDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+          )
+        }
+      }
+
       // 1. Create the Payment record (PENDING)
       const payment = await tx.payment.create({
         data: {

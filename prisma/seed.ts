@@ -1,3 +1,8 @@
+if (process.env.NODE_ENV === "production") {
+  console.error("❌ Seed cannot run in production environment!")
+  process.exit(1)
+}
+
 import { PrismaClient, UserRole, SubjectCategory, DayOfWeek } from "@prisma/client"
 import bcrypt from "bcryptjs"
 

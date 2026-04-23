@@ -130,10 +130,10 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/students — admin or coordinator can add students
+// POST /api/students — admin, coordinator, or parent can add students
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireRole(["ADMIN", "COORDINATOR"])
+    const session = await requireRole(["ADMIN", "COORDINATOR", "PARENT"])
 
     const body = await req.json()
     const {
@@ -141,24 +141,47 @@ export async function POST(req: NextRequest) {
       parentEmail, subjects, coordinatorId, timezone,
     } = body
 
-    if (!firstName || !lastName || !grade || !parentEmail) {
+    if (!firstName || !lastName || !grade) {
       return NextResponse.json(
-        { error: "Student name, grade, and parent email are required." },
+        { error: "Student name and grade are required." },
         { status: 400 }
       )
     }
 
-    // Find parent by email
-    const parentUser = await prisma.user.findUnique({
-      where: { email: parentEmail.toLowerCase().trim() },
-      include: { parentProfile: true },
-    })
+    // ── Determine parent profile ──
+    let parentProfileId: string
 
-    if (!parentUser || !parentUser.parentProfile) {
-      return NextResponse.json(
-        { error: "No parent account found with this email." },
-        { status: 404 }
-      )
+    if (session.user.role === "PARENT") {
+      // Parent adds child to their own profile — no parentEmail needed
+      const parentProfile = await prisma.parentProfile.findUnique({
+        where: { userId: session.user.id },
+      })
+      if (!parentProfile) {
+        return NextResponse.json(
+          { error: "Parent profile not found." },
+          { status: 404 }
+        )
+      }
+      parentProfileId = parentProfile.id
+    } else {
+      // Admin/Coordinator: lookup parent by email (required)
+      if (!parentEmail) {
+        return NextResponse.json(
+          { error: "Parent email is required." },
+          { status: 400 }
+        )
+      }
+      const parentUser = await prisma.user.findUnique({
+        where: { email: parentEmail.toLowerCase().trim() },
+        include: { parentProfile: true },
+      })
+      if (!parentUser || !parentUser.parentProfile) {
+        return NextResponse.json(
+          { error: "No parent account found with this email." },
+          { status: 404 }
+        )
+      }
+      parentProfileId = parentUser.parentProfile.id
     }
 
     // Determine coordinator
@@ -178,7 +201,7 @@ export async function POST(req: NextRequest) {
           grade,
           school: school?.trim() || null,
           timezone: timezone || "America/New_York",
-          parentId: parentUser.parentProfile!.id,
+          parentId: parentProfileId,
           coordinatorId: assignCoordId || null,
           status: "TRIAL_PENDING",
           onboardingStage: "NEW_LEAD",
@@ -216,6 +239,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
+
 
 // PATCH /api/students — admin or coordinator
 export async function PATCH(req: NextRequest) {
@@ -291,7 +315,6 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ student })    
 
-    return NextResponse.json({ student })
   } catch (error: any) {
     if (error.message === "Unauthorized") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
