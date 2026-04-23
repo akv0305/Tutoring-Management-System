@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherProfileClient } from "./TeacherProfileClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function TeacherProfilePage({ params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")

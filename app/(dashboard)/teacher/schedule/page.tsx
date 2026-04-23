@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherScheduleClient } from "./TeacherScheduleClient"
 
+export const dynamic = "force-dynamic"
+
 const SUBJECT_COLORS: Record<string, string> = {
   Mathematics: "bg-[#0D9488]/90 text-white border-teal-600",
   Physics: "bg-[#1E3A5F] text-white border-blue-800",

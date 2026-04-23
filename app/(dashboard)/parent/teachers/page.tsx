@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentTeachersClient } from "./ParentTeachersClient"
 
+export const dynamic = "force-dynamic"
+
 const AVATAR_COLORS = [
   "bg-[#0D9488]", "bg-[#1E3A5F]", "bg-purple-700", "bg-emerald-700",
   "bg-indigo-700", "bg-rose-700", "bg-pink-700", "bg-slate-700", "bg-violet-700",

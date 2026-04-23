@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentPackagesClient } from "./ParentPackagesClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function PackagesPage() {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")

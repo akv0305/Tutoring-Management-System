@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma"
 import { SubjectsClient } from "./SubjectsClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function SubjectsPage() {
   const subjectsRaw = await prisma.subject.findMany({
     include: {

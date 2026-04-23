@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma"
 import { CoordinatorsClient } from "./CoordinatorsClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function CoordinatorsPage() {
   const coordinatorsRaw = await prisma.coordinatorProfile.findMany({
     include: {

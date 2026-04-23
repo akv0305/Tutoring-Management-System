@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma"
 import { PackagesClient } from "./PackagesClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function PackagesPage() {
   // Fetch templates
   const templatesRaw = await prisma.packageTemplate.findMany({

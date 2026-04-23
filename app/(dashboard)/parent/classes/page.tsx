@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentClassesClient } from "./ParentClassesClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function ClassesPage() {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")

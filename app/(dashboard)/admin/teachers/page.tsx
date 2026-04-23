@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma"
 import { TeachersClient } from "./TeachersClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function TeachersPage() {
   const teachersRaw = await prisma.teacherProfile.findMany({
     include: {

@@ -46,10 +46,31 @@ function getWeekDates(weekOffset: number): Date[] {
   })
 }
 
+/**
+ * Convert 12-hour "H:MM AM/PM" or 24-hour "HH:MM" to "HH:MM" (24-hour).
+ */
+function to24(time: string): string {
+  const trimmed = time.trim()
+  // Already 24-hour format (no AM/PM)?
+  if (!/[APap][Mm]/.test(trimmed)) {
+    const [h, m] = trimmed.split(":").map(Number)
+    return `${String(h).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`
+  }
+  const isPM = /[Pp][Mm]/.test(trimmed)
+  const cleaned = trimmed.replace(/\s*[APap][Mm]\s*/, "")
+  let [h, m] = cleaned.split(":").map(Number)
+  if (isNaN(m)) m = 0
+  if (isPM && h !== 12) h += 12
+  if (!isPM && h === 12) h = 0
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+}
+
 function generateSlots(startTime: string, endTime: string): string[] {
   const slots: string[] = []
-  const [sh, sm] = startTime.split(":").map(Number)
-  const [eh] = endTime.split(":").map(Number)
+  const start24 = to24(startTime)
+  const end24 = to24(endTime)
+  const [sh, sm] = start24.split(":").map(Number)
+  const [eh] = end24.split(":").map(Number)
   let hour = sh
   let min = sm
   while (hour < eh) {
@@ -620,7 +641,7 @@ export function TeacherProfileClient({
                     const isBlocked = blockedSet.has(dateStr)
                     const isBooked = bookedSet.has(`${dateStr}_${timeSlot}`)
 
-                    const inWindow = avail && timeSlot >= avail.startTime && timeSlot < avail.endTime
+                    const inWindow = avail && timeSlot >= to24(avail.startTime) && timeSlot < to24(avail.endTime)
 
                     const unavailable = !inWindow || isPast || isPastToday || isBlocked || isBooked
                     const selected = isSelected(dateObj, timeSlot)

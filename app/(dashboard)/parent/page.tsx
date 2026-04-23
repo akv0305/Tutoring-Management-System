@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentDashboardClient } from "./ParentDashboardClient"
 
+export const dynamic = "force-dynamic"
+
 export default async function ParentDashboard() {
   const session = await getServerSession(authOptions)
   if (!session?.user) redirect("/login")

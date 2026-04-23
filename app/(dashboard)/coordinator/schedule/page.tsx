@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { CoordinatorScheduleClient } from "./CoordinatorScheduleClient"
 
+export const dynamic = "force-dynamic"
+
 const SUBJECT_COLORS: Record<string, string> = {
   Mathematics: "bg-teal-100 border-teal-400 text-teal-800",
   Physics: "bg-blue-100 border-blue-400 text-blue-800",
