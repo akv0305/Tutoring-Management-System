@@ -54,6 +54,12 @@ export function decrypt(encryptedText: string): string {
   return decrypted
 }
 
+export function buildPaymentUrl(encRequest: string): string {
+  const mode = process.env.CCAVENUE_MODE || "test"
+  const baseUrl = mode === "production" ? CCAVENUE_PROD_URL : CCAVENUE_TEST_URL
+  return `${baseUrl}&merchant_id=${CCAVENUE_MERCHANT_ID}&encRequest=${encRequest}&access_code=${CCAVENUE_ACCESS_CODE}`
+}
+
 export function buildOrderString(params: Record<string, string>): string {
   // CCAvenue expects key=value pairs joined by &
   return Object.entries(params)
