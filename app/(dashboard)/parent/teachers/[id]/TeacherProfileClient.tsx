@@ -261,53 +261,43 @@ export function TeacherProfileClient({
                 setError("")
                 setLoading(true)
                 try {
-                  // We need paymentId — fetch it from the booking order
-                  const orderRes = await fetch(`/api/classes?bookingOrderRef=${bookingOrderRef}`)
-                  const orderData = await orderRes.json()
-
-                  // Find the payment ID from the booking's pending payment
-                  let paymentIdToUse = ""
-
-                  // The booking order has a paymentId — we need to get it
-                  // Fetch from payments API filtered by student
+                  // Find the pending payment
                   const paymentsRes = await fetch("/api/payments?status=PENDING")
                   const paymentsData = await paymentsRes.json()
-
+              
+                  let paymentIdToUse = ""
                   if (paymentsData.payments && paymentsData.payments.length > 0) {
-                    // Find the most recent pending payment matching our student
                     const matchingPayment = paymentsData.payments.find(
                       (p: { studentId: string }) => p.studentId === studentId
                     ) || paymentsData.payments[0]
                     paymentIdToUse = matchingPayment.id
                   }
-
+              
                   if (!paymentIdToUse) {
                     setError("Could not find the pending payment. Please try from your Payments page.")
                     setLoading(false)
                     return
                   }
-
-                  const res = await fetch("/api/payments/ccavenue/initiate", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ paymentId: paymentIdToUse }),
-                  })
-                  const data = await res.json()
-
-                  if (!res.ok) {
-                    setError(data.error || "Failed to initiate payment")
-                    setLoading(false)
-                    return
-                  }
-
-                  if (data.paymentUrl) {
-                    window.location.href = data.paymentUrl
-                  }
+              
+                  // Submit a form POST to the redirect endpoint (returns HTML that auto-submits to CCAvenue)
+                  const form = document.createElement("form")
+                  form.method = "POST"
+                  form.action = "/api/payments/ccavenue/redirect"
+              
+                  const input = document.createElement("input")
+                  input.type = "hidden"
+                  input.name = "paymentId"
+                  input.value = paymentIdToUse
+                  form.appendChild(input)
+              
+                  document.body.appendChild(form)
+                  form.submit()
                 } catch {
                   setError("Network error. Please try again.")
                   setLoading(false)
                 }
               }}
+              
               disabled={loading}
               className="w-full flex items-center gap-4 p-5 bg-white border-2 border-[#0D9488] rounded-xl hover:bg-teal-50 transition-all text-left group"
             >
