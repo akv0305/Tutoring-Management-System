@@ -6,19 +6,20 @@ import PaymentConfirmed from "@/emails/payment-confirmed"
 import PaymentRejected from "@/emails/payment-rejected"
 
 export async function POST(req: NextRequest) {
+  const appUrl = process.env.NEXTAUTH_URL || ""
+
   try {
-    // CCAvenue sends form-urlencoded data with encResp field
     const formData = await req.formData()
     const encResp = formData.get("encResp") as string
 
     if (!encResp) {
       console.error("[CCAvenue Callback] No encResp received")
       return NextResponse.redirect(
-        new URL("/parent/payment-status?status=error&message=no-response", req.url)
+        new URL(`${appUrl}/parent/payment-status?status=error&message=no-response`),
+        { status: 303 }
       )
     }
 
-    // Decrypt the response
     const decryptedString = decrypt(encResp)
     const response = parseResponseString(decryptedString)
 
@@ -26,11 +27,9 @@ export async function POST(req: NextRequest) {
     console.log("[CCAvenue Callback] Order ID:", response.order_id)
     console.log("[CCAvenue Callback] Tracking ID:", response.tracking_id)
 
-    // Extract our custom params
     const paymentId = response.merchant_param1
     const bookingOrderId = response.merchant_param2
-    const studentId = response.merchant_param3
-    const orderStatus = response.order_status // "Success", "Failure", "Aborted", "Invalid"
+    const orderStatus = response.order_status
     const trackingId = response.tracking_id
     const bankRefNo = response.bank_ref_no
     const paymentMode = response.payment_mode
@@ -42,11 +41,11 @@ export async function POST(req: NextRequest) {
     if (!paymentId) {
       console.error("[CCAvenue Callback] No paymentId in merchant_param1")
       return NextResponse.redirect(
-        new URL("/parent/payment-status?status=error&message=invalid-payment", req.url)
+        new URL(`${appUrl}/parent/payment-status?status=error&message=invalid-payment`),
+        { status: 303 }
       )
     }
 
-    // Fetch payment to verify it exists
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
@@ -67,26 +66,19 @@ export async function POST(req: NextRequest) {
     if (!payment) {
       console.error("[CCAvenue Callback] Payment not found:", paymentId)
       return NextResponse.redirect(
-        new URL("/parent/payment-status?status=error&message=payment-not-found", req.url)
+        new URL(`${appUrl}/parent/payment-status?status=error&message=payment-not-found`),
+        { status: 303 }
       )
     }
 
-    // Prevent double-processing
     if (payment.status === "CONFIRMED") {
       return NextResponse.redirect(
-        new URL(
-          `/parent/payment-status?status=already-confirmed&order=${orderId}`,
-          req.url
-        )
+        new URL(`${appUrl}/parent/payment-status?status=already-confirmed&order=${orderId}`),
+        { status: 303 }
       )
     }
 
-    const appUrl = process.env.NEXTAUTH_URL || ""
-
     if (orderStatus === "Success") {
-      // ─── PAYMENT SUCCESSFUL ───
-
-      // Update payment status
       await prisma.payment.update({
         where: { id: paymentId },
         data: {
@@ -99,20 +91,17 @@ export async function POST(req: NextRequest) {
 
       let classesConfirmed = 0
 
-      // Update booking order and classes if exists
       if (bookingOrderId) {
         const bookingOrder = await prisma.bookingOrder.findUnique({
           where: { id: bookingOrderId },
         })
 
         if (bookingOrder) {
-          // Update BookingOrder status to PAID
           await prisma.bookingOrder.update({
             where: { id: bookingOrder.id },
             data: { status: "PAID" },
           })
 
-          // Update all PENDING_PAYMENT classes to SCHEDULED
           const result = await prisma.class.updateMany({
             where: {
               bookingOrderId: bookingOrder.id,
@@ -125,7 +114,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Send notification to parent
       if (payment.student.parent?.user) {
         await prisma.notification.create({
           data: {
@@ -136,7 +124,6 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // Send confirmation email
         if (payment.student.parent.user.email) {
           const confirmedFormatted = new Date().toLocaleDateString("en-US", {
             weekday: "long",
@@ -164,15 +151,10 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.redirect(
-        new URL(
-          `/parent/payment-status?status=success&order=${orderId}&amount=${amount}&classes=${classesConfirmed}`,
-          req.url
-        )
+        new URL(`${appUrl}/parent/payment-status?status=success&order=${orderId}&amount=${amount}&classes=${classesConfirmed}`),
+        { status: 303 }
       )
     } else if (orderStatus === "Aborted") {
-      // ─── PAYMENT CANCELLED BY USER ───
-
-      // Keep payment as PENDING so user can retry
       await prisma.payment.update({
         where: { id: paymentId },
         data: {
@@ -181,14 +163,10 @@ export async function POST(req: NextRequest) {
       })
 
       return NextResponse.redirect(
-        new URL(
-          `/parent/payment-status?status=cancelled&order=${orderId}`,
-          req.url
-        )
+        new URL(`${appUrl}/parent/payment-status?status=cancelled&order=${orderId}`),
+        { status: 303 }
       )
     } else {
-      // ─── PAYMENT FAILED ("Failure" or "Invalid") ───
-
       await prisma.payment.update({
         where: { id: paymentId },
         data: {
@@ -198,7 +176,6 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // Cancel booking order and classes
       let classesCancelled = 0
 
       if (bookingOrderId) {
@@ -228,7 +205,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Send notification to parent
       if (payment.student.parent?.user) {
         await prisma.notification.create({
           data: {
@@ -239,7 +215,6 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // Send rejection email
         if (payment.student.parent.user.email) {
           sendEmail({
             to: payment.student.parent.user.email,
@@ -260,16 +235,15 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.redirect(
-        new URL(
-          `/parent/payment-status?status=failed&order=${orderId}&message=${encodeURIComponent(response.failure_message || "Payment failed")}`,
-          req.url
-        )
+        new URL(`${appUrl}/parent/payment-status?status=failed&order=${orderId}&message=${encodeURIComponent(response.failure_message || "Payment failed")}`),
+        { status: 303 }
       )
     }
   } catch (error) {
     console.error("[CCAvenue Callback] Error:", error)
     return NextResponse.redirect(
-      new URL("/parent/payment-status?status=error&message=processing-error", req.url)
+      new URL(`${appUrl}/parent/payment-status?status=error&message=processing-error`),
+      { status: 303 }
     )
   }
 }

@@ -328,9 +328,10 @@ export function ParentPaymentsClient({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 whitespace-nowrap">
-                        {p.status === "completed" && (
+                      {p.status === "completed" && (
                           <button
                             type="button"
+                            onClick={() => window.open(`/api/payments/${p.id}/invoice`, "_blank")}
                             className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
                           >
                             <Download className="w-3.5 h-3.5" />
