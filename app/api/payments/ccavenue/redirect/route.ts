@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     const orderParams: Record<string, string> = {
       merchant_id: CCAVENUE_MERCHANT_ID,
       order_id: orderRef,
-      currency: "INR",
+      currency: "USD",
       amount: Number(payment.amount).toFixed(2),
       redirect_url: `${appUrl}/api/payments/ccavenue/callback`,
       cancel_url: `${appUrl}/api/payments/ccavenue/callback`,

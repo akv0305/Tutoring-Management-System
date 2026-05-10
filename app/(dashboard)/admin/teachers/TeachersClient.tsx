@@ -137,16 +137,23 @@ function SetRateModal({
   onClose: () => void
   onSuccess: () => void
 }) {
-  const currentRate = teacher.hourlyRate.replace("$", "").replace("/hr", "")
-  const [rate, setRate] = useState(currentRate)
+  const currentCompRate = teacher.hourlyRate.replace("$", "").replace("/hr", "")
+  const currentStudentRate = teacher.studentFacingRate.replace("$", "").replace("/hr", "")
+  const [compRate, setCompRate] = useState(currentCompRate)
+  const [studentRate, setStudentRate] = useState(currentStudentRate)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
   const handleSave = async () => {
     setError("")
-    const numRate = Number(rate)
-    if (isNaN(numRate) || numRate < 0) {
-      setError("Please enter a valid rate.")
+    const numCompRate = Number(compRate)
+    const numStudentRate = Number(studentRate)
+    if (isNaN(numCompRate) || numCompRate < 0) {
+      setError("Please enter a valid compensation rate.")
+      return
+    }
+    if (isNaN(numStudentRate) || numStudentRate < 0) {
+      setError("Please enter a valid student-facing rate.")
       return
     }
     setLoading(true)
@@ -154,7 +161,11 @@ function SetRateModal({
       const res = await fetch("/api/teachers", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: teacher.id, action: "update_rate", compensationRate: numRate }),
+        body: JSON.stringify({
+          id: teacher.id,
+          compensationRate: numCompRate,
+          studentFacingRate: numStudentRate,
+        }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || "Update failed"); return }
@@ -170,35 +181,49 @@ function SetRateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-[#1E293B]">Set Compensation Rate</h3>
+          <h3 className="text-lg font-bold text-[#1E293B]">Update Rates</h3>
           <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100"><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
         <p className="text-sm text-gray-600 mb-4">
-          Update the hourly compensation rate for <strong>{teacher.teacherName}</strong>.
+          Update rates for <strong>{teacher.teacherName}</strong>.
         </p>
 
         <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm space-y-1">
           <div className="flex justify-between">
-            <span className="text-gray-500">Current Rate</span>
+            <span className="text-gray-500">Current Compensation</span>
             <span className="font-semibold text-[#1E293B]">{teacher.hourlyRate}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-500">Student-Facing Rate</span>
-            <span className="text-gray-600">{teacher.studentFacingRate}</span>
+            <span className="text-gray-500">Current Student-Facing</span>
+            <span className="font-semibold text-[#1E293B]">{teacher.studentFacingRate}</span>
           </div>
         </div>
 
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-700 mb-1">New Compensation Rate ($/hr)</label>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={rate}
-            onChange={(e) => setRate(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
-          />
+        <div className="space-y-3 mb-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Compensation Rate ($/hr) <span className="text-amber-600">🔒</span></label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={compRate}
+              onChange={(e) => setCompRate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Student-Facing Rate ($/hr)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={studentRate}
+              onChange={(e) => setStudentRate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">This is the rate parents see when browsing teachers.</p>
+          </div>
         </div>
 
         {error && (
@@ -211,13 +236,14 @@ function SetRateModal({
           <button onClick={onClose} disabled={loading} className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">Cancel</button>
           <button onClick={handleSave} disabled={loading} className="flex-1 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {loading ? "Saving…" : "Save Rate"}
+            {loading ? "Saving…" : "Save Rates"}
           </button>
         </div>
       </div>
     </div>
   )
 }
+
 
 /* ─── Toggle Status Modal ─── */
 

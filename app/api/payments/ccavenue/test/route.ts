@@ -6,7 +6,7 @@ export async function GET() {
   const testParams: Record<string, string> = {
     merchant_id: CCAVENUE_MERCHANT_ID,
     order_id: `TEST_${Date.now()}`,
-    currency: "INR",
+    currency: "USD",
     amount: "1.00",
     redirect_url: `${process.env.NEXTAUTH_URL}/api/payments/ccavenue/callback`,
     cancel_url: `${process.env.NEXTAUTH_URL}/api/payments/ccavenue/callback`,
