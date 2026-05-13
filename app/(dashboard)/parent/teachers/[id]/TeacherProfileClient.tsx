@@ -522,7 +522,7 @@ export function TeacherProfileClient({
               disabled={loading || !studentId || !subjectId || (!!packageId && selectedSlots.length > totalRemaining)}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
             >
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</> : <>{isTrialEligible ? "Book Free Trial" : `Book ${selectedSlots.length} Class${selectedSlots.length > 1 ? "es" : ""}`}</>}
+              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</> : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>}
             </button>
           </div>
         </div>

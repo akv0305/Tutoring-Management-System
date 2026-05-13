@@ -4,25 +4,48 @@ import { StudentsClient } from "./StudentsClient"
 export const dynamic = "force-dynamic"
 
 export default async function StudentsPage() {
-  const studentsRaw = await prisma.student.findMany({
-    include: {
-      parent: {
-        include: { user: { select: { firstName: true, lastName: true, email: true, phone: true } } },
+  const [studentsRaw, coordinatorsRaw] = await Promise.all([
+    prisma.student.findMany({
+      include: {
+        parent: {
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        coordinator: {
+          include: {
+            user: { select: { firstName: true, lastName: true } },
+          },
+        },
+        subjects: {
+          include: { subject: { select: { name: true } } },
+        },
       },
-      coordinator: {
-        include: { user: { select: { firstName: true, lastName: true } } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.coordinatorProfile.findMany({
+      where: { status: "ACTIVE" },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        _count: { select: { students: true } },
       },
-      subjects: {
-        include: { subject: { select: { name: true } } },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  })
+      orderBy: { user: { firstName: "asc" } },
+    }),
+  ])
 
   const students = studentsRaw.map((s) => ({
     id: s.id,
     studentName: `${s.firstName} ${s.lastName}`,
-    parentName: s.parent ? `${s.parent.user.firstName} ${s.parent.user.lastName}` : "—",
+    parentName: s.parent
+      ? `${s.parent.user.firstName} ${s.parent.user.lastName}`
+      : "—",
     email: s.parent?.user.email ?? "—",
     phone: s.parent?.user.phone ?? "—",
     grade: `Grade ${s.grade}`,
@@ -30,12 +53,20 @@ export default async function StudentsPage() {
     coordinator: s.coordinator
       ? `${s.coordinator.user.firstName} ${s.coordinator.user.lastName}`
       : "Unassigned",
+    coordinatorId: s.coordinatorId || "",
     status: s.status.toLowerCase().replace("_", " "),
     joinedDate: s.createdAt.toLocaleDateString("en-US", {
       month: "short",
       day: "2-digit",
       year: "numeric",
     }),
+  }))
+
+  const coordinators = coordinatorsRaw.map((c) => ({
+    id: c.id,
+    name: `${c.user.firstName} ${c.user.lastName}`,
+    currentStudents: c._count.students,
+    bucketSize: c.bucketSize,
   }))
 
   const kpis = {
@@ -45,5 +76,11 @@ export default async function StudentsPage() {
     trialPending: students.filter((s) => s.status === "trial pending").length,
   }
 
-  return <StudentsClient students={students} kpis={kpis} />
+  return (
+    <StudentsClient
+      students={students}
+      kpis={kpis}
+      coordinators={coordinators}
+    />
+  )
 }
