@@ -1,7 +1,15 @@
 "use client"
 
 import React, { useState, useMemo } from "react"
-import { Download, CheckCircle, XCircle, Eye, Loader2 } from "lucide-react"
+import {
+  Download,
+  CheckCircle,
+  XCircle,
+  Eye,
+  Loader2,
+  X,
+  MessageSquareText,
+} from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 
@@ -16,6 +24,8 @@ type Payment = {
   status: string
   date: string
   confirmedBy: string | null
+  bankReference: string
+  adminNotes: string
   refundedAmount: number
 }
 
@@ -26,6 +36,13 @@ type KPIs = {
   refunded: number
   total: number
 }
+
+type ActionModal = {
+  paymentId: string
+  action: "confirm" | "reject"
+  student: string
+  amount: string
+} | null
 
 function MiniKPI({
   label,
@@ -56,28 +73,66 @@ export function PaymentsClient({
   const [payments, setPayments] = useState(initialPayments)
   const [kpis, setKpis] = useState(initialKpis)
   const [filter, setFilter] = useState<"all" | "pending">("all")
-  const [processing, setProcessing] = useState<string | null>(null)
+  const [processing, setProcessing] = useState(false)
+
+  // ── Modal state ──
+  const [actionModal, setActionModal] = useState<ActionModal>(null)
+  const [adminNotes, setAdminNotes] = useState("")
+  const [notesError, setNotesError] = useState(false)
 
   const filtered = useMemo(() => {
-    if (filter === "pending") return payments.filter((p) => p.status === "pending")
+    if (filter === "pending")
+      return payments.filter((p) => p.status === "pending")
     return payments
   }, [filter, payments])
 
-  async function handleAction(paymentId: string, action: "confirm" | "reject") {
-    setProcessing(paymentId)
+  function openModal(
+    paymentId: string,
+    action: "confirm" | "reject",
+    student: string,
+    amount: string
+  ) {
+    setActionModal({ paymentId, action, student, amount })
+    setAdminNotes("")
+    setNotesError(false)
+  }
+
+  function closeModal() {
+    setActionModal(null)
+    setAdminNotes("")
+    setNotesError(false)
+  }
+
+  async function handleSubmit() {
+    if (!actionModal) return
+    if (!adminNotes.trim()) {
+      setNotesError(true)
+      return
+    }
+
+    setProcessing(true)
     try {
       const res = await fetch("/api/payments", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: paymentId, action }),
+        body: JSON.stringify({
+          id: actionModal.paymentId,
+          action: actionModal.action,
+          adminNotes: adminNotes.trim(),
+        }),
       })
       const data = await res.json()
       if (res.ok) {
-        const payment = payments.find((p) => p.id === paymentId)
+        const payment = payments.find((p) => p.id === actionModal.paymentId)
         setPayments((prev) =>
           prev.map((p) =>
-            p.id === paymentId
-              ? { ...p, status: action === "confirm" ? "confirmed" : "failed" }
+            p.id === actionModal.paymentId
+              ? {
+                  ...p,
+                  status:
+                    actionModal.action === "confirm" ? "confirmed" : "failed",
+                  adminNotes: adminNotes.trim(),
+                }
               : p
           )
         )
@@ -85,17 +140,21 @@ export function PaymentsClient({
           ...prev,
           pendingCount: prev.pendingCount - 1,
           pending: prev.pending - (payment?.amountNum ?? 0),
-          ...(action === "confirm"
-            ? { totalCollected: prev.totalCollected + (payment?.amountNum ?? 0) }
+          ...(actionModal.action === "confirm"
+            ? {
+                totalCollected:
+                  prev.totalCollected + (payment?.amountNum ?? 0),
+              }
             : {}),
         }))
+        closeModal()
       } else {
         alert(data.error || "Failed to process payment")
       }
     } catch {
       alert("Network error")
     } finally {
-      setProcessing(null)
+      setProcessing(false)
     }
   }
 
@@ -146,13 +205,30 @@ export function PaymentsClient({
       render: (r: Payment) => (
         <div className="flex flex-col gap-0.5">
           <StatusBadge status={r.status} size="sm" />
-          {r.status === "refunded" && r.refundedAmount > 0 && r.refundedAmount < r.amountNum && (
-            <span className="text-[10px] text-gray-400">
-              Partial: ${r.refundedAmount.toFixed(2)} of {r.amount}
-            </span>
-          )}
+          {r.status === "refunded" &&
+            r.refundedAmount > 0 &&
+            r.refundedAmount < r.amountNum && (
+              <span className="text-[10px] text-gray-400">
+                Partial: ${r.refundedAmount.toFixed(2)} of {r.amount}
+              </span>
+            )}
         </div>
       ),
+    },
+    {
+      key: "adminNotes",
+      label: "Notes",
+      render: (r: Payment) =>
+        r.adminNotes ? (
+          <span
+            className="text-xs text-gray-600 max-w-[180px] truncate block cursor-help"
+            title={r.adminNotes}
+          >
+            {r.adminNotes}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        ),
     },
     {
       key: "date",
@@ -176,22 +252,20 @@ export function PaymentsClient({
           {r.status === "pending" && (
             <>
               <button
-                title="Confirm"
-                disabled={processing === r.id}
-                onClick={() => handleAction(r.id, "confirm")}
-                className="p-1.5 rounded-md text-[#22C55E] hover:bg-green-50 transition-colors disabled:opacity-50"
+                title="Approve"
+                onClick={() =>
+                  openModal(r.id, "confirm", r.student, r.amount)
+                }
+                className="p-1.5 rounded-md text-[#22C55E] hover:bg-green-50 transition-colors"
               >
-                {processing === r.id ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <CheckCircle className="w-3.5 h-3.5" />
-                )}
+                <CheckCircle className="w-3.5 h-3.5" />
               </button>
               <button
                 title="Reject"
-                disabled={processing === r.id}
-                onClick={() => handleAction(r.id, "reject")}
-                className="p-1.5 rounded-md text-[#EF4444] hover:bg-red-50 transition-colors disabled:opacity-50"
+                onClick={() =>
+                  openModal(r.id, "reject", r.student, r.amount)
+                }
+                className="p-1.5 rounded-md text-[#EF4444] hover:bg-red-50 transition-colors"
               >
                 <XCircle className="w-3.5 h-3.5" />
               </button>
@@ -201,6 +275,8 @@ export function PaymentsClient({
       ),
     },
   ]
+
+  const isConfirm = actionModal?.action === "confirm"
 
   return (
     <div className="space-y-5">
@@ -274,6 +350,113 @@ export function PaymentsClient({
         searchPlaceholder="Search payments..."
         pageSize={10}
       />
+
+      {/* ── Approve / Reject Modal ── */}
+      {actionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            {/* Header */}
+            <div
+              className={`px-6 py-4 flex items-center justify-between ${
+                isConfirm ? "bg-green-50" : "bg-red-50"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {isConfirm ? (
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                ) : (
+                  <XCircle className="w-5 h-5 text-red-600" />
+                )}
+                <h2
+                  className={`text-lg font-bold ${
+                    isConfirm ? "text-green-800" : "text-red-800"
+                  }`}
+                >
+                  {isConfirm ? "Approve Payment" : "Reject Payment"}
+                </h2>
+              </div>
+              <button
+                onClick={closeModal}
+                className="p-1 rounded-md hover:bg-white/60 transition-colors"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Student</span>
+                <span className="font-semibold text-[#1E293B]">
+                  {actionModal.student}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Amount</span>
+                <span className="font-bold text-[#1E293B]">
+                  {actionModal.amount}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  <MessageSquareText className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
+                  Notes / Remarks{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={adminNotes}
+                  onChange={(e) => {
+                    setAdminNotes(e.target.value)
+                    if (e.target.value.trim()) setNotesError(false)
+                  }}
+                  placeholder={
+                    isConfirm
+                      ? 'e.g., "Bank ref: TXN-98765" or "Opening balance — pre-paid before go-live"'
+                      : 'e.g., "Payment not received" or "Duplicate booking"'
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                    notesError
+                      ? "border-red-400 focus:ring-red-300 bg-red-50"
+                      : "border-gray-200 focus:ring-blue-300"
+                  }`}
+                />
+                {notesError && (
+                  <p className="text-xs text-red-500 mt-1">
+                    Notes are required before {isConfirm ? "approving" : "rejecting"}.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 flex justify-end gap-3">
+              <button
+                onClick={closeModal}
+                disabled={processing}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={processing}
+                className={`px-5 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50 inline-flex items-center gap-2 ${
+                  isConfirm
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "bg-red-600 hover:bg-red-700"
+                }`}
+              >
+                {processing && (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                )}
+                {isConfirm ? "Approve Payment" : "Reject Payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

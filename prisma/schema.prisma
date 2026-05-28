@@ -476,6 +476,7 @@ model Payment {
   method        PaymentMethod @default(BANK_TRANSFER)
   status        PaymentStatus @default(PENDING)
   bankReference String?
+  adminNotes    String?
   confirmedById String?
   confirmedBy   User?         @relation("ConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
   confirmedAt   DateTime?

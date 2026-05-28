@@ -31,7 +31,6 @@ export async function GET(req: NextRequest) {
       if (!coord) return NextResponse.json({ error: "Coordinator not found" }, { status: 404 })
       where.student = { coordinatorId: coord.id }
     }
-    // ADMIN sees all
 
     if (status) where.status = status.toUpperCase()
     if (studentId) where.studentId = studentId
@@ -56,6 +55,7 @@ export async function GET(req: NextRequest) {
       method: p.method,
       status: p.status,
       bankReference: p.bankReference,
+      adminNotes: p.adminNotes,
       confirmedBy: p.confirmedBy
         ? `${p.confirmedBy.firstName} ${p.confirmedBy.lastName}`
         : null,
@@ -109,7 +109,10 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    return NextResponse.json({ message: "Payment created", payment: { id: payment.id, status: payment.status } }, { status: 201 })
+    return NextResponse.json(
+      { message: "Payment created", payment: { id: payment.id, status: payment.status } },
+      { status: 201 }
+    )
   } catch (error) {
     console.error("POST /api/payments error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
@@ -122,10 +125,19 @@ export async function PATCH(req: NextRequest) {
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const body = await req.json()
-    const { id, action, reason } = body
+    const { id, action, reason, adminNotes } = body
 
     if (!id || !action) {
       return NextResponse.json({ error: "id and action required" }, { status: 400 })
+    }
+
+    // ── Mandatory notes for both confirm and reject ──
+    const notes = (adminNotes || reason || "").trim()
+    if (!notes) {
+      return NextResponse.json(
+        { error: "Notes are mandatory when approving or rejecting a payment." },
+        { status: 400 }
+      )
     }
 
     // Permission check
@@ -151,7 +163,10 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (!canConfirm) {
-      return NextResponse.json({ error: "You do not have permission to process payments" }, { status: 403 })
+      return NextResponse.json(
+        { error: "You do not have permission to process payments" },
+        { status: 403 }
+      )
     }
 
     const payment = await prisma.payment.findUnique({ where: { id } })
@@ -161,16 +176,19 @@ export async function PATCH(req: NextRequest) {
 
     if (action === "confirm") {
       if (payment.status !== "PENDING") {
-        return NextResponse.json({ error: "Only pending payments can be confirmed" }, { status: 400 })
+        return NextResponse.json(
+          { error: "Only pending payments can be confirmed" },
+          { status: 400 }
+        )
       }
 
-      // Update payment status
       const updated = await prisma.payment.update({
         where: { id },
         data: {
           status: "CONFIRMED",
           confirmedById: user!.id,
           confirmedAt: new Date(),
+          adminNotes: notes,
         },
         include: {
           student: { select: { firstName: true, lastName: true } },
@@ -178,7 +196,6 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-      // Find linked BookingOrder and update its classes to SCHEDULED
       const bookingOrder = await prisma.bookingOrder.findUnique({
         where: { paymentId: payment.id },
       })
@@ -186,13 +203,11 @@ export async function PATCH(req: NextRequest) {
       let classesConfirmed = 0
 
       if (bookingOrder) {
-        // Update BookingOrder status to PAID
         await prisma.bookingOrder.update({
           where: { id: bookingOrder.id },
           data: { status: "PAID" },
         })
 
-        // Update all PENDING_PAYMENT classes in this order to SCHEDULED
         const result = await prisma.class.updateMany({
           where: {
             bookingOrderId: bookingOrder.id,
@@ -203,7 +218,6 @@ export async function PATCH(req: NextRequest) {
 
         classesConfirmed = result.count
 
-        // Send notification to the parent
         const student = await prisma.student.findUnique({
           where: { id: bookingOrder.studentId },
           include: {
@@ -226,8 +240,7 @@ export async function PATCH(req: NextRequest) {
               message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) has been confirmed. ${classesConfirmed} class${classesConfirmed > 1 ? "es are" : " is"} now scheduled.`,
             },
           })
-          
-          // Send payment confirmed email to parent
+
           if (student.parent?.user?.email) {
             const appUrl = process.env.NEXTAUTH_URL || ""
             const confirmedFormatted = new Date().toLocaleDateString("en-US", {
@@ -266,27 +279,30 @@ export async function PATCH(req: NextRequest) {
           amount: Number(updated.amount),
           status: updated.status,
           confirmedAt: updated.confirmedAt,
+          adminNotes: notes,
         },
       })
     }
 
     if (action === "reject") {
       if (payment.status !== "PENDING") {
-        return NextResponse.json({ error: "Only pending payments can be rejected" }, { status: 400 })
+        return NextResponse.json(
+          { error: "Only pending payments can be rejected" },
+          { status: 400 }
+        )
       }
 
-      // Update payment status
       const updated = await prisma.payment.update({
         where: { id },
         data: {
           status: "FAILED",
+          adminNotes: notes,
         },
         include: {
           student: { select: { firstName: true, lastName: true } },
         },
       })
 
-      // Find linked BookingOrder and cancel its classes
       const bookingOrder = await prisma.bookingOrder.findUnique({
         where: { paymentId: payment.id },
       })
@@ -294,13 +310,11 @@ export async function PATCH(req: NextRequest) {
       let classesCancelled = 0
 
       if (bookingOrder) {
-        // Update BookingOrder status to CANCELLED
         await prisma.bookingOrder.update({
           where: { id: bookingOrder.id },
           data: { status: "CANCELLED" },
         })
 
-        // Cancel all PENDING_PAYMENT classes in this order
         const result = await prisma.class.updateMany({
           where: {
             bookingOrderId: bookingOrder.id,
@@ -309,13 +323,12 @@ export async function PATCH(req: NextRequest) {
           data: {
             status: "CANCELLED_STUDENT",
             cancelledAt: new Date(),
-            cancelReason: reason || "Payment rejected",
+            cancelReason: notes,
           },
         })
 
         classesCancelled = result.count
 
-        // Send notification to the parent
         const student = await prisma.student.findUnique({
           where: { id: bookingOrder.studentId },
           include: {
@@ -335,11 +348,10 @@ export async function PATCH(req: NextRequest) {
               userId: student.parent.user.id,
               type: "PAYMENT",
               title: "Payment Rejected — Classes Cancelled",
-              message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) was rejected. ${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled. ${reason ? "Reason: " + reason : ""}`,
+              message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) was rejected. ${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled. Reason: ${notes}`,
             },
           })
 
-          // Send payment rejected email to parent
           if (student.parent?.user?.email) {
             const appUrl = process.env.NEXTAUTH_URL || ""
 
@@ -352,7 +364,7 @@ export async function PATCH(req: NextRequest) {
                 orderRef: bookingOrder.orderRef,
                 amount: Number(payment.amount).toLocaleString(),
                 classesCancelled: classesCancelled,
-                reason: reason || undefined,
+                reason: notes,
                 dashboardUrl: `${appUrl}/parent`,
               }),
             }).catch((err) =>
@@ -370,12 +382,15 @@ export async function PATCH(req: NextRequest) {
           student: `${updated.student.firstName} ${updated.student.lastName}`,
           amount: Number(updated.amount),
           status: updated.status,
-          reason: reason ?? "Rejected by admin",
+          adminNotes: notes,
         },
       })
     }
 
-    return NextResponse.json({ error: "Invalid action. Use 'confirm' or 'reject'" }, { status: 400 })
+    return NextResponse.json(
+      { error: "Invalid action. Use 'confirm' or 'reject'" },
+      { status: 400 }
+    )
   } catch (error) {
     console.error("PATCH /api/payments error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

@@ -9,7 +9,6 @@ export default async function PaymentsPage() {
       student: { select: { firstName: true, lastName: true } },
       package: { select: { name: true } },
       confirmedBy: { select: { firstName: true, lastName: true } },
-      // Include refund requests to get actual refund amounts
       refundRequests: {
         where: { status: { in: ["APPROVED", "PROCESSED"] } },
         select: { refundAmount: true },
@@ -19,7 +18,6 @@ export default async function PaymentsPage() {
   })
 
   const payments = paymentsRaw.map((p, idx) => {
-    // Sum of all approved/processed refund amounts for this payment
     const refundedAmount = p.refundRequests.reduce(
       (sum, r) => sum + Number(r.refundAmount),
       0
@@ -42,12 +40,12 @@ export default async function PaymentsPage() {
       confirmedBy: p.confirmedBy
         ? `${p.confirmedBy.firstName} ${p.confirmedBy.lastName}`
         : "—",
-      // Actual refunded amount from refund requests (not the full payment amount)
+      bankReference: p.bankReference ?? "",
+      adminNotes: p.adminNotes ?? "",
       refundedAmount,
     }
   })
 
-  // KPI: "Refunded" should sum the actual refund request amounts, not the full payment amounts
   const totalRefundedFromRequests = payments
     .filter((p) => p.status === "refunded")
     .reduce((sum, p) => sum + p.refundedAmount, 0)
