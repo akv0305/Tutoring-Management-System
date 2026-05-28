@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { getSession } from "@/lib/auth-utils"
 import bcrypt from "bcryptjs"
 import { sendEmail } from "@/lib/email"
-import WelcomeStaff from "@/emails/welcome-staff"
+import WelcomeParent from "@/emails/welcome-parent"
 
 interface StudentRow {
   firstName: string
@@ -241,9 +241,8 @@ export async function POST(req: NextRequest) {
         sendEmail({
           to: email,
           subject: "Welcome to Expert Guru — Your Parent Account",
-          react: WelcomeStaff({
+          react: WelcomeParent({
             name: p.firstName.trim(),
-            role: "PARENT",
             email,
             loginUrl: `${appUrl}/login`,
           }),
