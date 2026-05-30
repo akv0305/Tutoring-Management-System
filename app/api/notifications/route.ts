@@ -62,6 +62,97 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// POST /api/notifications — parent sends a message/callback request to their coordinator
+export async function POST(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Only parents can use this endpoint
+    if (session.user.role !== "PARENT") {
+      return NextResponse.json({ error: "Only parents can send messages to coordinators" }, { status: 403 })
+    }
+
+    const body = await req.json()
+    const { recipientType, title, message } = body
+
+    if (!recipientType || recipientType !== "coordinator") {
+      return NextResponse.json(
+        { error: "recipientType must be 'coordinator'" },
+        { status: 400 }
+      )
+    }
+
+    if (!title || !title.trim()) {
+      return NextResponse.json({ error: "Title is required" }, { status: 400 })
+    }
+
+    if (!message || !message.trim()) {
+      return NextResponse.json({ error: "Message is required" }, { status: 400 })
+    }
+
+    // Find the parent profile and their students to locate the coordinator
+    const parentProfile = await prisma.parentProfile.findUnique({
+      where: { userId: session.user.id },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        students: {
+          select: {
+            coordinatorId: true,
+            coordinator: {
+              select: {
+                userId: true,
+                user: { select: { firstName: true, lastName: true } },
+              },
+            },
+          },
+        },
+      },
+    })
+
+    if (!parentProfile) {
+      return NextResponse.json({ error: "Parent profile not found" }, { status: 404 })
+    }
+
+    // Find the first coordinator assigned to any of the parent's children
+    const studentWithCoord = parentProfile.students.find((s) => s.coordinatorId && s.coordinator)
+
+    if (!studentWithCoord || !studentWithCoord.coordinator) {
+      return NextResponse.json(
+        { error: "No coordinator assigned to your children yet. Please contact support." },
+        { status: 404 }
+      )
+    }
+
+    const coordinatorUserId = studentWithCoord.coordinator.userId
+    const parentName = `${parentProfile.user.firstName} ${parentProfile.user.lastName}`
+
+    // Create the notification for the coordinator
+    const notification = await prisma.notification.create({
+      data: {
+        userId: coordinatorUserId,
+        type: "SYSTEM",
+        title: title.trim(),
+        message: `From parent ${parentName}: ${message.trim()}`,
+      },
+    })
+
+    return NextResponse.json(
+      {
+        message: "Message sent to your coordinator successfully",
+        notificationId: notification.id,
+        coordinatorName: `${studentWithCoord.coordinator.user.firstName} ${studentWithCoord.coordinator.user.lastName}`,
+      },
+      { status: 201 }
+    )
+  } catch (error) {
+    console.error("POST /api/notifications error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
 // PATCH /api/notifications — mark read, mark all read, dismiss
 export async function PATCH(req: NextRequest) {
   try {

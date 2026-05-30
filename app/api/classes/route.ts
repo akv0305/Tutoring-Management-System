@@ -148,6 +148,7 @@ export async function GET(req: NextRequest) {
 // POST /api/classes — book one or more classes
 // Accepts either { scheduledAt: "..." } for a single slot
 // or { slots: ["...", "..."] } for multiple slots in one booking
+// Optional: templateId for package-based booking
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -165,6 +166,7 @@ export async function POST(req: NextRequest) {
       teacherId,
       subjectId,
       packageId,
+      templateId,
       scheduledAt,
       slots,
       duration,
@@ -242,8 +244,47 @@ export async function POST(req: NextRequest) {
     const classDuration = duration || 60
     const isTrialClass = isTrial || false
 
-    // ── Package expiry & balance check ──
-    if (packageId) {
+    // ── Validate templateId if provided ──
+    let template: {
+      id: string
+      name: string
+      subjectId: string
+      classesIncluded: number
+      validityDays: number
+      suggestedPrice: number
+    } | null = null
+
+    if (templateId) {
+      const templateRaw = await prisma.packageTemplate.findUnique({
+        where: { id: templateId },
+      })
+      if (!templateRaw) {
+        return NextResponse.json({ error: "Package template not found" }, { status: 404 })
+      }
+      if (templateRaw.status !== "ACTIVE") {
+        return NextResponse.json({ error: "This package template is no longer available" }, { status: 400 })
+      }
+      if (templateRaw.subjectId !== subjectId) {
+        return NextResponse.json({ error: "Package template subject does not match selected subject" }, { status: 400 })
+      }
+      if (slotList.length !== templateRaw.classesIncluded) {
+        return NextResponse.json(
+          { error: `This package requires exactly ${templateRaw.classesIncluded} classes. You selected ${slotList.length}.` },
+          { status: 400 }
+        )
+      }
+      template = {
+        id: templateRaw.id,
+        name: templateRaw.name,
+        subjectId: templateRaw.subjectId,
+        classesIncluded: templateRaw.classesIncluded,
+        validityDays: templateRaw.validityDays,
+        suggestedPrice: Number(templateRaw.suggestedPrice),
+      }
+    }
+
+    // ── Package expiry & balance check (for existing packageId — legacy support) ──
+    if (packageId && !templateId) {
       const pkg = await prisma.package.findUnique({
         where: { id: packageId },
       })
@@ -401,11 +442,12 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── NON-TRIAL: create BookingOrder + Payment + Classes in a transaction ───
-
-    // Calculate total amount: classes × teacher's student-facing rate × (duration / 60)
+    // If templateId provided, use package price; otherwise use hourly rate
     const hourlyRate = Number(teacher.studentFacingRate.toString())
     const perClassAmount = hourlyRate * (classDuration / 60)
-    const totalAmount = perClassAmount * slotList.length
+    const totalAmount = template
+      ? template.suggestedPrice
+      : perClassAmount * slotList.length
     const orderRef = generateOrderRef()
 
     const result = await prisma.$transaction(async (tx) => {
@@ -434,11 +476,39 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // If template provided, create a Package record first
+      let createdPackageId: string | null = packageId || null
+
+      if (template) {
+        const now = new Date()
+        const expiryDate = new Date(now.getTime() + template.validityDays * 24 * 60 * 60 * 1000)
+
+        const newPackage = await tx.package.create({
+          data: {
+            name: template.name,
+            studentId,
+            teacherId,
+            subjectId,
+            classesIncluded: template.classesIncluded,
+            classesUsed: 0,
+            pricePerClass: template.suggestedPrice / template.classesIncluded,
+            totalPrice: template.suggestedPrice,
+            validityDays: template.validityDays,
+            startDate: now,
+            expiryDate,
+            status: "ACTIVE",
+            templateId: template.id,
+          },
+        })
+
+        createdPackageId = newPackage.id
+      }
+
       // 1. Create the Payment record (PENDING)
       const payment = await tx.payment.create({
         data: {
           studentId,
-          packageId: packageId || null,
+          packageId: createdPackageId,
           amount: totalAmount,
           method: "BANK_TRANSFER",
           status: "PENDING",
@@ -450,7 +520,7 @@ export async function POST(req: NextRequest) {
         data: {
           orderRef,
           studentId,
-          packageId: packageId || null,
+          packageId: createdPackageId,
           teacherId,
           subjectId,
           totalClasses: slotList.length,
@@ -468,7 +538,7 @@ export async function POST(req: NextRequest) {
             studentId,
             teacherId,
             subjectId,
-            packageId: packageId || null,
+            packageId: createdPackageId,
             bookingOrderId: bookingOrder.id,
             scheduledAt: new Date(slot),
             duration: classDuration,
@@ -481,7 +551,7 @@ export async function POST(req: NextRequest) {
         classRecords.push(newClass)
       }
 
-      return { payment, bookingOrder, classRecords }
+      return { payment, bookingOrder, classRecords, createdPackageId }
     })
 
     // Send notifications to admin(s) and coordinator (outside transaction, non-blocking)
@@ -510,13 +580,14 @@ export async function POST(req: NextRequest) {
       if (uniqueNotifyIds.length > 0) {
         const studentName = `${student.firstName} ${student.lastName}`
         const teacherName = `${teacher.user.firstName} ${teacher.user.lastName}`
+        const packageNote = template ? ` (Package: ${template.name})` : ""
 
         await prisma.notification.createMany({
           data: uniqueNotifyIds.map((userId) => ({
             userId,
             type: "PAYMENT" as const,
             title: "New Booking — Payment Pending",
-            message: `${studentName} booked ${slotList.length} class${slotList.length > 1 ? "es" : ""} with ${teacherName}. Order: ${orderRef}. Amount: $${totalAmount.toFixed(2)}. Awaiting payment confirmation.`,
+            message: `${studentName} booked ${slotList.length} class${slotList.length > 1 ? "es" : ""} with ${teacherName}${packageNote}. Order: ${orderRef}. Amount: $${totalAmount.toFixed(2)}. Awaiting payment confirmation.`,
           })),
         })
       }
@@ -575,6 +646,7 @@ export async function POST(req: NextRequest) {
         orderRef: result.bookingOrder.orderRef,
         bookingOrderId: result.bookingOrder.id,
         paymentId: result.payment.id,
+        packageId: result.createdPackageId || null,
         classIds: result.classRecords.map((c) => c.id),
         totalClasses: slotList.length,
         totalAmount: `$${totalAmount.toFixed(2)}`,
@@ -856,22 +928,22 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-            // If this was a trial class, reset trialTaken so student can rebook
-            if (classRecord.isTrial) {
-              try {
-                const studentSubjectLink = await prisma.studentSubject.findFirst({
-                  where: { studentId: classRecord.student.id, subjectId: classRecord.subjectId },
-                })
-                if (studentSubjectLink) {
-                  await prisma.studentSubject.update({
-                    where: { id: studentSubjectLink.id },
-                    data: { trialTaken: false },
-                  })
-                }
-              } catch (trialErr) {
-                console.error("[Cancel] Failed to reset trialTaken:", trialErr)
-              }
-            }      
+      // If this was a trial class, reset trialTaken so student can rebook
+      if (classRecord.isTrial) {
+        try {
+          const studentSubjectLink = await prisma.studentSubject.findFirst({
+            where: { studentId: classRecord.student.id, subjectId: classRecord.subjectId },
+          })
+          if (studentSubjectLink) {
+            await prisma.studentSubject.update({
+              where: { id: studentSubjectLink.id },
+              data: { trialTaken: false },
+            })
+          }
+        } catch (trialErr) {
+          console.error("[Cancel] Failed to reset trialTaken:", trialErr)
+        }
+      }      
 
       // Notify parent
       if (classRecord.student.parentId) {
@@ -1105,27 +1177,27 @@ export async function PATCH(req: NextRequest) {
             message: `${classRecord.student.firstName}'s ${classRecord.subject.name} class has been rescheduled to ${newDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`,
           },
         })
-                // Send reschedule email to teacher
-                const appUrl = process.env.NEXTAUTH_URL || ""
-                const previousFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-                const newFormatted = `${newDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-        
-                sendEmail({
-                  to: classRecord.teacher.user.email,
-                  subject: `Class rescheduled — ${classRecord.student.firstName} ${classRecord.student.lastName} — Expert Guru`,
-                  react: ClassRescheduled({
-                    recipientName: classRecord.teacher.user.firstName,
-                    studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
-                    teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
-                    subject: classRecord.subject.name,
-                    previousSchedule: previousFormatted,
-                    newSchedule: newFormatted,
-                    duration: classRecord.duration,
-                    rescheduledBy: "student",
-                    reason: reason || undefined,
-                    dashboardUrl: `${appUrl}/teacher`,
-                  }),
-                }).catch((err) => console.error("[Reschedule] Teacher email failed:", err))
+        // Send reschedule email to teacher
+        const appUrl = process.env.NEXTAUTH_URL || ""
+        const previousFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+        const newFormatted = `${newDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+
+        sendEmail({
+          to: classRecord.teacher.user.email,
+          subject: `Class rescheduled — ${classRecord.student.firstName} ${classRecord.student.lastName} — Expert Guru`,
+          react: ClassRescheduled({
+            recipientName: classRecord.teacher.user.firstName,
+            studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
+            teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
+            subject: classRecord.subject.name,
+            previousSchedule: previousFormatted,
+            newSchedule: newFormatted,
+            duration: classRecord.duration,
+            rescheduledBy: "student",
+            reason: reason || undefined,
+            dashboardUrl: `${appUrl}/teacher`,
+          }),
+        }).catch((err) => console.error("[Reschedule] Teacher email failed:", err))
         
       } else if (classRecord.student.parentId) {
         const parent = await prisma.parentProfile.findUnique({

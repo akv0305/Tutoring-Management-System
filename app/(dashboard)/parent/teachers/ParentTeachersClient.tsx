@@ -64,13 +64,9 @@ function TeacherGridCard({ teacher }: { teacher: TeacherEntry }) {
           </button>
           <button
             onClick={() => router.push(`/parent/teachers/${teacher.id}`)}
-            className={`w-full px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm ${
-              teacher.isExistingTeacher
-                ? "bg-[#0D9488] text-white hover:bg-teal-700"
-                : "bg-[#F59E0B] text-[#1E293B] hover:bg-amber-400"
-            }`}
+            className="w-full px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm bg-[#0D9488] text-white hover:bg-teal-700"
           >
-            {teacher.isExistingTeacher ? "Book Class" : "Book Trial"}
+            Book Class
           </button>
         </div>
       </div>
@@ -148,7 +144,7 @@ export function ParentTeachersClient({
           <div className="relative flex-1 min-w-[180px] max-w-xs">
             <input
               type="text"
-              placeholder="Search by name or subject…"
+              placeholder="Search by name or subject"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 text-sm text-[#1E293B] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
@@ -186,7 +182,7 @@ export function ParentTeachersClient({
       {/* Active filter chips */}
       {hasFilters && (
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-gray-500">Active filters:</span>
+          <span className="text-xs text-gray-500 font-medium">Active filters:</span>
           {search && (
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-teal-50 text-teal-700 text-xs font-medium border border-teal-200">
               &quot;{search}&quot;

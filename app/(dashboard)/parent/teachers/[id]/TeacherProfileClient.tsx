@@ -11,47 +11,40 @@ import { RatingStars } from "@/components/ui/RatingStars"
 type Subject = { id: string; name: string }
 type Availability = { dayOfWeek: string; startTime: string; endTime: string }
 type BookedSlot = { start: string; duration: number }
-type PackageOpt = { id: string; label: string; remaining: number; subjectId: string; subjectName: string; studentId: string }
 type Student = { id: string; name: string }
 type TrialEligibility = { studentId: string; subjectId: string; trialTaken: boolean }
+type PackageTemplateOpt = {
+  id: string; name: string; subjectId: string; subjectName: string
+  classesIncluded: number; validityDays: number; suggestedPrice: number
+  description: string; isPopular: boolean
+}
 
 type TeacherData = {
   id: string; name: string; initials: string; qualification: string; bio: string
-  experience: number; rate: string; rating: number; reviews: number; totalClasses: number
+  experience: number; rate: string; rateNum: number; rating: number; reviews: number; totalClasses: number
   timezone: string; subjects: Subject[]; availability: Availability[]
   blockedDates: string[]; bookedSlots: BookedSlot[]
 }
 
-const DAY_ORDER = ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"]
-const DAY_LABELS: Record<string,string> = {
-  MONDAY:"Mon",TUESDAY:"Tue",WEDNESDAY:"Wed",THURSDAY:"Thu",FRIDAY:"Fri",SATURDAY:"Sat",SUNDAY:"Sun"
-}
-const DAY_JS_MAP: Record<number,string> = { 1:"MONDAY",2:"TUESDAY",3:"WEDNESDAY",4:"THURSDAY",5:"FRIDAY",6:"SATURDAY",0:"SUNDAY" }
+type BookingType = "package" | "trial" | "standalone"
+
+const DAY_JS_MAP: Record<number, string> = { 1: "MONDAY", 2: "TUESDAY", 3: "WEDNESDAY", 4: "THURSDAY", 5: "FRIDAY", 6: "SATURDAY", 0: "SUNDAY" }
 
 function getWeekDates(weekOffset: number): Date[] {
   const now = new Date()
   const dayOfWeek = now.getUTCDay()
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
   const monday = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
+    now.getUTCFullYear(), now.getUTCMonth(),
     now.getUTCDate() + mondayOffset + weekOffset * 7
   ))
-  return Array.from({ length: 7 }, (_, i) => {
-    return new Date(Date.UTC(
-      monday.getUTCFullYear(),
-      monday.getUTCMonth(),
-      monday.getUTCDate() + i
-    ))
-  })
+  return Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(
+    monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate() + i
+  )))
 }
 
-/**
- * Convert 12-hour "H:MM AM/PM" or 24-hour "HH:MM" to "HH:MM" (24-hour).
- */
 function to24(time: string): string {
   const trimmed = time.trim()
-  // Already 24-hour format (no AM/PM)?
   if (!/[APap][Mm]/.test(trimmed)) {
     const [h, m] = trimmed.split(":").map(Number)
     return `${String(h).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`
@@ -72,9 +65,8 @@ function generateSlots(startTime: string, endTime: string): string[] {
   const [sh, sm] = start24.split(":").map(Number)
   const [eh] = end24.split(":").map(Number)
   let hour = sh
-  let min = sm
   while (hour < eh) {
-    slots.push(`${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`)
+    slots.push(`${String(hour).padStart(2, "0")}:${String(sm).padStart(2, "0")}`)
     hour++
   }
   return slots
@@ -92,21 +84,25 @@ type SelectedSlot = { date: string; time: string; dateObj: Date }
 export function TeacherProfileClient({
   teacher,
   students,
-  packages,
+  packageTemplates,
   trialEligibility,
 }: {
   teacher: TeacherData
   students: Student[]
-  packages: PackageOpt[]
+  packageTemplates: PackageTemplateOpt[]
   trialEligibility: TrialEligibility[]
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedSlots, setSelectedSlots] = useState<SelectedSlot[]>([])
   const [step, setStep] = useState<"browse" | "confirm">("browse")
+
+  // Selection state — now on browse step
   const [studentId, setStudentId] = useState(students.length === 1 ? students[0].id : "")
-  const [packageId, setPackageId] = useState("")
   const [subjectId, setSubjectId] = useState(teacher.subjects.length === 1 ? teacher.subjects[0].id : "")
+  const [bookingType, setBookingType] = useState<BookingType>("standalone")
+  const [templateId, setTemplateId] = useState("")
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
@@ -115,14 +111,12 @@ export function TeacherProfileClient({
 
   const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset])
 
-  // Build availability map: DAY_NAME -> startTime, endTime
   const availMap = useMemo(() => {
     const m = new Map<string, Availability>()
     teacher.availability.forEach((a) => m.set(a.dayOfWeek, a))
     return m
   }, [teacher.availability])
 
-  // Build set of booked ISO strings for quick lookup
   const bookedSet = useMemo(() => {
     const s = new Set<string>()
     teacher.bookedSlots.forEach((b) => {
@@ -134,27 +128,80 @@ export function TeacherProfileClient({
   }, [teacher.bookedSlots])
 
   const blockedSet = useMemo(() => new Set(teacher.blockedDates), [teacher.blockedDates])
-
   const now = new Date()
 
-  // Filter packages by selected student and subject
-  const filteredPackages = packages.filter(
-    (p) => (!studentId || p.studentId === studentId) && (!subjectId || p.subjectId === subjectId)
-  )
+  // Filter package templates by selected subject
+  const filteredTemplates = useMemo(() => {
+    if (!subjectId) return []
+    return packageTemplates.filter((t) => t.subjectId === subjectId)
+  }, [subjectId, packageTemplates])
 
-  const selectedPackage = packages.find((p) => p.id === packageId)
-  const totalRemaining = selectedPackage ? selectedPackage.remaining : 0
+  const selectedTemplate = packageTemplates.find((t) => t.id === templateId)
 
-  // Check if selected student+subject is eligible for a free trial
+  // Trial eligibility
   const isTrialEligible = useMemo(() => {
     if (!studentId || !subjectId) return false
     const record = trialEligibility.find(
       (te) => te.studentId === studentId && te.subjectId === subjectId
     )
-    // No record means student hasn't been linked to this subject yet — treat as eligible
     if (!record) return true
     return !record.trialTaken
   }, [studentId, subjectId, trialEligibility])
+
+  // Required slot count based on booking type
+  const requiredSlots = bookingType === "package" && selectedTemplate
+    ? selectedTemplate.classesIncluded
+    : bookingType === "trial"
+      ? 1
+      : 0 // 0 means any number ≥ 1
+
+  // Price display
+  const priceDisplay = useMemo(() => {
+    if (bookingType === "trial") return "Free"
+    if (bookingType === "package" && selectedTemplate) {
+      return `$${selectedTemplate.suggestedPrice.toFixed(2)} (${selectedTemplate.classesIncluded} classes)`
+    }
+    if (bookingType === "standalone" && selectedSlots.length > 0) {
+      const total = teacher.rateNum * selectedSlots.length
+      return `$${total.toFixed(2)} (${selectedSlots.length} × ${teacher.rate}/hr)`
+    }
+    return `${teacher.rate}/hr per class`
+  }, [bookingType, selectedTemplate, selectedSlots.length, teacher.rateNum, teacher.rate])
+
+  function handleBookingTypeChange(type: BookingType) {
+    setBookingType(type)
+    setTemplateId("")
+    setSelectedSlots([])
+    setError("")
+  }
+
+  function handleSubjectChange(newSubjectId: string) {
+    setSubjectId(newSubjectId)
+    setTemplateId("")
+    setSelectedSlots([])
+    // Reset booking type if trial no longer eligible or templates change
+    if (bookingType === "trial") {
+      const eligible = trialEligibility.find(
+        (te) => te.studentId === studentId && te.subjectId === newSubjectId
+      )
+      if (eligible && eligible.trialTaken) {
+        setBookingType("standalone")
+      }
+    }
+  }
+
+  function handleStudentChange(newStudentId: string) {
+    setStudentId(newStudentId)
+    setSelectedSlots([])
+    if (bookingType === "trial") {
+      const eligible = trialEligibility.find(
+        (te) => te.studentId === newStudentId && te.subjectId === subjectId
+      )
+      if (eligible && eligible.trialTaken) {
+        setBookingType("standalone")
+      }
+    }
+  }
 
   function toggleSlot(dateObj: Date, time: string) {
     const dateStr = dateObj.toISOString().split("T")[0]
@@ -162,6 +209,10 @@ export function TeacherProfileClient({
     setSelectedSlots((prev) => {
       const exists = prev.find((s) => `${s.date}_${s.time}` === key)
       if (exists) return prev.filter((s) => `${s.date}_${s.time}` !== key)
+      // Enforce max slots for trial
+      if (bookingType === "trial" && prev.length >= 1) return prev
+      // Enforce max slots for package
+      if (bookingType === "package" && selectedTemplate && prev.length >= selectedTemplate.classesIncluded) return prev
       return [...prev, { date: dateStr, time, dateObj }]
     })
   }
@@ -171,38 +222,53 @@ export function TeacherProfileClient({
     return selectedSlots.some((s) => s.date === dateStr && s.time === time)
   }
 
+  function canContinueToConfirm(): { ok: boolean; message: string } {
+    if (!studentId) return { ok: false, message: "Please select a student." }
+    if (!subjectId) return { ok: false, message: "Please select a subject." }
+    if (selectedSlots.length === 0) return { ok: false, message: "Please select at least one time slot." }
+    if (bookingType === "package") {
+      if (!templateId) return { ok: false, message: "Please select a package." }
+      if (selectedTemplate && selectedSlots.length !== selectedTemplate.classesIncluded) {
+        const diff = selectedTemplate.classesIncluded - selectedSlots.length
+        if (diff > 0) return { ok: false, message: `Please select ${diff} more class${diff > 1 ? "es" : ""} to match the package (${selectedTemplate.classesIncluded} required).` }
+        return { ok: false, message: `Too many slots selected. This package includes ${selectedTemplate.classesIncluded} classes.` }
+      }
+    }
+    if (bookingType === "trial" && selectedSlots.length !== 1) {
+      return { ok: false, message: "Please select exactly 1 time slot for the trial class." }
+    }
+    return { ok: true, message: "" }
+  }
+
   async function handleBook() {
     setError("")
-    if (!studentId) return setError("Please select a student.")
-    if (!subjectId) return setError("Please select a subject.")
-    if (selectedSlots.length === 0) return setError("Please select at least one time slot.")
-
-    if (isTrialEligible && selectedSlots.length > 1) return setError("Only 1 slot can be selected for a trial class.")
-
-    if (packageId && selectedSlots.length > totalRemaining) {
-      return setError(`Package has only ${totalRemaining} classes remaining but you selected ${selectedSlots.length} slots.`)
-    }
+    const check = canContinueToConfirm()
+    if (!check.ok) return setError(check.message)
 
     setLoading(true)
 
-    // Build array of ISO timestamps for all selected slots
     const slots = selectedSlots.map(
       (slot) => new Date(`${slot.date}T${slot.time}:00Z`).toISOString()
     )
 
     try {
+      const payload: any = {
+        studentId,
+        teacherId: teacher.id,
+        subjectId,
+        slots,
+        duration: 60,
+        isTrial: bookingType === "trial",
+      }
+
+      if (bookingType === "package" && templateId) {
+        payload.templateId = templateId
+      }
+
       const res = await fetch("/api/classes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          studentId,
-          teacherId: teacher.id,
-          subjectId,
-          packageId: packageId || null,
-          slots,
-          duration: 60,
-          isTrial: isTrialEligible,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
 
@@ -212,7 +278,6 @@ export function TeacherProfileClient({
         return
       }
 
-      // Check if this was a pending payment booking
       if (data.pendingPayment) {
         setPendingPayment(true)
         setBookingOrderRef(data.orderRef || "")
@@ -228,8 +293,6 @@ export function TeacherProfileClient({
 
   // ── SUCCESS SCREEN ──
   if (success) {
-    // Pending payment success
-    // Pending payment success — show payment options
     if (pendingPayment) {
       return (
         <div className="max-w-lg mx-auto mt-16 space-y-6">
@@ -253,18 +316,14 @@ export function TeacherProfileClient({
             </div>
           )}
 
-          {/* Payment Options */}
           <div className="space-y-3">
-            {/* Option 1: Pay Online via CCAvenue */}
             <button
               onClick={async () => {
                 setError("")
                 setLoading(true)
                 try {
-                  // Find the pending payment
                   const paymentsRes = await fetch("/api/payments?status=PENDING")
                   const paymentsData = await paymentsRes.json()
-              
                   let paymentIdToUse = ""
                   if (paymentsData.payments && paymentsData.payments.length > 0) {
                     const matchingPayment = paymentsData.payments.find(
@@ -272,24 +331,19 @@ export function TeacherProfileClient({
                     ) || paymentsData.payments[0]
                     paymentIdToUse = matchingPayment.id
                   }
-              
                   if (!paymentIdToUse) {
                     setError("Could not find the pending payment. Please try from your Payments page.")
                     setLoading(false)
                     return
                   }
-              
-                  // Submit a form POST to the redirect endpoint (returns HTML that auto-submits to CCAvenue)
                   const form = document.createElement("form")
                   form.method = "POST"
                   form.action = "/api/payments/ccavenue/redirect"
-              
                   const input = document.createElement("input")
                   input.type = "hidden"
                   input.name = "paymentId"
                   input.value = paymentIdToUse
                   form.appendChild(input)
-              
                   document.body.appendChild(form)
                   form.submit()
                 } catch {
@@ -297,7 +351,6 @@ export function TeacherProfileClient({
                   setLoading(false)
                 }
               }}
-              
               disabled={loading}
               className="w-full flex items-center gap-4 p-5 bg-white border-2 border-[#0D9488] rounded-xl hover:bg-teal-50 transition-all text-left group"
             >
@@ -311,22 +364,13 @@ export function TeacherProfileClient({
                   <p className="font-semibold text-[#1E293B]">Pay Online</p>
                   <span className="px-2 py-0.5 bg-[#0D9488] text-white text-[10px] font-bold rounded-full uppercase">Recommended</span>
                 </div>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  Credit Card, Debit Card, Net Banking, UPI, Wallets
-                </p>
+                <p className="text-sm text-gray-500 mt-0.5">Credit Card, Debit Card, Net Banking, UPI, Wallets</p>
               </div>
-              {loading ? (
-                <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin flex-shrink-0" />
-              ) : (
-                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0D9488] flex-shrink-0" />
-              )}
+              {loading ? <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin flex-shrink-0" /> : <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0D9488] flex-shrink-0" />}
             </button>
 
-            {/* Option 2: Bank Transfer */}
             <button
-              onClick={() => {
-                router.push("/parent/payments")
-              }}
+              onClick={() => router.push("/parent/payments")}
               className="w-full flex items-center gap-4 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-left group"
             >
               <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-gray-200 transition-colors">
@@ -336,34 +380,26 @@ export function TeacherProfileClient({
               </div>
               <div className="flex-1">
                 <p className="font-semibold text-[#1E293B]">Bank Transfer</p>
-                <p className="text-sm text-gray-500 mt-0.5">
-                  Transfer to our bank account &middot; Admin confirms manually
-                </p>
+                <p className="text-sm text-gray-500 mt-0.5">Transfer to our bank account &middot; Admin confirms manually</p>
               </div>
               <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 flex-shrink-0" />
             </button>
           </div>
 
-          {/* Info note */}
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
             <p className="font-semibold mb-1">Time slots are reserved</p>
             <p>Your selected class times are held for you. Classes will be confirmed once payment is received and verified.</p>
           </div>
 
-          {/* Skip for now */}
           <div className="text-center">
-            <button
-              onClick={() => router.push("/parent/classes")}
-              className="text-sm text-gray-400 hover:text-gray-600 hover:underline transition-colors"
-            >
+            <button onClick={() => router.push("/parent/classes")} className="text-sm text-gray-400 hover:text-gray-600 hover:underline transition-colors">
               I&apos;ll pay later &middot; View my classes
             </button>
           </div>
         </div>
       )
-    }    
+    }
 
-    // Direct booking success (trial classes)
     return (
       <div className="max-w-md mx-auto mt-20 text-center space-y-4">
         <CheckCircle className="w-16 h-16 text-[#22C55E] mx-auto" />
@@ -371,20 +407,9 @@ export function TeacherProfileClient({
         <p className="text-gray-500">
           {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} scheduled with {teacher.name}.
         </p>
-        {error && <p className="text-sm text-amber-600">{error}</p>}
         <div className="flex justify-center gap-3 pt-4">
-          <button
-            onClick={() => router.push("/parent/classes")}
-            className="px-5 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors"
-          >
-            View My Classes
-          </button>
-          <button
-            onClick={() => router.push("/parent/teachers")}
-            className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            Back to Teachers
-          </button>
+          <button onClick={() => router.push("/parent/classes")} className="px-5 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors">View My Classes</button>
+          <button onClick={() => router.push("/parent/teachers")} className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Back to Teachers</button>
         </div>
       </div>
     )
@@ -392,6 +417,9 @@ export function TeacherProfileClient({
 
   // ── CONFIRMATION STEP ──
   if (step === "confirm") {
+    const studentName = students.find((s) => s.id === studentId)?.name || ""
+    const subjectName = teacher.subjects.find((s) => s.id === subjectId)?.name || ""
+
     return (
       <div className="max-w-2xl mx-auto space-y-6">
         <button onClick={() => setStep("browse")} className="flex items-center gap-1 text-sm text-[#0D9488] hover:underline">
@@ -401,108 +429,77 @@ export function TeacherProfileClient({
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-5">
           <h2 className="text-xl font-bold text-[#1E293B]">Confirm Booking</h2>
 
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-sm font-medium text-gray-700 mb-2">Teacher: <span className="text-[#1E293B] font-bold">{teacher.name}</span></p>
-            <p className="text-sm text-gray-600">{selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} selected:</p>
-            <div className="mt-2 flex flex-wrap gap-2">
+          {/* Booking summary */}
+          <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-gray-500">Teacher</p>
+                <p className="font-bold text-[#1E293B]">{teacher.name}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Student</p>
+                <p className="font-bold text-[#1E293B]">{studentName}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Subject</p>
+                <p className="font-bold text-[#1E293B]">{subjectName}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Booking Type</p>
+                <p className="font-bold text-[#1E293B]">
+                  {bookingType === "package" && selectedTemplate
+                    ? selectedTemplate.name
+                    : bookingType === "trial"
+                      ? "Free Trial Class"
+                      : "Standalone Class"}
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500">{selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} selected</p>
+                <p className="text-lg font-bold text-[#0D9488]">{priceDisplay}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Slot list */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Scheduled Classes:</p>
+            <div className="flex flex-wrap gap-2">
               {selectedSlots
                 .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
                 .map((s) => (
                   <span key={`${s.date}_${s.time}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm">
                     <Calendar className="w-3.5 h-3.5 text-[#0D9488]" />
                     {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} at {formatTime(s.time)}
-                    <button onClick={() => { setSelectedSlots((prev) => prev.filter((x) => x.date !== s.date || x.time !== s.time)); }} className="text-gray-400 hover:text-red-500">
-                      <X className="w-3 h-3" />
-                    </button>
                   </span>
                 ))}
             </div>
           </div>
 
-          {/* Student */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Student *</label>
-            <select value={studentId} onChange={(e) => { setStudentId(e.target.value); setPackageId(""); }}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
-              <option value="">Select student</option>
-              {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-
-          {/* Subject */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
-            <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setPackageId(""); }}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
-              <option value="">Select subject</option>
-              {teacher.subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-
-          {/* Package (optional) */}
           {/* Trial badge */}
-          {isTrialEligible && (
+          {bookingType === "trial" && (
             <div className="flex items-center gap-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-700">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
-              <div>
-                <span className="font-semibold">Free Trial Class</span> — This is a complimentary trial session. No payment required.
-              </div>
+              <div><span className="font-semibold">Free Trial Class</span> — This is a complimentary trial session. No payment required.</div>
             </div>
           )}
 
-          {/* Package (optional) — hidden for trials */}
-          {!isTrialEligible && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-                <Package className="w-4 h-4 inline mr-1" />
-                Link to Package <span className="text-gray-400 font-normal">(optional — saves from your class balance)</span>
-            </label>
-            {filteredPackages.length === 0 ? (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-                No active package found for this teacher/subject. This will be booked as a standalone class.
-                <button onClick={() => router.push("/parent/packages")} className="block mt-1 text-[#0D9488] font-medium hover:underline text-xs">
-                    Want to save? Buy a package →
-                </button>
-                </div>
-            ) : (
-                <>
-                <select value={packageId} onChange={(e) => setPackageId(e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
-                    <option value="">No package (standalone class)</option>
-                    {filteredPackages.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label} — {p.remaining} classes left</option>
-                    ))}
-                </select>
-                {!packageId && (
-                    <p className="text-xs text-gray-400 mt-1">Booking without a package — class will not deduct from any balance.</p>
-                  )}
-                  </>
-              )}
-            </div>
-            )}
-
-          {/* Balance check */}
-          {!isTrialEligible && packageId && selectedSlots.length > totalRemaining && (
-            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <div>
-                You selected <strong>{selectedSlots.length}</strong> slots but your package only has <strong>{totalRemaining}</strong> classes remaining.
-                Remove {selectedSlots.length - totalRemaining} slot(s), or deselect the package to book as standalone.
-                </div>
-            </div>
-          )}
-
-          {!isTrialEligible && packageId && selectedSlots.length <= totalRemaining && (
+          {/* Package info */}
+          {bookingType === "package" && selectedTemplate && (
             <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                {selectedSlots.length} of {totalRemaining} package classes will be used. {totalRemaining - selectedSlots.length} will remain.
+              <Package className="w-4 h-4 flex-shrink-0" />
+              <div><span className="font-semibold">{selectedTemplate.name}</span> — {selectedTemplate.classesIncluded} classes for ${selectedTemplate.suggestedPrice.toFixed(2)} · Valid for {selectedTemplate.validityDays} days</div>
             </div>
           )}
 
-          {!isTrialEligible && !packageId && (
+          {/* Standalone info */}
+          {bookingType === "standalone" && (
             <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                <Calendar className="w-4 h-4 flex-shrink-0" />
-                Booking {selectedSlots.length} standalone class{selectedSlots.length > 1 ? "es" : ""}  not linked to any package.
+              <Calendar className="w-4 h-4 flex-shrink-0" />
+              Booking {selectedSlots.length} standalone class{selectedSlots.length > 1 ? "es" : ""} at {teacher.rate}/hr each.
             </div>
           )}
 
@@ -513,16 +510,18 @@ export function TeacherProfileClient({
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setStep("browse")}
-              className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
-              Back
-            </button>
+            <button onClick={() => setStep("browse")} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">Back</button>
             <button
               onClick={handleBook}
-              disabled={loading || !studentId || !subjectId || (!!packageId && selectedSlots.length > totalRemaining)}
+              disabled={loading}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
             >
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</> : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>}
+              {loading
+                ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</>
+                : bookingType === "trial"
+                  ? "Book Trial Class"
+                  : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>
+              }
             </button>
           </div>
         </div>
@@ -531,9 +530,10 @@ export function TeacherProfileClient({
   }
 
   // ── BROWSE / CALENDAR STEP ──
+  const continueCheck = canContinueToConfirm()
+
   return (
     <div className="space-y-6">
-      {/* Back link */}
       <button onClick={() => router.push("/parent/teachers")} className="flex items-center gap-1 text-sm text-[#0D9488] hover:underline">
         <ArrowLeft className="w-4 h-4" /> Back to Teachers
       </button>
@@ -568,113 +568,264 @@ export function TeacherProfileClient({
         </div>
       </div>
 
-      {/* Availability Calendar */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-[#1E293B]">Select Time Slots</h2>
-          <div className="flex items-center gap-3">
-            <button onClick={() => setWeekOffset((w) => Math.max(0, w - 1))} disabled={weekOffset === 0}
-              className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 transition-colors">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-sm font-medium text-gray-700">
-              {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
-            </span>
-            <button onClick={() => setWeekOffset((w) => Math.min(3, w + 1))} disabled={weekOffset >= 3}
-              className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 transition-colors">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            {weekOffset !== 0 && (
-              <button onClick={() => setWeekOffset(0)} className="text-xs text-[#0D9488] font-medium hover:underline ml-1">This week</button>
+      {/* Booking Options Card — Student, Subject, Booking Type, Package */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-5">
+        <h2 className="text-lg font-bold text-[#1E293B]">Booking Options</h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Student */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Student *</label>
+            <select value={studentId} onChange={(e) => handleStudentChange(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
+              <option value="">Select student</option>
+              {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+
+          {/* Subject */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+            <select value={subjectId} onChange={(e) => handleSubjectChange(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
+              <option value="">Select subject</option>
+              {teacher.subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Booking Type Selector */}
+        {studentId && subjectId && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Booking Type *</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Package option */}
+              {filteredTemplates.length > 0 && (
+                <button
+                  onClick={() => handleBookingTypeChange("package")}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                    bookingType === "package"
+                      ? "border-[#0D9488] bg-teal-50/50 ring-1 ring-[#0D9488]/20"
+                      : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <Package className={`w-5 h-5 mb-2 ${bookingType === "package" ? "text-[#0D9488]" : "text-gray-400"}`} />
+                  <p className={`text-sm font-semibold ${bookingType === "package" ? "text-[#0D9488]" : "text-[#1E293B]"}`}>Package</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Save with bundled classes</p>
+                </button>
+              )}
+
+              {/* Trial option */}
+              {isTrialEligible && (
+                <button
+                  onClick={() => handleBookingTypeChange("trial")}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                    bookingType === "trial"
+                      ? "border-[#F59E0B] bg-amber-50/50 ring-1 ring-[#F59E0B]/20"
+                      : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <CheckCircle className={`w-5 h-5 mb-2 ${bookingType === "trial" ? "text-[#F59E0B]" : "text-gray-400"}`} />
+                  <p className={`text-sm font-semibold ${bookingType === "trial" ? "text-[#F59E0B]" : "text-[#1E293B]"}`}>Trial Class</p>
+                  <p className="text-xs text-gray-500 mt-0.5">1 free session</p>
+                </button>
+              )}
+
+              {/* Standalone option */}
+              <button
+                onClick={() => handleBookingTypeChange("standalone")}
+                className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                  bookingType === "standalone"
+                    ? "border-[#1E3A5F] bg-blue-50/50 ring-1 ring-[#1E3A5F]/20"
+                    : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <Calendar className={`w-5 h-5 mb-2 ${bookingType === "standalone" ? "text-[#1E3A5F]" : "text-gray-400"}`} />
+                <p className={`text-sm font-semibold ${bookingType === "standalone" ? "text-[#1E3A5F]" : "text-[#1E293B]"}`}>Standalone</p>
+                <p className="text-xs text-gray-500 mt-0.5">{teacher.rate}/hr per class</p>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Package template dropdown */}
+        {bookingType === "package" && filteredTemplates.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Select Package *</label>
+            <select
+              value={templateId}
+              onChange={(e) => { setTemplateId(e.target.value); setSelectedSlots([]); }}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none"
+            >
+              <option value="">Choose a package</option>
+              {filteredTemplates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} — {t.classesIncluded} classes — ${t.suggestedPrice.toFixed(2)}{t.isPopular ? " (Popular)" : ""}
+                </option>
+              ))}
+            </select>
+            {selectedTemplate && (
+              <div className="mt-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-700">
+                <p className="font-semibold">{selectedTemplate.name}</p>
+                {selectedTemplate.description && <p className="text-xs mt-0.5">{selectedTemplate.description}</p>}
+                <p className="text-xs mt-1">Select exactly <strong>{selectedTemplate.classesIncluded}</strong> time slots below · Valid for {selectedTemplate.validityDays} days · <strong>${selectedTemplate.suggestedPrice.toFixed(2)}</strong></p>
+              </div>
             )}
           </div>
-        </div>
+        )}
 
-        <div className="p-4 overflow-x-auto">
-          <div className="min-w-[700px]">
-            {/* Day headers */}
-            <div className="grid grid-cols-8 gap-1 mb-2">
-              <div className="text-xs text-gray-400 font-medium py-2 text-center">Time (UTC)</div>
-              {weekDates.map((d, i) => {
-                const isToday = d.toISOString().split("T")[0] === now.toISOString().split("T")[0]
-                return (
-                  <div key={i} className={`text-center py-2 rounded-lg ${isToday ? "bg-[#1E3A5F] text-white" : ""}`}>
-                    <p className={`text-xs font-medium ${isToday ? "text-white/80" : "text-gray-500"}`}>
-                    {d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}
-                    </p>
-                    <p className={`text-sm font-bold ${isToday ? "text-white" : "text-[#1E293B]"}`}>
-                    {d.getUTCDate()}
-                    </p>
-                  </div>
-                )
-              })}
+        {/* Slot counter for package */}
+        {bookingType === "package" && selectedTemplate && selectedSlots.length > 0 && (
+          <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
+            selectedSlots.length === selectedTemplate.classesIncluded
+              ? "bg-green-50 border border-green-200 text-green-700"
+              : "bg-amber-50 border border-amber-200 text-amber-700"
+          }`}>
+            {selectedSlots.length === selectedTemplate.classesIncluded
+              ? <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              : <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            }
+            {selectedSlots.length} of {selectedTemplate.classesIncluded} classes selected
+            {selectedSlots.length < selectedTemplate.classesIncluded &&
+              ` — select ${selectedTemplate.classesIncluded - selectedSlots.length} more`
+            }
+          </div>
+        )}
+
+        {/* Trial info */}
+        {bookingType === "trial" && (
+          <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+            Select 1 time slot below for your free trial class. No payment required.
+          </div>
+        )}
+
+        {/* Price display */}
+        {studentId && subjectId && (bookingType !== "package" || templateId) && (
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <span className="text-sm text-gray-600">Estimated Total</span>
+            <span className="text-lg font-bold text-[#0D9488]">{priceDisplay}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Availability Calendar — show only when ready to select slots */}
+      {studentId && subjectId && (bookingType !== "package" || templateId) && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 className="text-lg font-bold text-[#1E293B]">Select Time Slots</h2>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setWeekOffset((w) => Math.max(0, w - 1))} disabled={weekOffset === 0}
+                className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 transition-colors">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-sm font-medium text-gray-700">
+                {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
+              </span>
+              <button onClick={() => setWeekOffset((w) => Math.min(3, w + 1))} disabled={weekOffset >= 3}
+                className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 transition-colors">
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              {weekOffset !== 0 && (
+                <button onClick={() => setWeekOffset(0)} className="text-xs text-[#0D9488] font-medium hover:underline ml-1">This week</button>
+              )}
             </div>
+          </div>
 
-            {/* Time slot rows */}
-            {(() => {
-              const allSlots = new Set<string>()
-              teacher.availability.forEach((a) => {
-                generateSlots(a.startTime, a.endTime).forEach((s) => allSlots.add(s))
-              })
-              const sortedSlots = Array.from(allSlots).sort()
+          <div className="p-4 overflow-x-auto">
+            <div className="min-w-[700px]">
+              <div className="grid grid-cols-8 gap-1 mb-2">
+                <div className="text-xs text-gray-400 font-medium py-2 text-center">Time (UTC)</div>
+                {weekDates.map((d, i) => {
+                  const isToday = d.toISOString().split("T")[0] === now.toISOString().split("T")[0]
+                  return (
+                    <div key={i} className={`text-center py-2 rounded-lg ${isToday ? "bg-[#1E3A5F] text-white" : ""}`}>
+                      <p className={`text-xs font-medium ${isToday ? "text-white/80" : "text-gray-500"}`}>
+                        {d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}
+                      </p>
+                      <p className={`text-sm font-bold ${isToday ? "text-white" : "text-[#1E293B]"}`}>
+                        {d.getUTCDate()}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
 
-              return sortedSlots.map((timeSlot) => (
-                <div key={timeSlot} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-xs text-gray-400 py-2 text-center font-medium">{formatTime(timeSlot)}</div>
-                  {weekDates.map((dateObj, dayIdx) => {
-                    const dayName = DAY_JS_MAP[dateObj.getUTCDay()]
-                    const avail = availMap.get(dayName)
-                    const dateStr = dateObj.toISOString().split("T")[0]
-                    const todayStr = now.toISOString().split("T")[0]
-                    const isPast = dateStr < todayStr
-                    const isPastToday = dateStr === todayStr && Number(timeSlot.split(":")[0]) <= now.getUTCHours()
-                    const isBlocked = blockedSet.has(dateStr)
-                    const isBooked = bookedSet.has(`${dateStr}_${timeSlot}`)
+              {(() => {
+                const allSlots = new Set<string>()
+                teacher.availability.forEach((a) => {
+                  generateSlots(a.startTime, a.endTime).forEach((s) => allSlots.add(s))
+                })
+                const sortedSlots = Array.from(allSlots).sort()
 
-                    const inWindow = avail && timeSlot >= to24(avail.startTime) && timeSlot < to24(avail.endTime)
+                return sortedSlots.map((timeSlot) => (
+                  <div key={timeSlot} className="grid grid-cols-8 gap-1 mb-1">
+                    <div className="text-xs text-gray-400 py-2 text-center font-medium">{formatTime(timeSlot)}</div>
+                    {weekDates.map((dateObj, dayIdx) => {
+                      const dayName = DAY_JS_MAP[dateObj.getUTCDay()]
+                      const avail = availMap.get(dayName)
+                      const dateStr = dateObj.toISOString().split("T")[0]
+                      const todayStr = now.toISOString().split("T")[0]
+                      const isPast = dateStr < todayStr
+                      const isPastToday = dateStr === todayStr && Number(timeSlot.split(":")[0]) <= now.getUTCHours()
+                      const isBlocked = blockedSet.has(dateStr)
+                      const isBooked = bookedSet.has(`${dateStr}_${timeSlot}`)
+                      const inWindow = avail && timeSlot >= to24(avail.startTime) && timeSlot < to24(avail.endTime)
+                      const unavailable = !inWindow || isPast || isPastToday || isBlocked || isBooked
+                      const selected = isSelected(dateObj, timeSlot)
 
-                    const unavailable = !inWindow || isPast || isPastToday || isBlocked || isBooked
-                    const selected = isSelected(dateObj, timeSlot)
-
-                    if (unavailable) {
-                      return (
-                        <div key={dayIdx} className={`py-2 rounded-md text-center text-xs ${
-                          isBooked ? "bg-red-50 text-red-300 line-through" : "bg-gray-50 text-gray-300"
-                        }`}>
-                          {isBooked ? "Booked" : inWindow ? "Past" : ""}
-                        </div>
+                      // Check if max slots reached (for non-selected slots)
+                      const atMax = !selected && (
+                        (bookingType === "trial" && selectedSlots.length >= 1) ||
+                        (bookingType === "package" && selectedTemplate && selectedSlots.length >= selectedTemplate.classesIncluded)
                       )
-                    }
 
-                    return (
-                      <button
-                        key={dayIdx}
-                        onClick={() => toggleSlot(dateObj, timeSlot)}
-                        className={`py-2 rounded-md text-center text-xs font-medium transition-all ${
-                          selected
-                            ? "bg-[#0D9488] text-white shadow-sm ring-2 ring-[#0D9488]/30"
-                            : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                        }`}
-                      >
-                        {selected ? "✓ Selected" : "Available"}
-                      </button>
-                    )
-                  })}
-                </div>
-              ))
-            })()}
+                      if (unavailable) {
+                        return (
+                          <div key={dayIdx} className={`py-2 rounded-md text-center text-xs ${
+                            isBooked ? "bg-red-50 text-red-300 line-through" : "bg-gray-50 text-gray-300"
+                          }`}>
+                            {isBooked ? "Booked" : inWindow ? "Past" : ""}
+                          </div>
+                        )
+                      }
+
+                      if (atMax && !selected) {
+                        return (
+                          <div key={dayIdx} className="py-2 rounded-md text-center text-xs bg-gray-50 text-gray-300">
+                          </div>
+                        )
+                      }
+
+                      return (
+                        <button
+                          key={dayIdx}
+                          onClick={() => toggleSlot(dateObj, timeSlot)}
+                          className={`py-2 rounded-md text-center text-xs font-medium transition-all ${
+                            selected
+                              ? "bg-[#0D9488] text-white shadow-sm ring-2 ring-[#0D9488]/30"
+                              : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                          }`}
+                        >
+                          {selected ? "Selected" : "Available"}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))
+              })()}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-4 items-center px-6 py-3 border-t border-gray-100 bg-gray-50/50">
+            <span className="text-xs text-gray-500 font-medium">Legend:</span>
+            <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-green-50 border border-green-200" /><span className="text-xs text-gray-600">Available</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-[#0D9488]" /><span className="text-xs text-gray-600">Selected</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-red-50 border border-red-100" /><span className="text-xs text-gray-600">Booked</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-gray-50 border border-gray-100" /><span className="text-xs text-gray-600">Unavailable</span></div>
           </div>
         </div>
-
-        {/* Legend */}
-        <div className="flex flex-wrap gap-4 items-center px-6 py-3 border-t border-gray-100 bg-gray-50/50">
-          <span className="text-xs text-gray-500 font-medium">Legend:</span>
-          <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-green-50 border border-green-200" /><span className="text-xs text-gray-600">Available</span></div>
-          <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-[#0D9488]" /><span className="text-xs text-gray-600">Selected</span></div>
-          <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-red-50 border border-red-100" /><span className="text-xs text-gray-600">Booked</span></div>
-          <div className="flex items-center gap-1.5"><div className="w-4 h-3 rounded bg-gray-50 border border-gray-100" /><span className="text-xs text-gray-600">Unavailable</span></div>
-        </div>
-      </div>
+      )}
 
       {/* Floating action bar */}
       {selectedSlots.length > 0 && (
@@ -682,12 +833,17 @@ export function TeacherProfileClient({
           <div>
             <p className="text-sm font-semibold text-[#1E293B]">
               {selectedSlots.length} slot{selectedSlots.length > 1 ? "s" : ""} selected
+              {bookingType === "package" && selectedTemplate && (
+                <span className="font-normal text-gray-500"> of {selectedTemplate.classesIncluded} required</span>
+              )}
             </p>
             <p className="text-xs text-gray-500">
               {selectedSlots
                 .sort((a, b) => a.date.localeCompare(b.date))
+                .slice(0, 4)
                 .map((s) => `${new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${formatTime(s.time)}`)
                 .join(" · ")}
+              {selectedSlots.length > 4 && ` +${selectedSlots.length - 4} more`}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -695,11 +851,29 @@ export function TeacherProfileClient({
               className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
               Clear
             </button>
-            <button onClick={() => setStep("confirm")}
-              className="px-5 py-2.5 bg-[#0D9488] text-white text-sm font-semibold rounded-lg hover:bg-teal-700 transition-colors shadow-sm">
-              Continue to Book →
+            <button
+              onClick={() => {
+                const check = canContinueToConfirm()
+                if (!check.ok) {
+                  setError(check.message)
+                  return
+                }
+                setError("")
+                setStep("confirm")
+              }}
+              disabled={!continueCheck.ok}
+              className="px-5 py-2.5 bg-[#0D9488] text-white text-sm font-semibold rounded-lg hover:bg-teal-700 transition-colors shadow-sm disabled:opacity-50"
+            >
+              Continue to Book
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Error display */}
+      {error && (
+        <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />{error}
         </div>
       )}
     </div>

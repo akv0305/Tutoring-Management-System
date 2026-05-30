@@ -1,6 +1,7 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   BookOpen,
   Calendar,
@@ -15,6 +16,9 @@ import {
   Plus,
   MessageCircle,
   Phone,
+  X,
+  AlertCircle,
+  Loader2,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -74,8 +78,60 @@ type DashboardData = {
 }
 
 export function ParentDashboardClient({ data }: { data: DashboardData }) {
+  const router = useRouter()
   const [detailsClass, setDetailsClass] = React.useState<UpcomingClass | null>(null)
   const childList = data.childrenNames.join(" & ")
+
+  // Coordinator message modal state
+  const [showCoordModal, setShowCoordModal] = useState(false)
+  const [coordTitle, setCoordTitle] = useState("Message from Parent")
+  const [coordMessage, setCoordMessage] = useState("")
+  const [coordSending, setCoordSending] = useState(false)
+  const [coordSuccess, setCoordSuccess] = useState("")
+  const [coordError, setCoordError] = useState("")
+
+  function openCoordModal(prefilledTitle: string) {
+    setCoordTitle(prefilledTitle)
+    setCoordMessage("")
+    setCoordError("")
+    setCoordSuccess("")
+    setShowCoordModal(true)
+  }
+
+  async function handleSendCoordinatorMessage() {
+    if (!coordMessage.trim()) {
+      setCoordError("Please enter a message.")
+      return
+    }
+    setCoordSending(true)
+    setCoordError("")
+    setCoordSuccess("")
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientType: "coordinator",
+          title: coordTitle,
+          message: coordMessage.trim(),
+        }),
+      })
+      const resData = await res.json()
+      if (!res.ok) {
+        setCoordError(resData.error || "Failed to send message.")
+      } else {
+        setCoordSuccess(`Message sent to ${resData.coordinatorName || "your coordinator"}.`)
+        setCoordMessage("")
+        setTimeout(() => {
+          setShowCoordModal(false)
+          setCoordSuccess("")
+        }, 2000)
+      }
+    } catch {
+      setCoordError("Network error. Please try again.")
+    }
+    setCoordSending(false)
+  }
 
   return (
     <div className="space-y-6">
@@ -148,7 +204,7 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-semibold text-[#1E293B]">Upcoming Schedule</h2>
               <a href="/parent/classes" className="text-sm text-[#0D9488] font-medium hover:underline">
-                View All Classes →
+                View All Classes &rarr;
               </a>
             </div>
             <div className="flex flex-col gap-4">
@@ -204,7 +260,10 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-semibold text-[#1E293B]">My Packages</h2>
-              <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] text-white text-xs font-semibold hover:bg-teal-700 transition-colors shadow-sm">
+              <button
+                onClick={() => router.push("/parent/teachers")}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] text-white text-xs font-semibold hover:bg-teal-700 transition-colors shadow-sm"
+              >
                 <Plus className="w-3.5 h-3.5" />
                 Buy New Package
               </button>
@@ -227,11 +286,11 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
                               />
                             </div>
                           </div>
-                          <p className="text-xs text-gray-500">{pkg.used} used • {pkg.remaining} remaining</p>
+                          <p className="text-xs text-gray-500">{pkg.used} used &middot; {pkg.remaining} remaining</p>
                           <p className="text-xs text-gray-400 mt-0.5">Expires: {pkg.expires}</p>
                           {pkg.isLow && (
                             <p className="text-xs text-[#F59E0B] font-medium mt-1">
-                              ⚠ Low balance — consider renewing
+                              Low balance &mdash; consider renewing
                             </p>
                           )}
                         </div>
@@ -259,7 +318,7 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
               {[
                 { icon: Search,       label: "Browse Teachers",  href: "/parent/teachers" },
                 { icon: CalendarPlus, label: "Schedule a Class", href: "/parent/classes" },
-                { icon: Package,      label: "Buy Package",      href: "/parent/packages" },
+                { icon: Package,      label: "Buy Package",      href: "/parent/teachers" },
                 { icon: CreditCard,   label: "Make Payment",     href: "/parent/payments" },
                 { icon: Gift,         label: "Refer a Friend",   href: "/parent/referrals" },
               ].map(({ icon: Icon, label, href }) => (
@@ -293,11 +352,17 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#0D9488] text-[#0D9488] text-xs font-medium hover:bg-teal-50 transition-colors">
+                  <button
+                    onClick={() => openCoordModal("Message from Parent")}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#0D9488] text-[#0D9488] text-xs font-medium hover:bg-teal-50 transition-colors"
+                  >
                     <MessageCircle className="w-3.5 h-3.5" />
                     Send Message
                   </button>
-                  <button className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 transition-colors">
+                  <button
+                    onClick={() => openCoordModal("Callback Request")}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 transition-colors"
+                  >
                     <Phone className="w-3.5 h-3.5" />
                     Schedule Call
                   </button>
@@ -324,9 +389,12 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
             ) : (
               <p className="text-sm text-gray-400 text-center py-4">No feedback given yet</p>
             )}
-            <button className="mt-3 text-sm text-[#0D9488] font-medium hover:underline">
-              Give Feedback →
-            </button>
+            <Link
+              href="/parent/classes?status=COMPLETED"
+              className="mt-3 inline-block text-sm text-[#0D9488] font-medium hover:underline"
+            >
+              Give Feedback &rarr;
+            </Link>
           </div>
         </div>
       </div>
@@ -349,6 +417,81 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
             studentName: detailsClass.studentName,
           }}
         />
+      )}
+
+      {/* Coordinator Message Modal */}
+      {showCoordModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-[#1E293B]">
+                {coordTitle === "Callback Request" ? "Request a Callback" : "Contact Coordinator"}
+              </h3>
+              <button
+                onClick={() => setShowCoordModal(false)}
+                className="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500">
+              {coordTitle === "Callback Request"
+                ? "Let your coordinator know when you'd like to be called back."
+                : "Send a message to your assigned education coordinator."}
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {coordTitle === "Callback Request" ? "Preferred time & message *" : "Your Message *"}
+              </label>
+              <textarea
+                value={coordMessage}
+                onChange={(e) => setCoordMessage(e.target.value)}
+                rows={4}
+                placeholder={
+                  coordTitle === "Callback Request"
+                    ? "e.g., Please call me tomorrow between 10 AM – 12 PM EST. I'd like to discuss..."
+                    : "e.g., I'd like to discuss package options for my child..."
+                }
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none resize-none"
+              />
+            </div>
+
+            {coordError && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />{coordError}
+              </div>
+            )}
+
+            {coordSuccess && (
+              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />{coordSuccess}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowCoordModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendCoordinatorMessage}
+                disabled={coordSending || !!coordSuccess}
+                className="inline-flex items-center gap-2 px-5 py-2 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+              >
+                {coordSending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" />Sending...</>
+                  : coordTitle === "Callback Request"
+                    ? "Send Request"
+                    : "Send Message"
+                }
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       
     </div>

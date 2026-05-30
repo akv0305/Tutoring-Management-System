@@ -1,16 +1,18 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   Package,
   Calendar,
   Clock,
   CheckCircle,
   AlertCircle,
-  RotateCcw,
   Plus,
   BookOpen,
   MessageCircle,
+  Loader2,
+  X,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -86,6 +88,50 @@ export function ParentPackagesClient({
   pastPackages: PastPkg[]
   kpis: KPIs
 }) {
+  const router = useRouter()
+
+  // Coordinator message modal state
+  const [showCoordModal, setShowCoordModal] = useState(false)
+  const [coordMessage, setCoordMessage] = useState("")
+  const [coordSending, setCoordSending] = useState(false)
+  const [coordSuccess, setCoordSuccess] = useState("")
+  const [coordError, setCoordError] = useState("")
+
+  async function handleSendCoordinatorMessage() {
+    if (!coordMessage.trim()) {
+      setCoordError("Please enter a message.")
+      return
+    }
+    setCoordSending(true)
+    setCoordError("")
+    setCoordSuccess("")
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientType: "coordinator",
+          title: "Message from Parent",
+          message: coordMessage.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setCoordError(data.error || "Failed to send message.")
+      } else {
+        setCoordSuccess(`Message sent to ${data.coordinatorName || "your coordinator"}.`)
+        setCoordMessage("")
+        setTimeout(() => {
+          setShowCoordModal(false)
+          setCoordSuccess("")
+        }, 2000)
+      }
+    } catch {
+      setCoordError("Network error. Please try again.")
+    }
+    setCoordSending(false)
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -143,7 +189,10 @@ export function ParentPackagesClient({
               {activePackages.length} package{activePackages.length !== 1 ? "s" : ""} currently active
             </p>
           </div>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-[#0D9488]/90 transition-colors">
+          <button
+            onClick={() => router.push("/parent/teachers")}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-[#0D9488]/90 transition-colors"
+          >
             <Plus className="w-4 h-4" />
             Buy New Package
           </button>
@@ -217,11 +266,10 @@ export function ParentPackagesClient({
                 )}
 
                 <div className="border-t border-gray-100 mt-4 pt-4 flex items-center gap-3">
-                  <button className="flex items-center gap-1.5 px-4 py-2 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-[#0D9488]/90 transition-colors">
-                    <RotateCcw className="w-4 h-4" />
-                    Renew Package
-                  </button>
-                  <button className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+                  <button
+                    onClick={() => router.push("/parent/classes")}
+                    className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                  >
                     <Calendar className="w-4 h-4" />
                     View Schedule
                   </button>
@@ -291,10 +339,21 @@ export function ParentPackagesClient({
               </p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <button className="px-4 py-2 border border-white/40 text-white rounded-lg text-sm font-medium hover:bg-white/10 transition-colors">
+              <button
+                onClick={() => router.push("/parent/teachers")}
+                className="px-4 py-2 border border-white/40 text-white rounded-lg text-sm font-medium hover:bg-white/10 transition-colors"
+              >
                 Browse All Packages
               </button>
-              <button className="flex items-center gap-1.5 px-4 py-2 bg-[#F59E0B] text-white rounded-lg text-sm font-medium hover:bg-[#F59E0B]/90 transition-colors">
+              <button
+                onClick={() => {
+                  setCoordMessage("")
+                  setCoordError("")
+                  setCoordSuccess("")
+                  setShowCoordModal(true)
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#F59E0B] text-white rounded-lg text-sm font-medium hover:bg-[#F59E0B]/90 transition-colors"
+              >
                 <MessageCircle className="w-4 h-4" />
                 Contact Coordinator
               </button>
@@ -302,6 +361,66 @@ export function ParentPackagesClient({
           </div>
         </div>
       </div>
+
+      {/* Coordinator Message Modal */}
+      {showCoordModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-[#1E293B]">Contact Coordinator</h3>
+              <button
+                onClick={() => setShowCoordModal(false)}
+                className="p-1 rounded-md hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500">
+              Send a message to your assigned education coordinator. They will be notified and respond as soon as possible.
+            </p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Your Message *</label>
+              <textarea
+                value={coordMessage}
+                onChange={(e) => setCoordMessage(e.target.value)}
+                rows={4}
+                placeholder="e.g., I'd like to discuss package options for my child..."
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none resize-none"
+              />
+            </div>
+
+            {coordError && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />{coordError}
+              </div>
+            )}
+
+            {coordSuccess && (
+              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />{coordSuccess}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowCoordModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendCoordinatorMessage}
+                disabled={coordSending || !!coordSuccess}
+                className="inline-flex items-center gap-2 px-5 py-2 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+              >
+                {coordSending ? <><Loader2 className="w-4 h-4 animate-spin" />Sending...</> : "Send Message"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -33,35 +33,29 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   const bookedClasses = await prisma.class.findMany({
     where: {
       teacherId: teacher.id,
-      status: { in: ["PENDING_PAYMENT","SCHEDULED", "CONFIRMED"] },
+      status: { in: ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"] },
       scheduledAt: { gte: now, lte: fourWeeksLater },
     },
     select: { scheduledAt: true, duration: true },
   })
 
-  // Active packages for this parent's students with this teacher
-  const studentIds = parent.students.map((s) => s.id)
-  const packages = await prisma.package.findMany({
+  // Fetch active PackageTemplates for subjects this teacher teaches
+  const teacherSubjectIds = teacher.subjects.map((ts) => ts.subject.id)
+
+  const packageTemplatesRaw = await prisma.packageTemplate.findMany({
     where: {
-      studentId: { in: studentIds },
-      teacherId: teacher.id,
+      subjectId: { in: teacherSubjectIds },
       status: "ACTIVE",
     },
-    select: {
-      id: true,
-      name: true,
-      classesIncluded: true,
-      classesUsed: true,
-      subjectId: true,
-      studentId: true,
-      student: { select: { firstName: true, lastName: true } },
+    include: {
       subject: { select: { id: true, name: true } },
     },
+    orderBy: [{ isPopular: "desc" }, { classesIncluded: "asc" }],
   })
 
   // Fetch trial eligibility for parent's students
   // Only for subjects this teacher offers
-  const teacherSubjectIds = teacher.subjects.map((ts) => ts.subject.id)
+  const studentIds = parent.students.map((s) => s.id)
   const studentSubjects = await prisma.studentSubject.findMany({
     where: {
       studentId: { in: studentIds },
@@ -92,6 +86,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     bio: teacher.bio ?? "",
     experience: teacher.experience,
     rate: `$${Number(teacher.studentFacingRate)}`,
+    rateNum: Number(teacher.studentFacingRate),
     rating: ratingAgg._avg.parentRating ? Number(ratingAgg._avg.parentRating.toFixed(1)) : 0,
     reviews: ratingAgg._count.parentRating,
     totalClasses: completedClasses,
@@ -114,30 +109,30 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     name: `${s.firstName} ${s.lastName}`,
   }))
 
-  const packagesData = packages
-    .filter((p) => p.classesUsed < p.classesIncluded)
-    .map((p) => ({
-      id: p.id,
-      label: `${p.name} — ${p.student.firstName} ${p.student.lastName}`,
-      remaining: p.classesIncluded - p.classesUsed,
-      subjectId: p.subjectId,
-      subjectName: p.subject.name,
-      studentId: p.studentId,
-    }))
+  const packageTemplatesData = packageTemplatesRaw.map((t) => ({
+    id: t.id,
+    name: t.name,
+    subjectId: t.subject.id,
+    subjectName: t.subject.name,
+    classesIncluded: t.classesIncluded,
+    validityDays: t.validityDays,
+    suggestedPrice: Number(t.suggestedPrice),
+    description: t.description ?? "",
+    isPopular: t.isPopular,
+  }))
 
   const trialEligibility = studentSubjects.map((ss) => ({
     studentId: ss.studentId,
     subjectId: ss.subjectId,
     trialTaken: ss.trialTaken,
-  }))  
+  }))
 
-    return (
-      <TeacherProfileClient
-        teacher={teacherData}
-        students={studentsData}
-        packages={packagesData}
-        trialEligibility={trialEligibility}
-      />
-    )
-  
+  return (
+    <TeacherProfileClient
+      teacher={teacherData}
+      students={studentsData}
+      packageTemplates={packageTemplatesData}
+      trialEligibility={trialEligibility}
+    />
+  )
 }
