@@ -13,6 +13,7 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
+  Gift,
 } from "lucide-react"
 
 /* ═══════════════════════════════════════════════════════════════
@@ -44,6 +45,8 @@ type PlatformSettings = {
   passwordResetExpiry: number
   maxLoginAttempts: number
   lockoutDuration: number
+  referralEnabled: boolean
+  referralRewardAmount: number
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -133,18 +136,27 @@ function NumberInputWithSuffix({
   value,
   onChange,
   suffix,
+  prefix,
+  min,
+  step,
 }: {
   id?: string
   value: number
   onChange: (v: number) => void
   suffix?: string
+  prefix?: string
+  min?: number
+  step?: string
 }) {
   return (
     <div className="flex items-center gap-3">
+      {prefix && <span className="text-sm font-semibold text-gray-600">{prefix}</span>}
       <input
         id={id}
         type="number"
         value={value}
+        min={min}
+        step={step}
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-28 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:ring-2 focus:ring-[#0D9488]/40 focus:border-[#0D9488] transition text-center font-semibold"
       />
@@ -526,9 +538,86 @@ function TabUserManagement({ s, set, onSave, saving, saved }: {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TAB 6 — Referral Program
+═══════════════════════════════════════════════════════════════ */
+function TabReferral({ s, set, onSave, saving, saved }: {
+  s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+  onSave: () => void; saving: boolean; saved: boolean
+}) {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+      <SectionTitle>Referral Program Settings</SectionTitle>
+
+      <InfoBanner>
+        When enabled, parents can share a unique referral link. When a referred parent registers and books their first paid class, the referrer receives the reward amount as a wallet credit. The wallet balance is automatically applied as a discount on future bookings.
+      </InfoBanner>
+
+      <div className="border border-gray-100 rounded-lg px-4 mb-6">
+        <Toggle
+          checked={s.referralEnabled}
+          onChange={(v) => set("referralEnabled", v)}
+          label="Enable Referral Program"
+          description="Allow parents to refer friends and earn wallet credits"
+        />
+      </div>
+
+      <div className={s.referralEnabled ? "" : "opacity-50 pointer-events-none"}>
+        <FormRow label="Reward Amount per Referral" htmlFor="r-amount">
+          <NumberInputWithSuffix
+            id="r-amount"
+            value={s.referralRewardAmount}
+            onChange={(v) => set("referralRewardAmount", v)}
+            prefix="$"
+            suffix="credited to referrer's wallet"
+            min={0}
+            step="0.01"
+          />
+        </FormRow>
+
+        <Divider />
+
+        <SectionTitle>How It Works</SectionTitle>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            {
+              step: 1,
+              title: "Parent Shares Link",
+              desc: "Each parent gets a unique referral link from their dashboard. They share it with friends.",
+              color: "bg-[#0D9488]",
+            },
+            {
+              step: 2,
+              title: "Friend Registers & Books",
+              desc: "The friend clicks the link, registers an account, and books their first paid class.",
+              color: "bg-[#1E3A5F]",
+            },
+            {
+              step: 3,
+              title: "Referrer Gets Rewarded",
+              desc: `$${s.referralRewardAmount} is automatically credited to the referrer's wallet and applied on their next booking.`,
+              color: "bg-[#F59E0B]",
+            },
+          ].map((item) => (
+            <div key={item.step} className="rounded-xl border border-gray-100 p-4 text-center">
+              <div className={`w-10 h-10 rounded-full ${item.color} text-white flex items-center justify-center mx-auto mb-3 text-lg font-bold`}>
+                {item.step}
+              </div>
+              <p className="text-sm font-semibold text-[#1E293B] mb-1">{item.title}</p>
+              <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <SaveButton onClick={onSave} saving={saving} saved={saved} />
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
    TAB DEFINITIONS
 ═══════════════════════════════════════════════════════════════ */
-type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users"
+type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users" | "referral"
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "general",       label: "General",              icon: Settings    },
@@ -536,6 +625,7 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "packages",      label: "Packages & Pricing",   icon: Package     },
   { key: "notifications", label: "Notifications",        icon: Bell        },
   { key: "users",         label: "User Management",      icon: Users       },
+  { key: "referral",      label: "Referral Program",     icon: Gift        },
 ]
 
 /* ═══════════════════════════════════════════════════════════════
@@ -662,6 +752,7 @@ export default function SettingsPage() {
       {activeTab === "packages"      && <TabPackages s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
       {activeTab === "notifications" && <TabNotifications onSave={handleSave} saving={saving} saved={saved} />}
       {activeTab === "users"         && <TabUserManagement s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "referral"      && <TabReferral s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
     </div>
   )
 }

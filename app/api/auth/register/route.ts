@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
       childSubjects,
       childTimezone,
       scheduleNotes,
+      // ── Referral (optional) ──
+      referralCode,
     } = body
 
     // ─── Validation ───
@@ -61,6 +63,37 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ─── Validate referral code (if provided) ───
+    let referrerId: string | null = null
+    let referrerUser: { id: string; firstName: string; lastName: string } | null = null
+
+    if (referralCode && typeof referralCode === "string" && referralCode.trim()) {
+      const cleanCode = referralCode.trim().toUpperCase()
+
+      // Check if referral program is enabled
+      const settings = await prisma.platformSettings.findFirst({
+        where: { id: "default" },
+        select: { referralEnabled: true },
+      })
+
+      if (settings?.referralEnabled) {
+        const referrer = await prisma.user.findFirst({
+          where: {
+            referralCode: cleanCode,
+            role: "PARENT",
+            status: "ACTIVE",
+          },
+          select: { id: true, firstName: true, lastName: true },
+        })
+
+        if (referrer) {
+          referrerId = referrer.id
+          referrerUser = referrer
+        }
+      }
+      // If code is invalid or program disabled, silently ignore — registration proceeds
+    }
+
     // ─── Find a coordinator with available slots ───
     const coordinator = await prisma.coordinatorProfile.findFirst({
       where: { status: "ACTIVE" },
@@ -91,6 +124,8 @@ export async function POST(req: NextRequest) {
           lastName: parentLastName.trim(),
           phone: parentPhone?.trim() || null,
           emailVerifyToken,
+          // ── Store referral info on user ──
+          referredByCode: referrerId ? referralCode.trim().toUpperCase() : null,
         },
       })
 
@@ -102,7 +137,15 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // 3. Create student
+      // 3. Create wallet for the parent (starts at $0)
+      await tx.wallet.create({
+        data: {
+          parentProfileId: parentProfile.id,
+          balance: 0,
+        },
+      })
+
+      // 4. Create student
       const student = await tx.student.create({
         data: {
           firstName: childFirstName.trim(),
@@ -118,7 +161,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // 4. Link subjects
+      // 5. Link subjects
       if (childSubjects && Array.isArray(childSubjects) && childSubjects.length > 0) {
         const subjects = await tx.subject.findMany({
           where: { name: { in: childSubjects } },
@@ -135,7 +178,32 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 5. Create welcome notification
+      // 6. Create referral record (if valid referrer found)
+      let referralCreated = false
+      if (referrerId) {
+        await tx.referral.create({
+          data: {
+            referralCode: `${referralCode.trim().toUpperCase()}-${user.id.slice(-6)}`,
+            referredById: referrerId,
+            referredToId: user.id,
+            status: "PENDING",
+          },
+        })
+
+        // Notify the referrer that someone signed up using their code
+        await tx.notification.create({
+          data: {
+            userId: referrerId,
+            type: "SYSTEM",
+            title: "New Referral Sign-up!",
+            message: `${parentFirstName.trim()} ${parentLastName.trim()} signed up using your referral link! You'll earn your reward once they book their first paid class.`,
+          },
+        })
+
+        referralCreated = true
+      }
+
+      // 7. Create welcome notification
       await tx.notification.create({
         data: {
           userId: user.id,
@@ -145,7 +213,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      return { user, student }
+      return { user, student, referralCreated }
     })
 
     // ─── Send verification email (non-blocking) ───
@@ -215,13 +283,14 @@ export async function POST(req: NextRequest) {
       }).catch((err) =>
         console.error("[Register] Admin alert email failed:", err)
       )
-    }    
+    }
 
     return NextResponse.json(
       {
         message: "Account created! Please check your email to verify your account.",
         userId: result.user.id,
         studentId: result.student.id,
+        referralApplied: result.referralCreated,
       },
       { status: 201 }
     )

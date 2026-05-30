@@ -1,3 +1,5 @@
+// prisma/schema.prisma
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -107,6 +109,7 @@ enum PaymentMethod {
   DEBIT_CARD
   UPI
   CCAVENUE
+  WALLET
   OTHER
 }
 
@@ -136,7 +139,6 @@ enum BookingOrderStatus {
   CANCELLED
 }
 
-
 enum NotificationType {
   CLASS
   PAYMENT
@@ -159,6 +161,12 @@ enum DayOfWeek {
   SUNDAY
 }
 
+enum WalletTransactionType {
+  REFERRAL_REWARD
+  BOOKING_DISCOUNT
+  ADMIN_ADJUSTMENT
+}
+
 // ─── 1. USERS (Authentication Master) ───────────────────
 
 model User {
@@ -178,6 +186,8 @@ model User {
   failedLoginAttempts Int  @default(0)
   lockedUntil         DateTime?
   lastLoginAt    DateTime?
+  referralCode        String?   @unique
+  referredByCode String?    // Referral code used during registration
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -257,6 +267,9 @@ model ParentProfile {
   // Children
   students    Student[]
 
+  // Wallet
+  wallet      Wallet?
+
   @@map("parent_profiles")
 }
 
@@ -315,7 +328,6 @@ model Subject {
   bookingOrders    BookingOrder[]
 
   @@map("subjects")
-  
 }
 
 // ─── Junction: Teacher <-> Subject ──────────────────────
@@ -439,49 +451,50 @@ model Class {
 // ─── 8a. BOOKING ORDERS ─────────────────────────────────
 
 model BookingOrder {
-  id           String             @id @default(cuid())
-  orderRef     String             @unique
-  studentId    String
-  student      Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  packageId    String?
-  package      Package?           @relation(fields: [packageId], references: [id], onDelete: SetNull)
-  teacherId    String
-  teacher      TeacherProfile     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  subjectId    String
-  subject      Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  totalClasses Int
-  totalAmount  Decimal            @db.Decimal(10, 2)
-  status       BookingOrderStatus @default(PENDING_PAYMENT)
-  paymentId    String?            @unique
-  payment      Payment?           @relation(fields: [paymentId], references: [id], onDelete: SetNull)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  id              String             @id @default(cuid())
+  orderRef        String             @unique
+  studentId       String
+  student         Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  packageId       String?
+  package         Package?           @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  teacherId       String
+  teacher         TeacherProfile     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  totalClasses    Int
+  totalAmount     Decimal            @db.Decimal(10, 2)
+  walletDeduction Decimal            @default(0) @db.Decimal(10, 2)
+  status          BookingOrderStatus @default(PENDING_PAYMENT)
+  paymentId       String?            @unique
+  payment         Payment?           @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-  classes      Class[]
+  classes         Class[]
 
   @@index([studentId, status])
   @@map("booking_orders")
 }
 
-
 // ─── 9. PAYMENTS MASTER ─────────────────────────────────
 
 model Payment {
-  id            String        @id @default(cuid())
-  studentId     String
-  student       Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  packageId     String?
-  package       Package?      @relation(fields: [packageId], references: [id], onDelete: SetNull)
-  amount        Decimal       @db.Decimal(10, 2)
-  method        PaymentMethod @default(BANK_TRANSFER)
-  status        PaymentStatus @default(PENDING)
-  bankReference String?
-  adminNotes    String?
-  confirmedById String?
-  confirmedBy   User?         @relation("ConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
-  confirmedAt   DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  studentId       String
+  student         Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  packageId       String?
+  package         Package?      @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  amount          Decimal       @db.Decimal(10, 2)
+  walletDeduction Decimal       @default(0) @db.Decimal(10, 2)
+  method          PaymentMethod @default(BANK_TRANSFER)
+  status          PaymentStatus @default(PENDING)
+  bankReference   String?
+  adminNotes      String?
+  confirmedById   String?
+  confirmedBy     User?         @relation("ConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   // Relations
   refundRequests RefundRequest[]
@@ -490,8 +503,6 @@ model Payment {
   @@index([studentId, status])
   @@map("payments")
 }
-
-// ─── 10. PAYOUTS MASTER ─────────────────────────────────
 
 // ─── 10. PAYOUTS MASTER ─────────────────────────────────
 
@@ -588,19 +599,50 @@ model Notification {
 // ─── 14. REFERRALS ──────────────────────────────────────
 
 model Referral {
-  id              String         @id @default(cuid())
-  referralCode    String         @unique
-  referredById    String
-  referredBy      User           @relation("ReferredBy", fields: [referredById], references: [id], onDelete: Cascade)
-  referredToId    String?
-  referredTo      User?          @relation("ReferredTo", fields: [referredToId], references: [id], onDelete: SetNull)
-  status          ReferralStatus @default(PENDING)
-  rewardClasses   Int            @default(0)
-  convertedAt     DateTime?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                   String         @id @default(cuid())
+  referralCode         String         @unique
+  referredById         String
+  referredBy           User           @relation("ReferredBy", fields: [referredById], references: [id], onDelete: Cascade)
+  referredToId         String?
+  referredTo           User?          @relation("ReferredTo", fields: [referredToId], references: [id], onDelete: SetNull)
+  status               ReferralStatus @default(PENDING)
+  rewardAmount         Decimal?       @db.Decimal(10, 2)  // Snapshot of reward at time of conversion
+  walletTransactionId  String?        // Links to the WalletTransaction created on conversion
+  convertedAt          DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   @@map("referrals")
+}
+
+// ─── 14a. WALLET ────────────────────────────────────────
+
+model Wallet {
+  id              String          @id @default(cuid())
+  parentProfileId String          @unique
+  parentProfile   ParentProfile   @relation(fields: [parentProfileId], references: [id], onDelete: Cascade)
+  balance         Decimal         @default(0) @db.Decimal(10, 2)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Transaction history
+  transactions    WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id          String                @id @default(cuid())
+  walletId    String
+  wallet      Wallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount      Decimal               @db.Decimal(10, 2)  // positive = credit, negative = debit
+  type        WalletTransactionType
+  description String
+  referenceId String?               // referralId, bookingOrderId, paymentId, etc.
+  createdAt   DateTime              @default(now())
+
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
 }
 
 // ─── 15. PLATFORM SETTINGS (Single Row) ─────────────────
@@ -624,14 +666,16 @@ model PlatformSettings {
   maxLoginAttempts        Int     @default(5)
   lockoutDuration         Int     @default(30)   // minutes
   coordinatorCanConfirmPayments Boolean @default(false)
-  rescheduleWindowHours    Int     @default(24)    // Free reschedule if > X hours before class
-  rescheduleLateFeePercent Int     @default(50)    // Fee % if within reschedule window but > hardCutoff
-  rescheduleHardCutoffHours Int    @default(2)     // No reschedule allowed within X hours of class
-  cancelFreeWindowHours    Int     @default(24)    // Free cancel if > X hours before class
-  cancelLateFeePercent     Int     @default(50)    // Fee % if within cancel window but > hardCutoff
-  cancelHardCutoffHours    Int     @default(2)     // No cancel within X hours (100% forfeit or blocked)
-  cancelHardCutoffFeePercent Int   @default(100)   // Fee % if within hard cutoff (100 = full forfeit)
-  maxReschedulesPerClass   Int     @default(2)     // Max times a single class can be rescheduled
+  rescheduleWindowHours    Int     @default(24)
+  rescheduleLateFeePercent Int     @default(50)
+  rescheduleHardCutoffHours Int    @default(2)
+  cancelFreeWindowHours    Int     @default(24)
+  cancelLateFeePercent     Int     @default(50)
+  cancelHardCutoffHours    Int     @default(2)
+  cancelHardCutoffFeePercent Int   @default(100)
+  maxReschedulesPerClass   Int     @default(2)
+  referralEnabled          Boolean @default(true)
+  referralRewardAmount     Decimal @default(25) @db.Decimal(10, 2)  // USD credited to referrer's wallet
 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt

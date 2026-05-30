@@ -21,6 +21,7 @@ export async function GET() {
     settings: {
       ...settings,
       teacherNoShowRatingHit: Number(settings.teacherNoShowRatingHit),
+      referralRewardAmount: Number(settings.referralRewardAmount),
     },
   })
 }
@@ -51,6 +52,7 @@ export async function PATCH(req: NextRequest) {
     ],
     packages: ["trialClassEnabled", "lowBalanceThreshold"],
     users: ["minPasswordLength", "passwordResetExpiry", "maxLoginAttempts", "lockoutDuration"],
+    referral: ["referralEnabled", "referralRewardAmount"],
   }
 
   const tabAllowed = allowed[tab]
@@ -79,6 +81,7 @@ export async function PATCH(req: NextRequest) {
     settings: {
       ...updated,
       teacherNoShowRatingHit: Number(updated.teacherNoShowRatingHit),
+      referralRewardAmount: Number(updated.referralRewardAmount),
     },
   })
 }

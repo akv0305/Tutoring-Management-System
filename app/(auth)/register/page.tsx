@@ -1,6 +1,7 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect, useCallback } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   GraduationCap,
   Eye,
@@ -18,6 +19,7 @@ import {
   ArrowRight,
   ArrowLeft,
   Globe,
+  Gift,
 } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -321,10 +323,22 @@ function Step1({
   data,
   onChange,
   onNext,
+  referralCode,
+  onReferralCodeChange,
+  referralChecking,
+  referralValid,
+  referralReferrer,
+  onValidateReferral,
 }: {
   data: Step1Data
   onChange: (d: Partial<Step1Data>) => void
   onNext: () => void
+  referralCode: string
+  onReferralCodeChange: (code: string) => void
+  referralChecking: boolean
+  referralValid: boolean | null
+  referralReferrer: string
+  onValidateReferral: () => void
 }) {
   const [pwVisible, pwToggle] = usePasswordToggle()
   const [cpwVisible, cpwToggle] = usePasswordToggle()
@@ -407,6 +421,67 @@ function Step1({
           </span>
         </div>
       )}
+
+      {/* ── Referral Code Field ── */}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="reg-referral" className="text-sm font-semibold text-[#1E293B] flex items-center gap-1.5">
+          <Gift className="w-3.5 h-3.5 text-gray-400" />
+          Referral Code
+          <span className="text-xs text-gray-400 font-normal">(optional)</span>
+        </label>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+              <Gift className="w-4 h-4" />
+            </div>
+            <input
+              id="reg-referral"
+              type="text"
+              placeholder="e.g. REF-A3K7X9P2"
+              value={referralCode}
+              onChange={(e) => onReferralCodeChange(e.target.value.toUpperCase())}
+              className={cn(
+                "w-full h-11 rounded-xl border bg-gray-50 text-sm text-[#1E293B] placeholder:text-gray-400 transition-all pl-10 pr-4",
+                "focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] focus:bg-white",
+                referralValid === true && "border-[#22C55E] bg-[#22C55E]/5",
+                referralValid === false && "border-[#EF4444] bg-[#EF4444]/5",
+                referralValid === null && "border-gray-200"
+              )}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onValidateReferral}
+            disabled={!referralCode.trim() || referralChecking}
+            className={cn(
+              "h-11 px-4 rounded-xl text-sm font-semibold transition-all flex items-center gap-1.5",
+              referralCode.trim() && !referralChecking
+                ? "bg-[#0D9488]/10 text-[#0D9488] hover:bg-[#0D9488]/20 border border-[#0D9488]/30"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200"
+            )}
+          >
+            {referralChecking ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              "Verify"
+            )}
+          </button>
+        </div>
+        {/* Referral validation feedback */}
+        {referralValid === true && referralReferrer && (
+          <div className="flex items-center gap-2 mt-0.5">
+            <CheckCircle className="w-3.5 h-3.5 text-[#22C55E]" />
+            <span className="text-xs text-[#22C55E] font-medium">
+              Referred by {referralReferrer}
+            </span>
+          </div>
+        )}
+        {referralValid === false && (
+          <p className="text-xs text-[#EF4444] mt-0.5">
+            Invalid or expired referral code. You can still register without one.
+          </p>
+        )}
+      </div>
 
       <button
         type="submit"
@@ -575,6 +650,9 @@ function ReviewRow({ label, value }: { label: string; value: React.ReactNode }) 
 function Step3({
   step1,
   step2,
+  referralCode,
+  referralValid,
+  referralReferrer,
   onBack,
   onSubmit,
   isLoading,
@@ -582,6 +660,9 @@ function Step3({
 }: {
   step1: Step1Data
   step2: Step2Data
+  referralCode: string
+  referralValid: boolean | null
+  referralReferrer: string
   onBack: () => void
   onSubmit: () => void
   isLoading: boolean
@@ -621,6 +702,19 @@ function Step3({
           <ReviewRow label="Full Name" value={step1.fullName || "—"} />
           <ReviewRow label="Email" value={step1.email ? maskEmail(step1.email) : "—"} />
           <ReviewRow label="Phone" value={step1.phone || "—"} />
+          {referralCode && referralValid && (
+            <ReviewRow
+              label="Referral"
+              value={
+                <span className="flex items-center gap-1.5 justify-end">
+                  <Gift className="w-3.5 h-3.5 text-[#22C55E]" />
+                  <span className="text-[#22C55E]">
+                    {referralReferrer ? `By ${referralReferrer}` : referralCode}
+                  </span>
+                </span>
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -804,6 +898,8 @@ function SuccessView({ name }: { name: string }) {
    REGISTRATION PAGE (main export)
 ───────────────────────────────────────────── */
 export default function RegisterPage() {
+  const searchParams = useSearchParams()
+
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [submitted, setSubmitted] = useState(false)
   const [step1, setStep1] = useState<Step1Data>(STEP1_INIT)
@@ -811,10 +907,56 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
 
+  // ── Referral state ──
+  const [referralCode, setReferralCode] = useState("")
+  const [referralValid, setReferralValid] = useState<boolean | null>(null)
+  const [referralReferrer, setReferralReferrer] = useState("")
+  const [referralChecking, setReferralChecking] = useState(false)
+
   const updateStep1 = (partial: Partial<Step1Data>) =>
     setStep1((prev) => ({ ...prev, ...partial }))
   const updateStep2 = (partial: Partial<Step2Data>) =>
     setStep2((prev) => ({ ...prev, ...partial }))
+
+  // ── Validate referral code via API ──
+  const validateReferralCode = useCallback(async (code: string) => {
+    if (!code.trim()) {
+      setReferralValid(null)
+      setReferralReferrer("")
+      return
+    }
+    setReferralChecking(true)
+    try {
+      const res = await fetch("/api/referrals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "validate", code: code.trim() }),
+      })
+      const data = await res.json()
+      if (data.valid) {
+        setReferralValid(true)
+        setReferralReferrer(data.referrerName || "")
+      } else {
+        setReferralValid(false)
+        setReferralReferrer("")
+      }
+    } catch {
+      setReferralValid(false)
+      setReferralReferrer("")
+    } finally {
+      setReferralChecking(false)
+    }
+  }, [])
+
+  // ── Auto-fill referral code from URL ?ref= param ──
+  useEffect(() => {
+    const refParam = searchParams.get("ref")
+    if (refParam) {
+      const code = refParam.trim().toUpperCase()
+      setReferralCode(code)
+      validateReferralCode(code)
+    }
+  }, [searchParams, validateReferralCode])
 
   async function handleRegister() {
     setError("")
@@ -829,10 +971,10 @@ export default function RegisterPage() {
     const childFirstName = childParts[0] || ""
     const childLastName = childParts.slice(1).join(" ") || childParts[0] || ""
 
-    // Map grade format — Genspark uses "Grade 8", API expects "8"
+    // Map grade format — "Grade 8" → "8"
     const gradeNum = step2.grade.replace("Grade ", "")
 
-    // Map timezone — Genspark uses "EST", API expects "America/New_York"
+    // Map timezone — "EST" → "America/New_York"
     const tzMap: Record<string, string> = {
       EST: "America/New_York",
       CST: "America/Chicago",
@@ -857,6 +999,8 @@ export default function RegisterPage() {
           childSubjects: step2.subjects,
           childTimezone: tzMap[step2.timezone] || "America/New_York",
           scheduleNotes: step2.preferredSchedule,
+          // ── Pass validated referral code ──
+          referralCode: referralValid ? referralCode.trim() : undefined,
         }),
       })
 
@@ -868,7 +1012,7 @@ export default function RegisterPage() {
         return
       }
 
-      // Show success view first
+      // Show success view
       setSubmitted(true)
       setIsLoading(false)
     } catch {
@@ -929,12 +1073,39 @@ export default function RegisterPage() {
                 <p className="text-sm text-gray-500 leading-relaxed">{current.sub}</p>
               </div>
 
+              {/* Referral welcome banner — shown when arriving via referral link */}
+              {step === 1 && referralValid && referralReferrer && (
+                <div className="mb-4 p-3 rounded-xl bg-[#0D9488]/5 border border-[#0D9488]/20 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-[#0D9488]/10 flex items-center justify-center flex-shrink-0">
+                    <Gift className="w-4 h-4 text-[#0D9488]" />
+                  </div>
+                  <p className="text-sm text-[#1E3A5F]">
+                    <span className="font-semibold">{referralReferrer}</span> invited you! Complete registration and your friend earns a reward.
+                  </p>
+                </div>
+              )}
+
               {/* Step indicator */}
               <StepIndicator current={step} />
 
               {/* Steps */}
               {step === 1 && (
-                <Step1 data={step1} onChange={updateStep1} onNext={() => setStep(2)} />
+                <Step1
+                  data={step1}
+                  onChange={updateStep1}
+                  onNext={() => setStep(2)}
+                  referralCode={referralCode}
+                  onReferralCodeChange={(code) => {
+                    setReferralCode(code)
+                    // Reset validation when code changes
+                    setReferralValid(null)
+                    setReferralReferrer("")
+                  }}
+                  referralChecking={referralChecking}
+                  referralValid={referralValid}
+                  referralReferrer={referralReferrer}
+                  onValidateReferral={() => validateReferralCode(referralCode)}
+                />
               )}
               {step === 2 && (
                 <Step2
@@ -948,6 +1119,9 @@ export default function RegisterPage() {
                 <Step3
                   step1={step1}
                   step2={step2}
+                  referralCode={referralCode}
+                  referralValid={referralValid}
+                  referralReferrer={referralReferrer}
                   onBack={() => setStep(2)}
                   onSubmit={handleRegister}
                   isLoading={isLoading}
@@ -974,4 +1148,3 @@ export default function RegisterPage() {
     </div>
   )
 }
-
