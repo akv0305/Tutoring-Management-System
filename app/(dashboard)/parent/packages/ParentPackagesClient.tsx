@@ -1,3 +1,5 @@
+// app/(dashboard)/parent/packages/ParentPackagesClient.tsx
+
 "use client"
 
 import React, { useState } from "react"
@@ -13,6 +15,10 @@ import {
   MessageCircle,
   Loader2,
   X,
+  ShoppingCart,
+  Star,
+  Filter,
+  ArrowRight,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -49,6 +55,24 @@ type KPIs = {
   totalRemaining: number
 }
 
+type TemplatePkg = {
+  id: string
+  name: string
+  subjectId: string
+  subjectName: string
+  classesIncluded: number
+  validityDays: number
+  price: string
+  priceNum: number
+  description: string
+  isPopular: boolean
+}
+
+type CatalogSubject = {
+  id: string
+  name: string
+}
+
 function ProgressBar({
   used,
   total,
@@ -82,13 +106,25 @@ export function ParentPackagesClient({
   activePackages,
   pastPackages,
   kpis,
+  packageTemplates = [],
+  catalogSubjects = [],
 }: {
   childName: string
   activePackages: ActivePkg[]
   pastPackages: PastPkg[]
   kpis: KPIs
+  packageTemplates?: TemplatePkg[]
+  catalogSubjects?: CatalogSubject[]
 }) {
   const router = useRouter()
+
+  // Subject filter for catalog
+  const [selectedSubject, setSelectedSubject] = useState<string>("all")
+
+  const filteredTemplates =
+    selectedSubject === "all"
+      ? packageTemplates
+      : packageTemplates.filter((t) => t.subjectId === selectedSubject)
 
   // Coordinator message modal state
   const [showCoordModal, setShowCoordModal] = useState(false)
@@ -279,6 +315,122 @@ export function ParentPackagesClient({
           )}
         </div>
       </div>
+
+      {/* ── Available Packages Catalog (NEW) ──────────────────────── */}
+      {packageTemplates.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-[#1E293B]">
+                Available Packages
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Browse our package catalog and choose the best fit for {childName}
+              </p>
+            </div>
+            {catalogSubjects.length > 1 && (
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <select
+                  value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 bg-white focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none"
+                >
+                  <option value="all">All Subjects</option>
+                  {catalogSubjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="p-5">
+            {filteredTemplates.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-6">
+                No packages available for the selected subject.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {filteredTemplates.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className={[
+                      "relative rounded-xl border p-5 flex flex-col justify-between transition-all hover:shadow-md",
+                      tpl.isPopular
+                        ? "border-[#F59E0B]/40 bg-[#F59E0B]/5"
+                        : "border-gray-100 bg-gray-50/30",
+                    ].join(" ")}
+                  >
+                    {/* Popular badge */}
+                    {tpl.isPopular && (
+                      <div className="absolute -top-2.5 left-4">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#F59E0B] text-white text-xs font-bold rounded-full shadow-sm">
+                          <Star className="w-3 h-3" />
+                          Popular
+                        </span>
+                      </div>
+                    )}
+
+                    <div className={tpl.isPopular ? "mt-2" : ""}>
+                      {/* Subject badge */}
+                      <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-100 text-teal-700 mb-3">
+                        {tpl.subjectName}
+                      </span>
+
+                      {/* Package name */}
+                      <h3 className="text-sm font-semibold text-[#1E293B] leading-snug">
+                        {tpl.name}
+                      </h3>
+
+                      {/* Description */}
+                      {tpl.description && (
+                        <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">
+                          {tpl.description}
+                        </p>
+                      )}
+
+                      {/* Details row */}
+                      <div className="flex items-center gap-3 mt-3 flex-wrap">
+                        <span className="flex items-center gap-1 text-xs text-gray-600">
+                          <BookOpen className="w-3.5 h-3.5 text-[#0D9488]" />
+                          {tpl.classesIncluded} classes
+                        </span>
+                        <span className="flex items-center gap-1 text-xs text-gray-600">
+                          <Clock className="w-3.5 h-3.5 text-[#0D9488]" />
+                          {tpl.validityDays} days validity
+                        </span>
+                      </div>
+
+                      {/* Price */}
+                      <div className="mt-3">
+                        <span className="text-lg font-bold text-[#1E3A5F]">
+                          {tpl.price}
+                        </span>
+                        <span className="text-xs text-gray-400 ml-1">
+                          / package
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Buy button */}
+                    <button
+                      onClick={() => router.push("/parent/teachers")}
+                      className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors"
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      Buy Package
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Package History */}
       {pastPackages.length > 0 && (

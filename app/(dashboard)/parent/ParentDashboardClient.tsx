@@ -19,6 +19,8 @@ import {
   X,
   AlertCircle,
   Loader2,
+  Info,
+  ArrowRight,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -148,13 +150,23 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
-          <Link href="/parent/classes" className="px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
+          <Link href="/parent/teachers" className="px-4 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors shadow-sm">
             Book a Class
           </Link>
           <Link href="/parent/teachers" className="px-4 py-2 rounded-lg border border-white text-white text-sm font-semibold hover:bg-white/10 transition-colors">
             Browse Teachers
           </Link>
         </div>
+      </div>
+
+      {/* Booking Process Info Banner */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-teal-50 border border-teal-200 rounded-xl">
+        <Info className="w-5 h-5 text-[#0D9488] flex-shrink-0" />
+        <p className="text-sm text-[#1E293B]">
+          <span className="font-semibold">How to book a class:</span>{" "}
+          Browse Teachers <ArrowRight className="w-3 h-3 inline text-gray-400" /> Select a teacher <ArrowRight className="w-3 h-3 inline text-gray-400" /> View availability <ArrowRight className="w-3 h-3 inline text-gray-400" /> Pick time slots <ArrowRight className="w-3 h-3 inline text-gray-400" /> Confirm booking.{" "}
+          <span className="text-gray-500">You can book trial classes, standalone sessions, or full packages.</span>
+        </p>
       </div>
 
       {/* KPI Cards */}
@@ -317,7 +329,7 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
             <div className="flex flex-col gap-3">
               {[
                 { icon: Search,       label: "Browse Teachers",  href: "/parent/teachers" },
-                { icon: CalendarPlus, label: "Schedule a Class", href: "/parent/classes" },
+                { icon: CalendarPlus, label: "Schedule a Class", href: "/parent/teachers" },
                 { icon: Package,      label: "Buy Package",      href: "/parent/teachers" },
                 { icon: CreditCard,   label: "Make Payment",     href: "/parent/payments" },
                 { icon: Gift,         label: "Refer a Friend",   href: "/parent/referrals" },
@@ -451,7 +463,7 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
                 rows={4}
                 placeholder={
                   coordTitle === "Callback Request"
-                    ? "e.g., Please call me tomorrow between 10 AM – 12 PM EST. I'd like to discuss..."
+                    ? "e.g., Please call me tomorrow between 10 AM  12 PM EST. I'd like to discuss..."
                     : "e.g., I'd like to discuss package options for my child..."
                 }
                 className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none resize-none"

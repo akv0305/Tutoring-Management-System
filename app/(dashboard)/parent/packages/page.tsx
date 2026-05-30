@@ -1,3 +1,4 @@
+
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
@@ -19,6 +20,7 @@ export default async function PackagesPage() {
   const studentIds = parent.students.map((s) => s.id)
   const childName = parent.students[0]?.firstName ?? "your child"
 
+  // ── Purchased packages (existing logic, unchanged) ──────────────
   const packagesRaw = await prisma.package.findMany({
     where: { studentId: { in: studentIds } },
     include: {
@@ -78,12 +80,41 @@ export default async function PackagesPage() {
     totalRemaining,
   }
 
+  // ── Package templates catalog (NEW) ─────────────────────────────
+  const templatesRaw = await prisma.packageTemplate.findMany({
+    where: { status: "ACTIVE" },
+    include: { subject: { select: { id: true, name: true } } },
+    orderBy: [{ isPopular: "desc" }, { suggestedPrice: "asc" }],
+  })
+
+  const packageTemplates = templatesRaw.map((t) => ({
+    id: t.id,
+    name: t.name,
+    subjectId: t.subject.id,
+    subjectName: t.subject.name,
+    classesIncluded: t.classesIncluded,
+    validityDays: t.validityDays,
+    price: `$${Number(t.suggestedPrice)}`,
+    priceNum: Number(t.suggestedPrice),
+    description: t.description ?? "",
+    isPopular: t.isPopular,
+  }))
+
+  // Unique subjects from templates for filter dropdown
+  const catalogSubjects = [
+    ...new Map(
+      templatesRaw.map((t) => [t.subject.id, { id: t.subject.id, name: t.subject.name }])
+    ).values(),
+  ]
+
   return (
     <ParentPackagesClient
       childName={childName}
       activePackages={activePackages}
       pastPackages={pastPackages}
       kpis={kpis}
+      packageTemplates={packageTemplates}
+      catalogSubjects={catalogSubjects}
     />
   )
 }

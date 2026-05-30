@@ -6,7 +6,24 @@ import { ParentClassesClient } from "./ParentClassesClient"
 
 export const dynamic = "force-dynamic"
 
-export default async function ClassesPage() {
+type Tab = "upcoming" | "completed" | "cancelled"
+
+const VALID_TABS: Record<string, Tab> = {
+  upcoming: "upcoming",
+  scheduled: "upcoming",
+  confirmed: "upcoming",
+  pending_payment: "upcoming",
+  completed: "completed",
+  cancelled: "cancelled",
+  cancelled_student: "cancelled",
+  cancelled_teacher: "cancelled",
+}
+
+export default async function ClassesPage({
+  searchParams,
+}: {
+  searchParams: { status?: string }
+}) {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
 
@@ -15,6 +32,10 @@ export default async function ClassesPage() {
     include: { students: { select: { id: true, firstName: true } } },
   })
   if (!parent) redirect("/unauthorized")
+
+  // Resolve default tab from query param
+  const rawStatus = (searchParams.status ?? "").toLowerCase().trim()
+  const defaultTab: Tab = VALID_TABS[rawStatus] ?? "upcoming"
 
   const studentIds = parent.students.map((s) => s.id)
   const childName = parent.students[0]?.firstName ?? "your child"
@@ -151,6 +172,7 @@ export default async function ClassesPage() {
       cancelled={cancelled}
       monthStats={monthStats}
       calendarData={calendarData}
+      defaultTab={defaultTab}
     />
   )
 }

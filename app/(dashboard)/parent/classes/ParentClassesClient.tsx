@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import {
   Calendar,
   Clock,
@@ -18,7 +19,6 @@ import {
 } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
-import { BookClassModal } from "@/components/modals/BookClassModal"
 import { RescheduleModal } from "@/components/modals/RescheduleModal"
 import { CancelClassModal } from "@/components/modals/CancelClassModal"
 import { RateClassModal } from "@/components/modals/RateClassModal"
@@ -142,6 +142,7 @@ export function ParentClassesClient({
   cancelled,
   monthStats,
   calendarData,
+  defaultTab = "upcoming",
 }: {
   childName: string
   upcoming: UpcomingClass[]
@@ -149,17 +150,10 @@ export function ParentClassesClient({
   cancelled: CancelledClass[]
   monthStats: MonthStats
   calendarData: CalendarData
+  defaultTab?: Tab
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>("upcoming")
-
-  // Book modal
-  const [showBookModal, setShowBookModal] = useState(false)
-  const [bookingData, setBookingData] = useState<any>(null)
-  useEffect(() => {
-    if (showBookModal && !bookingData) {
-      fetch("/api/classes/booking-data").then((r) => r.json()).then((d) => setBookingData(d)).catch(() => {})
-    }
-  }, [showBookModal, bookingData])
+  const router = useRouter()
+  const [activeTab, setActiveTab] = useState<Tab>(defaultTab)
 
   // Reschedule modal
   const [rescheduleClass, setRescheduleClass] = useState<UpcomingClass | null>(null)
@@ -199,7 +193,7 @@ export function ParentClassesClient({
           </p>
         </div>
         <button
-          onClick={() => setShowBookModal(true)}
+          onClick={() => router.push("/parent/teachers")}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" />Book a Class
@@ -435,9 +429,6 @@ export function ParentClassesClient({
                     </p>
                   </div>
                   <StatusBadge status="cancelled" />
-                  <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors">
-                    <RotateCcw className="w-3 h-3" />Rebook
-                  </button>
                 </div>
               ))
             )}
@@ -446,19 +437,6 @@ export function ParentClassesClient({
       )}
 
       {/*  MODALS  */}
-
-      {/* Book Class Modal */}
-      {bookingData && (
-        <BookClassModal
-          open={showBookModal}
-          onClose={() => setShowBookModal(false)}
-          onSuccess={() => window.location.reload()}
-          role="PARENT"
-          students={bookingData.students}
-          teachers={bookingData.teachers}
-          packages={bookingData.packages}
-        />
-      )}
 
       {/* Reschedule Modal */}
       {rescheduleClass && teacherSlots && (
