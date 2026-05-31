@@ -11,6 +11,151 @@ import ClassRescheduled from "@/emails/class-rescheduled"
 import MeetingLinkShared from "@/emails/meeting-link-shared"
 import ClassCompleted from "@/emails/class-completed"
 
+// ── Referral conversion & wallet deduction helper ──
+async function handleReferralConversion(
+  tx: any,
+  parentUserId: string,
+  parentProfileId: string
+) {
+  try {
+    // Check if this parent was referred
+    const parentUser = await tx.user.findUnique({
+      where: { id: parentUserId },
+      select: { referredByCode: true },
+    })
+
+    if (!parentUser?.referredByCode) return
+
+    // Check if there's a PENDING referral for this parent
+    const pendingReferral = await tx.referral.findFirst({
+      where: {
+        referredToId: parentUserId,
+        status: "PENDING",
+      },
+      include: {
+        referredBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            parentProfile: { select: { id: true } },
+          },
+        },
+      },
+    })
+
+    if (!pendingReferral || !pendingReferral.referredBy?.parentProfile) return
+
+    // Get reward amount from settings
+    const settings = await tx.platformSettings.findFirst({
+      where: { id: "default" },
+      select: { referralEnabled: true, referralRewardAmount: true },
+    })
+
+    if (!settings?.referralEnabled) return
+
+    const rewardAmount = Number(settings.referralRewardAmount)
+    if (rewardAmount <= 0) return
+
+    const referrerParentProfileId = pendingReferral.referredBy.parentProfile.id
+
+    // Find or create referrer's wallet
+    let referrerWallet = await tx.wallet.findUnique({
+      where: { parentProfileId: referrerParentProfileId },
+    })
+
+    if (!referrerWallet) {
+      referrerWallet = await tx.wallet.create({
+        data: {
+          parentProfileId: referrerParentProfileId,
+          balance: 0,
+        },
+      })
+    }
+
+    // Credit the referrer's wallet
+    const walletTx = await tx.walletTransaction.create({
+      data: {
+        walletId: referrerWallet.id,
+        amount: rewardAmount,
+        type: "REFERRAL_REWARD",
+        description: `Referral reward — ${parentUser.referredByCode} converted`,
+        referenceId: pendingReferral.id,
+      },
+    })
+
+    await tx.wallet.update({
+      where: { id: referrerWallet.id },
+      data: { balance: { increment: rewardAmount } },
+    })
+
+    // Mark referral as SUCCESSFUL
+    await tx.referral.update({
+      where: { id: pendingReferral.id },
+      data: {
+        status: "SUCCESSFUL",
+        rewardAmount: rewardAmount,
+        walletTransactionId: walletTx.id,
+        convertedAt: new Date(),
+      },
+    })
+
+    // Notify the referrer
+    await tx.notification.create({
+      data: {
+        userId: pendingReferral.referredById,
+        type: "SYSTEM",
+        title: "Referral Reward Earned!",
+        message: `You earned $${rewardAmount.toFixed(2)} because your referral just booked their first paid class! The amount has been added to your wallet.`,
+      },
+    })
+  } catch (err) {
+    // Don't fail the booking if referral processing fails
+    console.error("[Referral conversion] Error:", err)
+  }
+}
+
+async function applyWalletDiscount(
+  tx: any,
+  parentProfileId: string,
+  totalAmount: number
+): Promise<{ walletDeduction: number; amountDue: number }> {
+  try {
+    const wallet = await tx.wallet.findUnique({
+      where: { parentProfileId },
+    })
+
+    if (!wallet || Number(wallet.balance) <= 0) {
+      return { walletDeduction: 0, amountDue: totalAmount }
+    }
+
+    const walletBalance = Number(wallet.balance)
+    const walletDeduction = Math.min(walletBalance, totalAmount)
+    const amountDue = totalAmount - walletDeduction
+
+    if (walletDeduction > 0) {
+      // Debit the wallet
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          amount: -walletDeduction,
+          type: "BOOKING_DISCOUNT",
+          description: `Wallet applied to booking — $${walletDeduction.toFixed(2)} deducted`,
+        },
+      })
+
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: { decrement: walletDeduction } },
+      })
+    }
+
+    return { walletDeduction, amountDue }
+  } catch (err) {
+    console.error("[Wallet discount] Error:", err)
+    return { walletDeduction: 0, amountDue: totalAmount }
+  }
+}
 
 // Generate a unique order reference like "ORD-20260402-A1B2C3"
 function generateOrderRef(): string {
@@ -505,13 +650,28 @@ export async function POST(req: NextRequest) {
       }
 
       // 1. Create the Payment record (PENDING)
+      // ── Apply wallet discount ──
+      const parentProfile = await tx.parentProfile.findUnique({
+        where: { userId: session.user.id },
+        select: { id: true },
+      })
+
+      const { walletDeduction, amountDue } = parentProfile
+        ? await applyWalletDiscount(tx, parentProfile.id, totalAmount)
+        : { walletDeduction: 0, amountDue: totalAmount }
+
+      // Create payment record
       const payment = await tx.payment.create({
         data: {
           studentId,
-          packageId: createdPackageId,
-          amount: totalAmount,
-          method: "BANK_TRANSFER",
-          status: "PENDING",
+          packageId: createdPackageId || packageId || null,
+          amount: amountDue,
+          method: amountDue === 0 ? "WALLET" : "BANK_TRANSFER",
+          status: amountDue === 0 ? "CONFIRMED" : "PENDING",
+          walletDeduction: walletDeduction,
+          adminNotes: walletDeduction > 0
+            ? `Wallet discount applied: $${walletDeduction.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
+            : null,
         },
       })
 
@@ -525,7 +685,8 @@ export async function POST(req: NextRequest) {
           subjectId,
           totalClasses: slotList.length,
           totalAmount,
-          status: "PENDING_PAYMENT",
+          walletDeduction: walletDeduction,
+          status: amountDue === 0 ? "PAID" : "PENDING_PAYMENT",
           paymentId: payment.id,
         },
       })
@@ -553,6 +714,22 @@ export async function POST(req: NextRequest) {
 
       return { payment, bookingOrder, classRecords, createdPackageId }
     })
+
+    // ── Referral conversion trigger (non-blocking, outside main transaction) ──
+    if (!isTrialClass && session.user.role === "PARENT") {
+      const parentProfile = await prisma.parentProfile.findUnique({
+        where: { userId: session.user.id },
+        select: { id: true },
+      })
+      if (parentProfile) {
+        // Run in a separate transaction so it doesn't break the main flow
+        prisma.$transaction(async (tx) => {
+          await handleReferralConversion(tx, session.user.id, parentProfile.id)
+        }).catch((err) => {
+          console.error("[Referral conversion] Failed:", err)
+        })
+      }
+    }
 
     // Send notifications to admin(s) and coordinator (outside transaction, non-blocking)
     try {
