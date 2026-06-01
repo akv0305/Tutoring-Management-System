@@ -318,6 +318,8 @@ export async function POST(req: NextRequest) {
       topicCovered,
       meetingLink,
       isTrial,
+      couponCode,
+      discountMethod, // "coupon" | "wallet" | "none"
     } = body
 
     // Parents can only book for their own children
@@ -650,28 +652,125 @@ export async function POST(req: NextRequest) {
       }
 
       // 1. Create the Payment record (PENDING)
-      // ── Apply wallet discount ──
+      // ── Apply discount: coupon OR wallet (never both) ──
       const parentProfile = await tx.parentProfile.findUnique({
         where: { userId: session.user.id },
         select: { id: true },
       })
 
-      const { walletDeduction, amountDue } = parentProfile
-        ? await applyWalletDiscount(tx, parentProfile.id, totalAmount)
-        : { walletDeduction: 0, amountDue: totalAmount }
+      let walletDeduction = 0
+      let couponDiscount = 0
+      let appliedCouponId: string | null = null
+      let amountDue = totalAmount
+      let discountNotes: string | null = null
+
+      const chosenMethod = discountMethod || "none"
+
+      // ── COUPON PATH ──
+      if (chosenMethod === "coupon" && couponCode && parentProfile) {
+        // Validate the coupon inside the transaction
+        const coupon = await tx.coupon.findFirst({
+          where: {
+            code: { equals: couponCode.trim().toUpperCase(), mode: "insensitive" },
+            status: "ACTIVE",
+          },
+          include: {
+            assignments: { select: { parentProfileId: true } },
+          },
+        })
+
+        if (coupon) {
+          const now = new Date()
+          const isWithinDates = now >= new Date(coupon.validFrom) && now <= new Date(coupon.validUntil)
+          const isUnderGlobalCap = coupon.maxUsesTotal === null || coupon.usedCount < coupon.maxUsesTotal
+          const meetsMinOrder = !coupon.minOrderAmount || totalAmount >= Number(coupon.minOrderAmount)
+
+          // Scope check
+          let scopeValid = coupon.scope === "ALL_USERS"
+          if (!scopeValid && (coupon.scope === "SINGLE_USER" || coupon.scope === "MULTI_USER")) {
+            scopeValid = coupon.assignments.some((a) => a.parentProfileId === parentProfile.id)
+          }
+
+          // Per-user usage check
+          const userUsageCount = await tx.couponUsage.count({
+            where: { couponId: coupon.id, parentProfileId: parentProfile.id },
+          })
+          const isUnderUserCap = userUsageCount < coupon.maxUsesPerUser
+
+          if (isWithinDates && isUnderGlobalCap && meetsMinOrder && scopeValid && isUnderUserCap) {
+            // Calculate discount
+            if (coupon.discountType === "PERCENTAGE") {
+              couponDiscount = (totalAmount * Number(coupon.discountValue)) / 100
+              if (coupon.maxDiscountAmount && couponDiscount > Number(coupon.maxDiscountAmount)) {
+                couponDiscount = Number(coupon.maxDiscountAmount)
+              }
+            } else {
+              couponDiscount = Number(coupon.discountValue)
+            }
+
+            // Cannot exceed order total
+            if (couponDiscount > totalAmount) {
+              couponDiscount = totalAmount
+            }
+
+            couponDiscount = Math.round(couponDiscount * 100) / 100
+            amountDue = Math.round((totalAmount - couponDiscount) * 100) / 100
+            appliedCouponId = coupon.id
+
+            // Record coupon usage
+            await tx.couponUsage.create({
+              data: {
+                couponId: coupon.id,
+                parentProfileId: parentProfile.id,
+                bookingOrderId: null, // will be updated after bookingOrder is created
+                discountApplied: couponDiscount,
+              },
+            })
+
+            // Increment coupon used count
+            await tx.coupon.update({
+              where: { id: coupon.id },
+              data: { usedCount: { increment: 1 } },
+            })
+
+            const discountLabel = coupon.discountType === "PERCENTAGE"
+              ? `${Number(coupon.discountValue)}% off`
+              : `$${Number(coupon.discountValue).toFixed(2)} off`
+            discountNotes = `Coupon ${coupon.code} applied (${discountLabel}): -$${couponDiscount.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
+          }
+          // If validation fails silently, no discount is applied — booking continues at full price
+        }
+      }
+
+      // ── WALLET PATH ──
+      if (chosenMethod === "wallet" && parentProfile && couponDiscount === 0) {
+        const walletResult = await applyWalletDiscount(tx, parentProfile.id, totalAmount)
+        walletDeduction = walletResult.walletDeduction
+        amountDue = walletResult.amountDue
+        if (walletDeduction > 0) {
+          discountNotes = `Wallet discount applied: $${walletDeduction.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
+        }
+      }
+
+      // Determine payment method and status
+      const finalAmountDue = amountDue
+      const paymentMethod = finalAmountDue === 0
+        ? (couponDiscount > 0 ? "OTHER" : "WALLET")
+        : "BANK_TRANSFER"
+      const paymentStatus = finalAmountDue === 0 ? "CONFIRMED" : "PENDING"
 
       // Create payment record
       const payment = await tx.payment.create({
         data: {
           studentId,
           packageId: createdPackageId || packageId || null,
-          amount: amountDue,
-          method: amountDue === 0 ? "WALLET" : "BANK_TRANSFER",
-          status: amountDue === 0 ? "CONFIRMED" : "PENDING",
+          amount: finalAmountDue,
           walletDeduction: walletDeduction,
-          adminNotes: walletDeduction > 0
-            ? `Wallet discount applied: $${walletDeduction.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
-            : null,
+          couponId: appliedCouponId,
+          couponDiscount: couponDiscount,
+          method: paymentMethod,
+          status: paymentStatus,
+          adminNotes: discountNotes,
         },
       })
 
@@ -686,10 +785,24 @@ export async function POST(req: NextRequest) {
           totalClasses: slotList.length,
           totalAmount,
           walletDeduction: walletDeduction,
-          status: amountDue === 0 ? "PAID" : "PENDING_PAYMENT",
+          couponId: appliedCouponId,
+          couponDiscount: couponDiscount,
+          status: finalAmountDue === 0 ? "PAID" : "PENDING_PAYMENT",
           paymentId: payment.id,
         },
       })
+
+      // Update coupon usage with bookingOrderId now that we have it
+      if (appliedCouponId && parentProfile) {
+        await tx.couponUsage.updateMany({
+          where: {
+            couponId: appliedCouponId,
+            parentProfileId: parentProfile.id,
+            bookingOrderId: null,
+          },
+          data: { bookingOrderId: bookingOrder.id },
+        })
+      }      
 
       // 3. Create all Class records linked to the BookingOrder
       const classRecords = []
@@ -817,9 +930,15 @@ export async function POST(req: NextRequest) {
       }),
     }).catch((err) => console.error("[Booking] Teacher email failed:", err))    
 
+    const hasCoupon = Number(result.bookingOrder.couponDiscount) > 0
+    const hasWallet = Number(result.bookingOrder.walletDeduction) > 0
+    const isPaid = result.bookingOrder.status === "PAID"
+
     return NextResponse.json(
       {
-        message: `${slotList.length} class${slotList.length > 1 ? "es" : ""} reserved — awaiting payment confirmation`,
+        message: isPaid
+          ? `${slotList.length} class${slotList.length > 1 ? "es" : ""} booked — fully paid${hasCoupon ? " via coupon" : hasWallet ? " via wallet" : ""}!`
+          : `${slotList.length} class${slotList.length > 1 ? "es" : ""} reserved — awaiting payment confirmation`,
         orderRef: result.bookingOrder.orderRef,
         bookingOrderId: result.bookingOrder.id,
         paymentId: result.payment.id,
@@ -827,10 +946,14 @@ export async function POST(req: NextRequest) {
         classIds: result.classRecords.map((c) => c.id),
         totalClasses: slotList.length,
         totalAmount: `$${totalAmount.toFixed(2)}`,
-        pendingPayment: true,
+        walletDeduction: hasWallet ? `$${Number(result.bookingOrder.walletDeduction).toFixed(2)}` : null,
+        couponDiscount: hasCoupon ? `$${Number(result.bookingOrder.couponDiscount).toFixed(2)}` : null,
+        amountDue: `$${Number(result.payment.amount).toFixed(2)}`,
+        pendingPayment: !isPaid,
       },
       { status: 201 }
     )
+
   } catch (error) {
     console.error("POST /api/classes error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

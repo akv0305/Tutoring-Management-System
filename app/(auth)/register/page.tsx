@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, Suspense  } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   GraduationCap,
@@ -897,7 +897,7 @@ function SuccessView({ name }: { name: string }) {
 /* ─────────────────────────────────────────────
    REGISTRATION PAGE (main export)
 ───────────────────────────────────────────── */
-export default function RegisterPage() {
+function RegisterPageInner() {
   const searchParams = useSearchParams()
 
   const [step, setStep] = useState<1 | 2 | 3>(1)
@@ -1148,3 +1148,15 @@ export default function RegisterPage() {
     </div>
   )
 }
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+        <div className="w-8 h-8 border-4 border-[#0D9488] border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <RegisterPageInner />
+    </Suspense>
+  )
+}
+

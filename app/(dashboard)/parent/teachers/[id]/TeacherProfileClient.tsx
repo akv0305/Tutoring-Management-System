@@ -4,7 +4,7 @@ import React, { useState, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft, Star, Clock, BookOpen, MapPin, Calendar, ChevronLeft,
-  ChevronRight, CheckCircle, Loader2, AlertTriangle, X, Package,
+  ChevronRight, CheckCircle, Loader2, AlertTriangle, X, Package, Ticket, Wallet,
 } from "lucide-react"
 import { RatingStars } from "@/components/ui/RatingStars"
 
@@ -86,11 +86,13 @@ export function TeacherProfileClient({
   students,
   packageTemplates,
   trialEligibility,
+  walletBalance = 0,
 }: {
   teacher: TeacherData
   students: Student[]
   packageTemplates: PackageTemplateOpt[]
   trialEligibility: TrialEligibility[]
+  walletBalance?: number
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -108,6 +110,15 @@ export function TeacherProfileClient({
   const [success, setSuccess] = useState(false)
   const [pendingPayment, setPendingPayment] = useState(false)
   const [bookingOrderRef, setBookingOrderRef] = useState("")
+
+  // Discount state
+  const [discountMethod, setDiscountMethod] = useState<"none" | "coupon" | "wallet">("none")
+  const [couponCode, setCouponCode] = useState("")
+  const [couponValidating, setCouponValidating] = useState(false)
+  const [couponValid, setCouponValid] = useState<boolean | null>(null)
+  const [couponMessage, setCouponMessage] = useState("")
+  const [couponDiscountAmount, setCouponDiscountAmount] = useState(0)
+  const [couponName, setCouponName] = useState("")
 
   const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset])
 
@@ -168,11 +179,83 @@ export function TeacherProfileClient({
     return `${teacher.rate}/hr per class`
   }, [bookingType, selectedTemplate, selectedSlots.length, teacher.rateNum, teacher.rate])
 
+    // Compute total amount for discount calculations
+    const totalAmount = useMemo(() => {
+      if (bookingType === "trial") return 0
+      if (bookingType === "package" && selectedTemplate) return selectedTemplate.suggestedPrice
+      if (bookingType === "standalone" && selectedSlots.length > 0) {
+        return teacher.rateNum * selectedSlots.length
+      }
+      return 0
+    }, [bookingType, selectedTemplate, selectedSlots.length, teacher.rateNum])
+  
+    // Wallet deduction preview
+    const walletDeductionPreview = discountMethod === "wallet" && totalAmount > 0
+      ? Math.min(walletBalance, totalAmount)
+      : 0
+  
+    // Coupon discount preview
+    const couponDeductionPreview = discountMethod === "coupon" && couponValid
+      ? couponDiscountAmount
+      : 0
+  
+    const amountAfterDiscount = totalAmount - (discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview)
+  
+    async function validateCoupon() {
+      if (!couponCode.trim()) return
+      setCouponValidating(true)
+      setCouponValid(null)
+      setCouponMessage("")
+      setCouponDiscountAmount(0)
+      setCouponName("")
+  
+      try {
+        const res = await fetch("/api/coupons/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ couponCode: couponCode.trim(), totalAmount }),
+        })
+        const data = await res.json()
+  
+        if (data.valid) {
+          setCouponValid(true)
+          setCouponMessage(data.message)
+          setCouponDiscountAmount(data.discountAmount)
+          setCouponName(data.couponName || data.couponCode)
+        } else {
+          setCouponValid(false)
+          setCouponMessage(data.error || "Invalid coupon code.")
+          setCouponDiscountAmount(0)
+        }
+      } catch {
+        setCouponValid(false)
+        setCouponMessage("Failed to validate coupon. Try again.")
+      }
+  
+      setCouponValidating(false)
+    }
+  
+    function resetCoupon() {
+      setCouponCode("")
+      setCouponValid(null)
+      setCouponMessage("")
+      setCouponDiscountAmount(0)
+      setCouponName("")
+    }
+  
+    function handleDiscountMethodChange(method: "none" | "coupon" | "wallet") {
+      setDiscountMethod(method)
+      if (method !== "coupon") resetCoupon()
+    }
+  
+
   function handleBookingTypeChange(type: BookingType) {
     setBookingType(type)
     setTemplateId("")
     setSelectedSlots([])
     setError("")
+    setDiscountMethod("none")
+    resetCoupon()
   }
 
   function handleSubjectChange(newSubjectId: string) {
@@ -259,10 +342,15 @@ export function TeacherProfileClient({
         slots,
         duration: 60,
         isTrial: bookingType === "trial",
+        discountMethod: bookingType === "trial" ? "none" : discountMethod,
       }
 
       if (bookingType === "package" && templateId) {
         payload.templateId = templateId
+      }
+      // Attach coupon code if using coupon discount
+      if (discountMethod === "coupon" && couponValid && couponCode.trim()) {
+        payload.couponCode = couponCode.trim()
       }
 
       const res = await fetch("/api/classes", {
@@ -484,6 +572,140 @@ export function TeacherProfileClient({
             <div className="flex items-center gap-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-700">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
               <div><span className="font-semibold">Free Trial Class</span> — This is a complimentary trial session. No payment required.</div>
+            </div>
+          )}
+
+          {/* ── Discount Section (non-trial only) ── */}
+          {bookingType !== "trial" && totalAmount > 0 && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-gray-700">Apply Discount (optional)</p>
+
+              {/* Radio options */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDiscountMethodChange("none")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    discountMethod === "none"
+                      ? "border-[#1E3A5F] bg-[#1E3A5F]/5 text-[#1E3A5F]"
+                      : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                  }`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                  No Discount
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDiscountMethodChange("coupon")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    discountMethod === "coupon"
+                      ? "border-[#0D9488] bg-[#0D9488]/5 text-[#0D9488]"
+                      : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                  }`}
+                >
+                  <Ticket className="w-3.5 h-3.5" />
+                  Use Coupon
+                </button>
+
+                {walletBalance > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleDiscountMethodChange("wallet")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      discountMethod === "wallet"
+                        ? "border-[#F59E0B] bg-[#F59E0B]/5 text-[#F59E0B]"
+                        : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Wallet className="w-3.5 h-3.5" />
+                    Use Wallet (${walletBalance.toFixed(2)})
+                  </button>
+                )}
+              </div>
+
+              {/* Coupon input */}
+              {discountMethod === "coupon" && (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      value={couponCode}
+                      onChange={(e) => {
+                        setCouponCode(e.target.value.toUpperCase())
+                        if (couponValid !== null) resetCoupon()
+                      }}
+                      placeholder="Enter coupon code"
+                      className={`flex-1 px-3 py-2 border rounded-lg text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] ${
+                        couponValid === true ? "border-green-400 bg-green-50" :
+                        couponValid === false ? "border-red-300 bg-red-50" :
+                        "border-gray-200"
+                      }`}
+                      disabled={couponValidating}
+                    />
+                    <button
+                      onClick={validateCoupon}
+                      disabled={!couponCode.trim() || couponValidating || couponValid === true}
+                      className="px-4 py-2 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                    >
+                      {couponValidating ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : couponValid === true ? (
+                        <CheckCircle className="w-4 h-4" />
+                      ) : (
+                        "Apply"
+                      )}
+                    </button>
+                  </div>
+
+                  {couponMessage && (
+                    <div className={`flex items-start gap-2 p-2.5 rounded-lg text-sm ${
+                      couponValid
+                        ? "bg-green-50 border border-green-200 text-green-700"
+                        : "bg-red-50 border border-red-200 text-red-700"
+                    }`}>
+                      {couponValid ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+                      <span>{couponMessage}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Wallet preview */}
+              {discountMethod === "wallet" && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+                  <Wallet className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">Wallet balance: ${walletBalance.toFixed(2)}</p>
+                    <p className="text-xs mt-0.5">
+                      ${walletDeductionPreview.toFixed(2)} will be deducted from your wallet.
+                      {amountAfterDiscount > 0 && ` Remaining $${amountAfterDiscount.toFixed(2)} via payment.`}
+                      {amountAfterDiscount === 0 && " No additional payment needed!"}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Updated total */}
+              {(couponDeductionPreview > 0 || walletDeductionPreview > 0) && (
+                <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">Original Total</span>
+                    <span className="text-gray-400 line-through">${totalAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">
+                      {discountMethod === "coupon" ? `Coupon (${couponName})` : "Wallet Balance"}
+                    </span>
+                    <span className="text-green-600 font-medium">
+                      -${(discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="border-t border-gray-200 pt-1 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-[#1E293B]">Amount Due</span>
+                    <span className="text-lg font-bold text-[#0D9488]">${amountAfterDiscount.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

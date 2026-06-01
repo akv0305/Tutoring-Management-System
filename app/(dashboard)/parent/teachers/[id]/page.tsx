@@ -121,6 +121,13 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     isPopular: t.isPopular,
   }))
 
+  // Fetch wallet balance for discount option
+  const wallet = await prisma.wallet.findUnique({
+    where: { parentProfileId: parent.id },
+    select: { balance: true },
+  })
+  const walletBalance = wallet ? Number(wallet.balance) : 0  
+
   const trialEligibility = studentSubjects.map((ss) => ({
     studentId: ss.studentId,
     subjectId: ss.subjectId,
@@ -133,6 +140,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
       students={studentsData}
       packageTemplates={packageTemplatesData}
       trialEligibility={trialEligibility}
+      walletBalance={walletBalance}
     />
   )
 }

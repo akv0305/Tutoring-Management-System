@@ -14,7 +14,7 @@ import {
   Wallet,
   RotateCcw,
   BarChart3,
-  Settings, Bell,
+  Settings, Bell, Ticket,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -52,6 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "User Management", icon: Shield,          href: "/admin/users" },
     { label: "Subjects",        icon: BookOpen,        href: "/admin/subjects" },
     { label: "Packages",        icon: Package,         href: "/admin/packages" },
+    { label: "Coupons",         icon: Ticket,          href: "/admin/coupons" },
     { label: "Payments",        icon: CreditCard,      href: "/admin/payments",      ...(pendingPayments > 0 && { badge: pendingPayments }) },
     { label: "Payouts",         icon: Wallet,          href: "/admin/payouts" },
     { label: "Refund Requests", icon: RotateCcw,       href: "/admin/refunds",       ...(pendingRefunds > 0 && { badge: pendingRefunds }) },
