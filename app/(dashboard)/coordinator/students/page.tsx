@@ -19,15 +19,28 @@ export default async function CoordinatorStudentsPage() {
     where: { coordinatorId: coordinator.id },
     include: {
       parent: {
-        include: { user: { select: { firstName: true, lastName: true } } },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
       },
       subjects: { include: { subject: { select: { name: true } } } },
       packages: {
         where: { status: "ACTIVE" },
         select: {
+          id: true,
+          name: true,
           classesIncluded: true,
           classesUsed: true,
           status: true,
+          expiryDate: true,
+          subject: { select: { name: true } },
           teacher: {
             include: { user: { select: { firstName: true, lastName: true } } },
           },
@@ -39,16 +52,17 @@ export default async function CoordinatorStudentsPage() {
           scheduledAt: { gte: new Date() },
         },
         orderBy: { scheduledAt: "asc" },
-        take: 1,
+        take: 3,
         include: {
           teacher: {
             include: { user: { select: { firstName: true, lastName: true } } },
           },
+          subject: { select: { name: true } },
         },
       },
       payments: {
         where: { status: "PENDING" },
-        select: { id: true },
+        select: { id: true, amount: true },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -82,7 +96,13 @@ export default async function CoordinatorStudentsPage() {
       parentName: s.parent
         ? `${s.parent.user.firstName} ${s.parent.user.lastName}`
         : "—",
+      parentEmail: s.parent?.user.email ?? "—",
+      parentPhone: s.parent?.user.phone ?? "—",
       grade: `Grade ${s.grade}`,
+      school: s.school ?? "—",
+      timezone: s.timezone ?? "—",
+      scheduleNotes: s.scheduleNotes ?? "",
+      onboardingStage: s.onboardingStage,
       subjects: s.subjects.map((ss) => ss.subject.name),
       packageStatus,
       classesRemaining: String(remaining),
@@ -102,6 +122,43 @@ export default async function CoordinatorStudentsPage() {
         ? `${mainTeacher.firstName} ${mainTeacher.lastName}`
         : "—",
       actionType,
+      // Detailed data for the modal
+      activePackages: s.packages.map((p) => ({
+        name: p.name,
+        subject: p.subject.name,
+        teacher: `${p.teacher.user.firstName} ${p.teacher.user.lastName}`,
+        classesUsed: p.classesUsed,
+        classesIncluded: p.classesIncluded,
+        expiryDate: p.expiryDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+      })),
+      upcomingClasses: s.classes.map((c) => ({
+        subject: c.subject.name,
+        teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+        scheduledAt: c.scheduledAt.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }) +
+          " at " +
+          c.scheduledAt.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }),
+        status: c.status,
+        isTrial: c.isTrial,
+      })),
+      pendingPaymentCount: s.payments.length,
+      pendingPaymentTotal: s.payments.reduce((sum, p) => sum + Number(p.amount), 0),
+      registeredAt: s.createdAt.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
     }
   })
 

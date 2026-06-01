@@ -5,10 +5,10 @@ import { prisma } from "@/lib/prisma"
 
 // ═════════════════════════════════════════════════════════
 // POST /api/coupons/validate
-// Parent validates a coupon code against a booking amount.
-// Body: { couponCode: string, totalAmount: number }
-// Returns: { valid, discountAmount, couponId, couponName,
-//            discountType, discountValue, message }
+// Validates a coupon code against a booking amount.
+// Body: { couponCode: string, totalAmount: number, parentProfileId?: string }
+// Parents: parentProfileId is auto-resolved from session.
+// Coordinators: must pass parentProfileId explicitly.
 // ═════════════════════════════════════════════════════════
 
 export async function POST(req: NextRequest) {
@@ -18,20 +18,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Only parents can use coupons
-    if (session.user.role !== "PARENT") {
-      return NextResponse.json({ error: "Only parents can use discount coupons." }, { status: 403 })
+    // Allow PARENT and COORDINATOR roles
+    if (!["PARENT", "COORDINATOR"].includes(session.user.role)) {
+      return NextResponse.json(
+        { error: "Only parents and coordinators can validate discount coupons." },
+        { status: 403 }
+      )
     }
 
     const body = await req.json()
-    const { couponCode, totalAmount } = body
+    const { couponCode, totalAmount, parentProfileId: bodyParentProfileId } = body
 
     if (!couponCode || typeof couponCode !== "string" || !couponCode.trim()) {
-      return NextResponse.json({ valid: false, error: "Coupon code is required." }, { status: 400 })
+      return NextResponse.json(
+        { valid: false, error: "Coupon code is required." },
+        { status: 400 }
+      )
     }
 
     if (!totalAmount || Number(totalAmount) <= 0) {
-      return NextResponse.json({ valid: false, error: "A valid booking amount is required." }, { status: 400 })
+      return NextResponse.json(
+        { valid: false, error: "A valid booking amount is required." },
+        { status: 400 }
+      )
     }
 
     const amount = Number(totalAmount)
@@ -39,7 +48,10 @@ export async function POST(req: NextRequest) {
     // ── 1. Find coupon (case-insensitive) ───────────────
     const coupon = await prisma.coupon.findFirst({
       where: {
-        code: { equals: couponCode.trim().toUpperCase(), mode: "insensitive" },
+        code: {
+          equals: couponCode.trim().toUpperCase(),
+          mode: "insensitive",
+        },
       },
       include: {
         assignments: { select: { parentProfileId: true } },
@@ -80,7 +92,6 @@ export async function POST(req: NextRequest) {
     }
 
     if (now > new Date(coupon.validUntil)) {
-      // Auto-expire
       await prisma.coupon.update({
         where: { id: coupon.id },
         data: { status: "EXPIRED" },
@@ -92,54 +103,92 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4. Check global usage cap ───────────────────────
-    if (coupon.maxUsesTotal !== null && coupon.usedCount >= coupon.maxUsesTotal) {
+    if (
+      coupon.maxUsesTotal !== null &&
+      coupon.usedCount >= coupon.maxUsesTotal
+    ) {
       return NextResponse.json({
         valid: false,
         error: "This coupon has reached its maximum usage limit.",
       })
     }
 
-    // ── 5. Get parent profile ───────────────────────────
-    const parentProfile = await prisma.parentProfile.findUnique({
-      where: { userId: session.user.id },
-      select: { id: true },
-    })
+    // ── 5. Resolve parent profile ───────────────────────
+    let parentProfileId: string | null = null
 
-    if (!parentProfile) {
-      return NextResponse.json({
-        valid: false,
-        error: "Parent profile not found.",
-      }, { status: 404 })
+    if (session.user.role === "PARENT") {
+      const parentProfile = await prisma.parentProfile.findUnique({
+        where: { userId: session.user.id },
+        select: { id: true },
+      })
+      if (!parentProfile) {
+        return NextResponse.json(
+          { valid: false, error: "Parent profile not found." },
+          { status: 404 }
+        )
+      }
+      parentProfileId = parentProfile.id
+    } else if (session.user.role === "COORDINATOR") {
+      // Coordinator must supply the parentProfileId
+      if (!bodyParentProfileId) {
+        return NextResponse.json(
+          {
+            valid: false,
+            error:
+              "parentProfileId is required when validating on behalf of a parent.",
+          },
+          { status: 400 }
+        )
+      }
+      // Verify the parent profile exists
+      const parentProfile = await prisma.parentProfile.findUnique({
+        where: { id: bodyParentProfileId },
+        select: { id: true },
+      })
+      if (!parentProfile) {
+        return NextResponse.json(
+          { valid: false, error: "Parent profile not found." },
+          { status: 404 }
+        )
+      }
+      parentProfileId = parentProfile.id
+    }
+
+    if (!parentProfileId) {
+      return NextResponse.json(
+        { valid: false, error: "Could not determine parent profile." },
+        { status: 400 }
+      )
     }
 
     // ── 6. Check scope / assignment ─────────────────────
     if (coupon.scope === "SINGLE_USER" || coupon.scope === "MULTI_USER") {
       const isAssigned = coupon.assignments.some(
-        (a) => a.parentProfileId === parentProfile.id
+        (a) => a.parentProfileId === parentProfileId
       )
       if (!isAssigned) {
         return NextResponse.json({
           valid: false,
-          error: "This coupon is not available for your account.",
+          error: "This coupon is not available for this account.",
         })
       }
     }
-    // ALL_USERS — no assignment check needed
 
     // ── 7. Check per-user usage limit ───────────────────
     const userUsageCount = await prisma.couponUsage.count({
       where: {
         couponId: coupon.id,
-        parentProfileId: parentProfile.id,
+        parentProfileId,
       },
     })
 
     if (userUsageCount >= coupon.maxUsesPerUser) {
       return NextResponse.json({
         valid: false,
-        error: coupon.maxUsesPerUser === 1
-          ? "You have already used this coupon."
-          : `You have already used this coupon ${userUsageCount} time${userUsageCount !== 1 ? "s" : ""} (limit: ${coupon.maxUsesPerUser}).`,
+        error:
+          coupon.maxUsesPerUser === 1
+            ? "This coupon has already been used."
+            : `This coupon has already been used ${userUsageCount} time${userUsageCount !== 1 ? "s" : ""} (limit: ${coupon.maxUsesPerUser}).`,
       })
     }
 
@@ -156,24 +205,21 @@ export async function POST(req: NextRequest) {
 
     if (coupon.discountType === "PERCENTAGE") {
       discountAmount = (amount * Number(coupon.discountValue)) / 100
-
-      // Apply max discount cap if set
-      if (coupon.maxDiscountAmount && discountAmount > Number(coupon.maxDiscountAmount)) {
+      if (
+        coupon.maxDiscountAmount &&
+        discountAmount > Number(coupon.maxDiscountAmount)
+      ) {
         discountAmount = Number(coupon.maxDiscountAmount)
       }
     } else {
-      // FIXED_AMOUNT
       discountAmount = Number(coupon.discountValue)
     }
 
-    // Discount cannot exceed order total
     if (discountAmount > amount) {
       discountAmount = amount
     }
 
-    // Round to 2 decimal places
     discountAmount = Math.round(discountAmount * 100) / 100
-
     const amountDue = Math.round((amount - discountAmount) * 100) / 100
 
     // ── 10. Build discount label ────────────────────────

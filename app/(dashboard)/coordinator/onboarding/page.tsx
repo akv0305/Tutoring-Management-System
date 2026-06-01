@@ -15,7 +15,6 @@ export default async function OnboardingPage() {
   })
   if (!coordinator) redirect("/unauthorized")
 
-  // Fetch students that are NOT fully converted/active yet, plus converted ones for the tab
   const studentsRaw = await prisma.student.findMany({
     where: { coordinatorId: coordinator.id },
     include: {
@@ -28,10 +27,26 @@ export default async function OnboardingPage() {
       },
       subjects: { include: { subject: { select: { name: true } } } },
       classes: {
-        where: { isTrial: true },
         orderBy: { scheduledAt: "desc" },
-        take: 1,
-        select: { status: true, parentRating: true, scheduledAt: true },
+        include: {
+          subject: { select: { name: true } },
+          teacher: {
+            include: { user: { select: { firstName: true, lastName: true } } },
+          },
+        },
+      },
+      packages: {
+        where: { status: "ACTIVE" },
+        include: {
+          subject: { select: { name: true } },
+          teacher: {
+            include: { user: { select: { firstName: true, lastName: true } } },
+          },
+        },
+      },
+      bookingOrders: {
+        orderBy: { createdAt: "desc" },
+        take: 10,
       },
     },
     orderBy: { createdAt: "desc" },
@@ -45,7 +60,7 @@ export default async function OnboardingPage() {
     else if (s.onboardingStage === "CONVERTED") status = "converted"
     else if (s.onboardingStage === "DROPPED") status = "dropped"
 
-    const trial = s.classes[0]
+    const trialClass = s.classes.find((c) => c.isTrial)
 
     return {
       id: s.id,
@@ -56,21 +71,80 @@ export default async function OnboardingPage() {
       email: s.parent?.user.email ?? "—",
       phone: s.parent?.user.phone ?? "—",
       grade: `Grade ${s.grade}`,
+      school: s.school ?? null,
+      gender: s.gender ?? null,
       subjects: s.subjects.map((ss) => ss.subject.name),
       timezone: s.timezone ?? "EST",
+      parentTimezone: s.parent?.timezone ?? null,
+      scheduleNotes: s.scheduleNotes ?? null,
       status,
       registered: s.createdAt.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
       }),
-      trialDate: trial
-        ? trial.scheduledAt.toLocaleDateString("en-US", {
+      updatedAt: s.updatedAt.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      trialDate: trialClass
+        ? trialClass.scheduledAt.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
           })
         : null,
-      trialRating: trial?.parentRating ?? null,
+      trialStatus: trialClass
+        ? trialClass.status.toLowerCase().replace(/_/g, " ")
+        : null,
+      trialRating: trialClass?.parentRating ?? null,
+      trialFeedback: trialClass?.parentFeedback ?? null,
+      classes: s.classes.map((c) => ({
+        id: c.id,
+        date: c.scheduledAt.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+        time: c.scheduledAt.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        }),
+        subject: c.subject.name,
+        teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+        status: c.status.toLowerCase().replace(/_/g, " "),
+        isTrial: c.isTrial,
+        topic: c.topicCovered ?? null,
+        rating: c.parentRating ?? null,
+        feedback: c.parentFeedback ?? null,
+      })),
+      packages: s.packages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        subject: p.subject.name,
+        teacher: `${p.teacher.user.firstName} ${p.teacher.user.lastName}`,
+        classesIncluded: p.classesIncluded,
+        classesUsed: p.classesUsed,
+        remaining: p.classesIncluded - p.classesUsed,
+        status: p.status.toLowerCase(),
+        expiryDate: p.expiryDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+      })),
+      bookingOrders: s.bookingOrders.map((o) => ({
+        id: o.id,
+        orderRef: o.orderRef,
+        status: o.status.toLowerCase().replace(/_/g, " "),
+        totalAmount: Number(o.totalAmount),
+        createdAt: o.createdAt.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+      })),
     }
   })
 

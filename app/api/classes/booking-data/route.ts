@@ -31,11 +31,11 @@ export async function GET(req: NextRequest) {
     // Students
     const students = await prisma.student.findMany({
       where: studentWhere,
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, parentId: true },
       orderBy: { firstName: "asc" },
     })
 
-    // Active teachers with subjects
+    // Active teachers with subjects + rate
     const teacherProfiles = await prisma.teacherProfile.findMany({
       where: { status: "ACTIVE" },
       include: {
@@ -49,26 +49,27 @@ export async function GET(req: NextRequest) {
       id: t.id,
       name: `${t.user.firstName} ${t.user.lastName}`,
       subjects: t.subjects.map((ts) => ({ id: ts.subject.id, name: ts.subject.name })),
+      hourlyRate: Number(t.studentFacingRate),
     }))
 
     // Active packages with remaining classes
     const studentIds = students.map((s) => s.id)
     const pkgs = await prisma.package.findMany({
-        where: {
-          studentId: { in: studentIds },
-          status: "ACTIVE",
-        },
-        select: {
-          id: true,
-          name: true,
-          classesIncluded: true,
-          classesUsed: true,
-          studentId: true,
-          teacherId: true,
-          subjectId: true,
-          student: { select: { firstName: true, lastName: true } },
-        },
-      })
+      where: {
+        studentId: { in: studentIds },
+        status: "ACTIVE",
+      },
+      select: {
+        id: true,
+        name: true,
+        classesIncluded: true,
+        classesUsed: true,
+        studentId: true,
+        teacherId: true,
+        subjectId: true,
+        student: { select: { firstName: true, lastName: true } },
+      },
+    })
 
     const packages = pkgs
       .filter((p) => p.classesUsed < p.classesIncluded)
@@ -82,7 +83,11 @@ export async function GET(req: NextRequest) {
       }))
 
     return NextResponse.json({
-      students: students.map((s) => ({ id: s.id, name: `${s.firstName} ${s.lastName}` })),
+      students: students.map((s) => ({
+        id: s.id,
+        name: `${s.firstName} ${s.lastName}`,
+        parentId: s.parentId,
+      })),
       teachers,
       packages,
     })
