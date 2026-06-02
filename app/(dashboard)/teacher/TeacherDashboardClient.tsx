@@ -17,6 +17,8 @@ import {
   Copy,
   ExternalLink,
   Save,
+  CalendarClock,
+  AlertTriangle,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -33,10 +35,14 @@ type TodayClass = {
   studentName: string
   initials: string
   subject: string
+  subjectName: string
   topic: string
+  sessionNotes: string
   status: string
   isTrial: boolean
   meetingLink: string | null
+  scheduledAtISO: string
+  duration: number
 }
 
 type UpcomingRow = {
@@ -51,6 +57,23 @@ type FeedbackItem = {
   from: string
   text: string
   date: string
+}
+
+type AvailabilitySlot = {
+  dayOfWeek: number
+  startTime: string
+  endTime: string
+}
+
+type BookedSlot = {
+  date: string
+  time: string
+  duration: number
+}
+
+type BlockedDate = {
+  date: string
+  reason: string
 }
 
 type DashboardData = {
@@ -72,6 +95,10 @@ type DashboardData = {
     noShows: string
     cancellations: string
   }
+  availability: AvailabilitySlot[]
+  bookedSlots: BookedSlot[]
+  blockedDates: BlockedDate[]
+  teacherTimezone: string
 }
 
 /* ────────────────────────────────────────────────
@@ -165,11 +192,16 @@ function MeetingLinkModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+        >
           <X className="w-5 h-5" />
         </button>
 
-        <h3 className="text-lg font-bold text-[#1E293B] mb-1">Meeting Link</h3>
+        <h3 className="text-lg font-bold text-[#1E293B] mb-1">
+          Meeting Link
+        </h3>
         <p className="text-sm text-gray-500 mb-5">
           {cls.subject} — {cls.studentName} — {cls.time}
         </p>
@@ -190,14 +222,24 @@ function MeetingLinkModal({
             disabled={busy}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#1E3A5F] text-white text-sm font-medium hover:bg-[#162d4a] transition-colors disabled:opacity-50"
           >
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
+            {generating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Video className="w-4 h-4" />
+            )}
             {generating ? "Generating…" : "Generate Jitsi Link"}
           </button>
         </div>
 
         <div className="relative mb-5">
-          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
-          <div className="relative flex justify-center"><span className="bg-white px-3 text-xs text-gray-400 uppercase">or</span></div>
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200" />
+          </div>
+          <div className="relative flex justify-center">
+            <span className="bg-white px-3 text-xs text-gray-400 uppercase">
+              or
+            </span>
+          </div>
         </div>
 
         {/* Option 2: Paste custom link */}
@@ -217,9 +259,16 @@ function MeetingLinkModal({
               />
             </div>
             {customLink && (
-              <button onClick={copyLink} title="Copy link"
-                className="px-2.5 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50">
-                {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+              <button
+                onClick={copyLink}
+                title="Copy link"
+                className="px-2.5 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50"
+              >
+                {copied ? (
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
               </button>
             )}
           </div>
@@ -228,7 +277,11 @@ function MeetingLinkModal({
             disabled={!customLink.trim() || busy}
             className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50"
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             {saving ? "Saving…" : "Save Meeting Link"}
           </button>
         </div>
@@ -238,7 +291,7 @@ function MeetingLinkModal({
 }
 
 /* ────────────────────────────────────────────────
-   View-Notes Modal Component
+   Add / View Notes Modal Component
    ──────────────────────────────────────────────── */
 
 function ViewNotesModal({
@@ -252,8 +305,10 @@ function ViewNotesModal({
   cls: TodayClass
   onNotesSaved: (classId: string, topic: string, notes: string) => void
 }) {
-  const [topicCovered, setTopicCovered] = useState(cls.topic || "")
-  const [sessionNotes, setSessionNotes] = useState("")
+  const [topicCovered, setTopicCovered] = useState(
+    cls.topic !== "—" ? cls.topic : ""
+  )
+  const [sessionNotes, setSessionNotes] = useState(cls.sessionNotes || "")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
@@ -286,14 +341,22 @@ function ViewNotesModal({
     }
   }
 
+  const hasExistingContent =
+    (cls.topic && cls.topic !== "—") || cls.sessionNotes
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6 relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+        >
           <X className="w-5 h-5" />
         </button>
 
-        <h3 className="text-lg font-bold text-[#1E293B] mb-1">Class Notes</h3>
+        <h3 className="text-lg font-bold text-[#1E293B] mb-1">
+          {hasExistingContent ? "View / Edit Notes" : "Add Class Notes"}
+        </h3>
         <p className="text-sm text-gray-500 mb-5">
           {cls.subject} — {cls.studentName} — {cls.time}
         </p>
@@ -306,7 +369,9 @@ function ViewNotesModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-[#1E293B] mb-1">Topic Covered</label>
+            <label className="block text-sm font-medium text-[#1E293B] mb-1">
+              Topic Covered
+            </label>
             <input
               type="text"
               value={topicCovered}
@@ -316,7 +381,9 @@ function ViewNotesModal({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-[#1E293B] mb-1">Session Notes</label>
+            <label className="block text-sm font-medium text-[#1E293B] mb-1">
+              Session Notes (Lesson Details)
+            </label>
             <textarea
               value={sessionNotes}
               onChange={(e) => setSessionNotes(e.target.value)}
@@ -328,14 +395,301 @@ function ViewNotesModal({
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
-          <button onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
             Cancel
           </button>
-          <button onClick={save} disabled={saving || (!topicCovered.trim() && !sessionNotes.trim())}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          <button
+            onClick={save}
+            disabled={
+              saving || (!topicCovered.trim() && !sessionNotes.trim())
+            }
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50"
+          >
+            {saving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             {saving ? "Saving…" : "Save Notes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────
+   Reschedule Class Modal Component
+   ──────────────────────────────────────────────── */
+
+function RescheduleClassModal({
+  open,
+  onClose,
+  cls,
+  availability,
+  bookedSlots,
+  blockedDates,
+  teacherTimezone,
+}: {
+  open: boolean
+  onClose: () => void
+  cls: TodayClass
+  availability: AvailabilitySlot[]
+  bookedSlots: BookedSlot[]
+  blockedDates: BlockedDate[]
+  teacherTimezone: string
+}) {
+  const [selectedDate, setSelectedDate] = useState("")
+  const [selectedTime, setSelectedTime] = useState("")
+  const [reason, setReason] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState(false)
+
+  if (!open) return null
+
+  // Get available time slots for the selected date
+  function getAvailableSlots(): string[] {
+    if (!selectedDate) return []
+
+    const dateObj = new Date(selectedDate + "T12:00:00")
+    const dayOfWeek = dateObj.getDay() // 0=Sun, 1=Mon, ...
+
+    // Check if date is blocked
+    const isBlocked = blockedDates.some((bd) => bd.date === selectedDate)
+    if (isBlocked) return []
+
+    // Find teacher availability for this day
+    const dayAvail = availability.filter((a) => a.dayOfWeek === dayOfWeek)
+    if (dayAvail.length === 0) return []
+
+    // Generate slots from availability
+    const slots: string[] = []
+    for (const avail of dayAvail) {
+      const [startH, startM] = avail.startTime.split(":").map(Number)
+      const [endH, endM] = avail.endTime.split(":").map(Number)
+      const startMin = startH * 60 + (startM || 0)
+      const endMin = endH * 60 + (endM || 0)
+
+      for (let min = startMin; min + cls.duration <= endMin; min += 30) {
+        const h = Math.floor(min / 60)
+        const m = min % 60
+        const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+
+        // Check if this slot is already booked
+        const isBooked = bookedSlots.some((bs) => {
+          if (bs.date !== selectedDate) return false
+          const [bh, bm] = bs.time.split(":").map(Number)
+          const bookedStart = bh * 60 + bm
+          const bookedEnd = bookedStart + bs.duration
+          const slotEnd = min + cls.duration
+          return min < bookedEnd && slotEnd > bookedStart
+        })
+
+        if (!isBooked) {
+          slots.push(timeStr)
+        }
+      }
+    }
+
+    return slots
+  }
+
+  const availableSlots = getAvailableSlots()
+
+  // Check if selected date is blocked
+  const isDateBlocked = blockedDates.some((bd) => bd.date === selectedDate)
+  const blockedReason = blockedDates.find(
+    (bd) => bd.date === selectedDate
+  )?.reason
+
+  // Min date: tomorrow
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const minDate = tomorrow.toISOString().slice(0, 10)
+
+  async function handleReschedule() {
+    if (!selectedDate || !selectedTime) return
+    setSaving(true)
+    setError("")
+    try {
+      const newScheduledAt = `${selectedDate}T${selectedTime}:00`
+      const res = await fetch("/api/classes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId: cls.id,
+          action: "reschedule",
+          newScheduledAt,
+          reason: reason.trim() || "Rescheduled by teacher from dashboard",
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || "Failed to reschedule class")
+      }
+      setSuccess(true)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-6 h-6 text-green-600" />
+          </div>
+          <h3 className="text-lg font-bold text-[#1E293B] mb-2">
+            Class Rescheduled!
+          </h3>
+          <p className="text-sm text-gray-500 mb-5">
+            The class has been moved to {selectedDate} at {selectedTime}. The
+            parent has been notified.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-5 py-2.5 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 relative max-h-[90vh] overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <h3 className="text-lg font-bold text-[#1E293B] mb-1">
+          Reschedule Class
+        </h3>
+        <p className="text-sm text-gray-500 mb-5">
+          {cls.subject} — {cls.studentName} — {cls.time}
+        </p>
+
+        {error && (
+          <div className="mb-4 p-3 rounded-lg bg-red-50 text-sm text-red-600 border border-red-200 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {/* Date picker */}
+          <div>
+            <label className="block text-sm font-medium text-[#1E293B] mb-1">
+              New Date
+            </label>
+            <input
+              type="date"
+              value={selectedDate}
+              min={minDate}
+              onChange={(e) => {
+                setSelectedDate(e.target.value)
+                setSelectedTime("")
+              }}
+              className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488] focus:border-transparent"
+            />
+            {isDateBlocked && (
+              <p className="text-xs text-red-500 mt-1">
+                This date is blocked
+                {blockedReason ? `: ${blockedReason}` : ""}. Please choose
+                another date.
+              </p>
+            )}
+          </div>
+
+          {/* Time slot selector */}
+          {selectedDate && !isDateBlocked && (
+            <div>
+              <label className="block text-sm font-medium text-[#1E293B] mb-1">
+                Available Time Slots{" "}
+                <span className="text-gray-400 font-normal">
+                  ({teacherTimezone})
+                </span>
+              </label>
+              {availableSlots.length === 0 ? (
+                <p className="text-sm text-gray-400 py-3 text-center bg-gray-50 rounded-lg">
+                  No available slots on this date. Try another date.
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                  {availableSlots.map((slot) => {
+                    const [h, m] = slot.split(":").map(Number)
+                    const d = new Date()
+                    d.setHours(h, m)
+                    const label = d.toLocaleTimeString("en-US", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      hour12: true,
+                    })
+                    return (
+                      <button
+                        key={slot}
+                        onClick={() => setSelectedTime(slot)}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                          selectedTime === slot
+                            ? "bg-[#0D9488] text-white border-[#0D9488]"
+                            : "border-gray-200 text-gray-600 hover:border-[#0D9488] hover:text-[#0D9488]"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reason */}
+          <div>
+            <label className="block text-sm font-medium text-[#1E293B] mb-1">
+              Reason{" "}
+              <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Personal commitment, schedule change…"
+              className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488] focus:border-transparent resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleReschedule}
+            disabled={saving || !selectedDate || !selectedTime}
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-[#F59E0B] text-[#1E293B] text-sm font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50"
+          >
+            {saving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CalendarClock className="w-4 h-4" />
+            )}
+            {saving ? "Rescheduling…" : "Reschedule"}
           </button>
         </div>
       </div>
@@ -349,11 +703,18 @@ function ViewNotesModal({
 
 export function TeacherDashboardClient({ data }: { data: DashboardData }) {
   const [completeClass, setCompleteClass] = useState<TodayClass | null>(null)
-  const [meetingLinkClass, setMeetingLinkClass] = useState<TodayClass | null>(null)
+  const [meetingLinkClass, setMeetingLinkClass] = useState<TodayClass | null>(
+    null
+  )
   const [notesClass, setNotesClass] = useState<TodayClass | null>(null)
+  const [rescheduleClass, setRescheduleClass] = useState<TodayClass | null>(
+    null
+  )
 
   // Local copy of today's classes so we can update meeting links & topics in-place
-  const [todayClasses, setTodayClasses] = useState<TodayClass[]>(data.todayClasses)
+  const [todayClasses, setTodayClasses] = useState<TodayClass[]>(
+    data.todayClasses
+  )
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -368,13 +729,11 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
     if (cls.meetingLink) {
       window.open(cls.meetingLink, "_blank", "noopener,noreferrer")
     } else {
-      // No link yet → open modal to add one
       setMeetingLinkClass(cls)
     }
   }
 
   function handleJoinNextClass() {
-    // Find the first non-completed, non-cancelled class
     const next = todayClasses.find((c) =>
       ["scheduled", "confirmed"].includes(c.status)
     )
@@ -388,10 +747,22 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
     )
   }
 
-  function handleNotesSaved(classId: string, topic: string, _notes: string) {
+  function handleNotesSaved(classId: string, topic: string, notes: string) {
     setTodayClasses((prev) =>
-      prev.map((c) => (c.id === classId ? { ...c, topic: topic || c.topic } : c))
+      prev.map((c) =>
+        c.id === classId
+          ? { ...c, topic: topic || c.topic, sessionNotes: notes || c.sessionNotes }
+          : c
+      )
     )
+  }
+
+  // Dynamic label for notes button
+  function getNotesLabel(cls: TodayClass): string {
+    if ((cls.topic && cls.topic !== "—") || cls.sessionNotes) {
+      return "Add / View Notes"
+    }
+    return "Add Notes"
   }
 
   return (
@@ -399,16 +770,19 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
       {/* Welcome Banner */}
       <div
         className="rounded-xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-        style={{ background: "linear-gradient(135deg, #0D9488 0%, #1E3A5F 100%)" }}
+        style={{
+          background: "linear-gradient(135deg, #0D9488 0%, #1E3A5F 100%)",
+        }}
       >
         <div>
           <h2 className="text-2xl font-bold text-white">
-            Welcome back, {data.teacherTitle ? `${data.teacherTitle} ` : ""}
+            Welcome back,{" "}
+            {data.teacherTitle ? `${data.teacherTitle} ` : ""}
             {data.teacherFirstName}!
           </h2>
           <p className="text-white/80 text-sm mt-1">
-            You have {data.todayCount} class{data.todayCount !== 1 ? "es" : ""}{" "}
-            scheduled today.
+            You have {data.todayCount} class
+            {data.todayCount !== 1 ? "es" : ""} scheduled today.
           </p>
         </div>
         {todayClasses.length > 0 && (
@@ -424,10 +798,38 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
-        <KPICard title="Today's Classes" value={String(data.todayCount)} subtitle={today} change="" changeType="neutral" icon={Calendar} />
-        <KPICard title="This Week" value={String(data.thisWeekCount)} subtitle={`${data.upcomingWeek.length} remaining after today`} change="" changeType="neutral" icon={BookOpen} />
-        <KPICard title="My Rating" value={data.avgRating} subtitle={`Based on ${data.ratingCount} reviews`} change={data.avgRating !== "—" ? "★" : ""} changeType="positive" icon={Star} />
-        <KPICard title="This Month Earnings" value={`$${data.monthEarnings.toLocaleString()}`} subtitle={`${data.monthCompleted} classes completed`} change="" changeType="neutral" icon={Wallet} />
+        <KPICard
+          title="Today's Classes"
+          value={String(data.todayCount)}
+          subtitle={today}
+          change=""
+          changeType="neutral"
+          icon={Calendar}
+        />
+        <KPICard
+          title="This Week"
+          value={String(data.thisWeekCount)}
+          subtitle={`${data.upcomingWeek.length} remaining after today`}
+          change=""
+          changeType="neutral"
+          icon={BookOpen}
+        />
+        <KPICard
+          title="My Rating"
+          value={data.avgRating}
+          subtitle={`Based on ${data.ratingCount} reviews`}
+          change={data.avgRating !== "—" ? "★" : ""}
+          changeType="positive"
+          icon={Star}
+        />
+        <KPICard
+          title="This Month Earnings"
+          value={`$${data.monthEarnings.toLocaleString()}`}
+          subtitle={`${data.monthCompleted} classes completed`}
+          change=""
+          changeType="neutral"
+          icon={Wallet}
+        />
       </div>
 
       {/* Two-column layout */}
@@ -437,39 +839,66 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
           {/* Today's Schedule */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-semibold text-[#1E293B]">{today}</h2>
-              <a href="/teacher/schedule" className="text-sm text-[#0D9488] font-medium hover:underline">View Full Schedule →</a>
+              <h2 className="text-base font-semibold text-[#1E293B]">
+                {today}
+              </h2>
+              <a
+                href="/teacher/schedule"
+                className="text-sm text-[#0D9488] font-medium hover:underline"
+              >
+                View Full Schedule →
+              </a>
             </div>
             <div className="flex flex-col gap-4">
               {todayClasses.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-6">No classes scheduled for today.</p>
+                <p className="text-sm text-gray-400 text-center py-6">
+                  No classes scheduled for today.
+                </p>
               ) : (
                 todayClasses.map((cls) => (
                   <div
                     key={cls.id}
                     className={`rounded-lg border border-gray-100 border-l-4 ${
-                      cls.isTrial ? "border-l-blue-500" : cls.status === "confirmed" ? "border-l-green-500" : "border-l-amber-400"
+                      cls.isTrial
+                        ? "border-l-blue-500"
+                        : cls.status === "confirmed"
+                          ? "border-l-green-500"
+                          : "border-l-amber-400"
                     } p-4 hover:bg-gray-50/50 transition-colors`}
                   >
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-[#1E293B]">{cls.time}</p>
+                        <p className="text-sm font-bold text-[#1E293B]">
+                          {cls.time}
+                        </p>
                         <div className="flex items-center gap-2 mt-1.5">
                           <div className="w-7 h-7 rounded-full bg-[#0D9488] flex items-center justify-center flex-shrink-0">
-                            <span className="text-white text-[10px] font-bold">{cls.initials}</span>
+                            <span className="text-white text-[10px] font-bold">
+                              {cls.initials}
+                            </span>
                           </div>
-                          <span className="text-sm font-medium text-[#1E293B]">{cls.studentName}</span>
+                          <span className="text-sm font-medium text-[#1E293B]">
+                            {cls.studentName}
+                          </span>
                           {cls.isTrial && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 uppercase tracking-wide">TRIAL</span>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 uppercase tracking-wide">
+                              TRIAL
+                            </span>
                           )}
                         </div>
-                        <p className="text-xs text-[#0D9488] font-medium mt-1">{cls.subject}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{cls.topic}</p>
+                        <p className="text-xs text-[#0D9488] font-medium mt-1">
+                          {cls.subject}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {cls.topic}
+                        </p>
                         {/* Meeting link indicator */}
                         {cls.meetingLink && (
                           <div className="flex items-center gap-1 mt-1.5">
                             <LinkIcon className="w-3 h-3 text-gray-400" />
-                            <span className="text-[10px] text-gray-400 truncate max-w-[200px]">{cls.meetingLink}</span>
+                            <span className="text-[10px] text-gray-400 truncate max-w-[200px]">
+                              {cls.meetingLink}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -484,19 +913,25 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
                                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-[#0D9488] text-white text-xs font-medium hover:bg-teal-700 transition-colors"
                               >
                                 {cls.meetingLink ? (
-                                  <><ExternalLink className="w-3 h-3" />Join Class</>
+                                  <>
+                                    <ExternalLink className="w-3 h-3" />
+                                    Join Class
+                                  </>
                                 ) : (
-                                  <><Video className="w-3 h-3" />Add Link</>
+                                  <>
+                                    <Video className="w-3 h-3" />
+                                    Add Link
+                                  </>
                                 )}
                               </button>
-                              {/* Edit link — only shown when a link already exists */}
                               {cls.meetingLink && (
                                 <button
                                   onClick={() => setMeetingLinkClass(cls)}
                                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 transition-colors"
                                   title="Change meeting link"
                                 >
-                                  <LinkIcon className="w-3 h-3" />Edit Link
+                                  <LinkIcon className="w-3 h-3" />
+                                  Edit Link
                                 </button>
                               )}
                             </>
@@ -508,22 +943,35 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
                               onClick={() => setCompleteClass(cls)}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-[#22C55E] text-white text-xs font-medium hover:bg-green-600 transition-colors"
                             >
-                              <CheckCircle className="w-3 h-3" />Mark Complete
+                              <CheckCircle className="w-3 h-3" />
+                              Mark Complete
                             </button>
                           )}
                           {cls.status === "completed" && (
                             <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-100 text-gray-500 text-xs font-medium">
-                              <CheckCircle className="w-3 h-3" />Completed
+                              <CheckCircle className="w-3 h-3" />
+                              Completed
                             </span>
                           )}
 
-                          {/* View / Add Notes */}
+                          {/* Reschedule — NEW */}
+                          {["scheduled", "confirmed"].includes(cls.status) && (
+                            <button
+                              onClick={() => setRescheduleClass(cls)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-amber-300 text-amber-700 bg-amber-50 text-xs font-medium hover:bg-amber-100 transition-colors"
+                            >
+                              <CalendarClock className="w-3 h-3" />
+                              Reschedule
+                            </button>
+                          )}
+
+                          {/* Add / View Notes — label updated */}
                           <button
                             onClick={() => setNotesClass(cls)}
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 transition-colors"
                           >
                             <FileText className="w-3 h-3" />
-                            {cls.topic ? "View Notes" : "Add Notes"}
+                            {getNotesLabel(cls)}
                           </button>
                         </div>
                       </div>
@@ -536,17 +984,32 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
 
           {/* Upcoming This Week */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Rest of the Week</h2>
+            <h2 className="text-base font-semibold text-[#1E293B] mb-4">
+              Rest of the Week
+            </h2>
             <div className="flex flex-col gap-2">
               {data.upcomingWeek.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">No more classes this week.</p>
+                <p className="text-sm text-gray-400 text-center py-4">
+                  No more classes this week.
+                </p>
               ) : (
                 data.upcomingWeek.map((row, i) => (
-                  <div key={i} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/50 rounded-lg px-2 transition-colors">
-                    <span className="w-24 flex-shrink-0 text-xs text-gray-400 font-medium">{row.date}</span>
-                    <span className="w-20 flex-shrink-0 text-xs font-semibold text-[#1E293B]">{row.time}</span>
-                    <span className="flex-1 text-sm text-[#1E293B]">{row.student}</span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-medium">{row.subject}</span>
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/50 rounded-lg px-2 transition-colors"
+                  >
+                    <span className="w-24 flex-shrink-0 text-xs text-gray-400 font-medium">
+                      {row.date}
+                    </span>
+                    <span className="w-20 flex-shrink-0 text-xs font-semibold text-[#1E293B]">
+                      {row.time}
+                    </span>
+                    <span className="flex-1 text-sm text-[#1E293B]">
+                      {row.student}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-medium">
+                      {row.subject}
+                    </span>
                   </div>
                 ))
               )}
@@ -558,24 +1021,52 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
         <div className="flex flex-col gap-6">
           {/* Quick Actions */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
+            <h2 className="text-base font-semibold text-[#1E293B] mb-4">
+              Quick Actions
+            </h2>
             <div className="flex flex-col gap-3">
               {[
-                { icon: Clock, label: "Update Availability", action: () => { window.location.href = "/teacher/availability" } },
-                { icon: FileText, label: "Add Class Notes", action: () => {
-                    const next = todayClasses.find((c) => ["scheduled", "confirmed", "completed"].includes(c.status))
-                    if (next) setNotesClass(next)
-                  }
+                {
+                  icon: Clock,
+                  label: "Update Availability",
+                  action: () => {
+                    window.location.href = "/teacher/availability"
+                  },
                 },
-                { icon: Users, label: "View My Students", action: () => { window.location.href = "/teacher/students" } },
-                { icon: BookOpen, label: "View Class History", action: () => { window.location.href = "/teacher/history" } },
+                {
+                  icon: FileText,
+                  label: "Add Class Notes",
+                  action: () => {
+                    const next = todayClasses.find((c) =>
+                      ["scheduled", "confirmed", "completed"].includes(
+                        c.status
+                      )
+                    )
+                    if (next) setNotesClass(next)
+                  },
+                },
+                {
+                  icon: Users,
+                  label: "View My Students",
+                  action: () => {
+                    window.location.href = "/teacher/students"
+                  },
+                },
+                {
+                  icon: BookOpen,
+                  label: "View Class History",
+                  action: () => {
+                    window.location.href = "/teacher/history"
+                  },
+                },
               ].map(({ icon: Icon, label, action }) => (
                 <button
                   key={label}
                   onClick={action}
                   className="w-full inline-flex items-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:bg-gray-50 hover:border-[#0D9488] hover:text-[#0D9488] transition-colors"
                 >
-                  <Icon className="w-4 h-4 text-[#0D9488]" />{label}
+                  <Icon className="w-4 h-4 text-[#0D9488]" />
+                  {label}
                 </button>
               ))}
             </div>
@@ -583,19 +1074,29 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
 
           {/* Recent Feedback */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Student Feedback</h2>
+            <h2 className="text-base font-semibold text-[#1E293B] mb-4">
+              Student Feedback
+            </h2>
             <div className="flex flex-col gap-4">
               {data.feedback.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">No feedback yet.</p>
+                <p className="text-sm text-gray-400 text-center py-4">
+                  No feedback yet.
+                </p>
               ) : (
                 data.feedback.map((fb, i) => (
                   <div key={i} className="rounded-lg bg-gray-50 p-3">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="text-xs font-semibold text-[#1E293B]">{fb.from}</span>
-                      <span className="text-[10px] text-gray-400">{fb.date}</span>
+                      <span className="text-xs font-semibold text-[#1E293B]">
+                        {fb.from}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        {fb.date}
+                      </span>
                     </div>
                     <RatingStars rating={fb.rating} size="sm" />
-                    <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">{fb.text}</p>
+                    <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
+                      {fb.text}
+                    </p>
                   </div>
                 ))
               )}
@@ -604,23 +1105,51 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
 
           {/* Performance Stats */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Performance</h2>
+            <h2 className="text-base font-semibold text-[#1E293B] mb-4">
+              Performance
+            </h2>
             <div className="flex flex-col gap-3">
               {[
-                { label: "Total Classes Taught", value: String(data.stats.totalCompleted), valueClass: "text-[#1E293B]" },
-                { label: "Completion Rate", value: data.stats.completionRate, valueClass: "text-[#22C55E]" },
-                { label: "Average Rating", value: data.stats.avgRating, valueClass: "text-[#F59E0B]" },
-                { label: "No-Shows", value: data.stats.noShows, valueClass: "text-[#22C55E]" },
-                { label: "Cancellations This Month", value: data.stats.cancellations, valueClass: "text-[#1E293B]" },
+                {
+                  label: "Total Classes Taught",
+                  value: String(data.stats.totalCompleted),
+                  valueClass: "text-[#1E293B]",
+                },
+                {
+                  label: "Completion Rate",
+                  value: data.stats.completionRate,
+                  valueClass: "text-[#22C55E]",
+                },
+                {
+                  label: "Average Rating",
+                  value: data.stats.avgRating,
+                  valueClass: "text-[#F59E0B]",
+                },
+                {
+                  label: "No-Shows",
+                  value: data.stats.noShows,
+                  valueClass: "text-[#22C55E]",
+                },
+                {
+                  label: "Cancellations This Month",
+                  value: data.stats.cancellations,
+                  valueClass: "text-[#1E293B]",
+                },
               ].map((row) => (
-                <div key={row.label} className="flex items-center justify-between gap-2 py-1.5 border-b border-gray-50 last:border-0">
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between gap-2 py-1.5 border-b border-gray-50 last:border-0"
+                >
                   <span className="text-sm text-gray-500">{row.label}</span>
-                  <span className={`text-sm font-bold ${row.valueClass}`}>{row.value}</span>
+                  <span className={`text-sm font-bold ${row.valueClass}`}>
+                    {row.value}
+                  </span>
                 </div>
               ))}
             </div>
             <p className="text-xs text-gray-400 mt-3 leading-relaxed">
-              Teacher cancellation limit: 3 per month. No-shows result in −0.5 rating penalty.
+              Teacher cancellation limit: 3 per month. No-shows result in −0.5
+              rating penalty.
             </p>
           </div>
         </div>
@@ -658,6 +1187,19 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
           onClose={() => setNotesClass(null)}
           cls={notesClass}
           onNotesSaved={handleNotesSaved}
+        />
+      )}
+
+      {/* Reschedule Class Modal — NEW */}
+      {rescheduleClass && (
+        <RescheduleClassModal
+          open={!!rescheduleClass}
+          onClose={() => setRescheduleClass(null)}
+          cls={rescheduleClass}
+          availability={data.availability}
+          bookedSlots={data.bookedSlots}
+          blockedDates={data.blockedDates}
+          teacherTimezone={data.teacherTimezone}
         />
       )}
     </div>

@@ -1,410 +1,195 @@
-"use client"
+// app/(dashboard)/parent/progress/page.tsx
+import { prisma } from "@/lib/prisma"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
+import { redirect } from "next/navigation"
+import { ProgressClient } from "./ProgressClient"
 
-import React from "react"
-import {
-  TrendingUp,
-  CheckCircle,
-  Clock,
-  BookOpen,
-  Zap,
-  Star,
-  Calendar,
-  MessageCircle,
-} from "lucide-react"
-import { KPICard } from "@/components/ui/KPICard"
-import { RatingStars } from "@/components/ui/RatingStars"
+export const dynamic = "force-dynamic"
 
-/* ─── Types ─── */
-type ChapterItem = {
-  name: string
-  status: "done" | "in-progress" | "not-started"
-}
+export default async function ProgressPage() {
+  const session = await getServerSession(authOptions)
+  if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
 
-type SubjectProgress = {
-  id: string
-  subject: string
-  teacher: string
-  teacherInitials: string
-  coveragePct: number
-  chapters: ChapterItem[]
-  lastSession: string
-  teacherComment: string
-  barColor: string
-}
+  const parent = await prisma.parentProfile.findFirst({
+    where: { user: { email: session.user.email! } },
+    include: {
+      students: {
+        include: {
+          subjects: { include: { subject: true } },
+          classes: {
+            include: {
+              teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
+              subject: { select: { name: true } },
+            },
+            orderBy: { scheduledAt: "desc" },
+          },
+        },
+      },
+    },
+  })
+  if (!parent) redirect("/unauthorized")
 
-type FeedbackItem = {
-  id: string
-  teacher: string
-  teacherInitials: string
-  subject: string
-  date: string
-  rating: number
-  note: string
-}
+  const now = new Date()
 
-type Achievement = {
-  id: string
-  label: string
-  desc: string
-  icon: React.ComponentType<{ className?: string }>
-  bg: string
-  iconColor: string
-  textColor: string
-}
+  // Build per-student, per-subject progress
+  const studentProgress = parent.students.map((student) => {
+    const fullName = `${student.firstName} ${student.lastName}`
 
-/* ─── Data ─── */
-const SUBJECTS: SubjectProgress[] = [
-  {
-    id: "math",
-    subject: "Mathematics",
-    teacher: "Dr. Ananya Sharma",
-    teacherInitials: "AS",
-    coveragePct: 60,
-    barColor: "bg-[#0D9488]",
-    lastSession: "Mar 10, 2026",
-    teacherComment:
-      "Alex is making excellent progress with polynomials. Showing strong analytical thinking. Would benefit from extra practice on graphing.",
-    chapters: [
-      { name: "Linear Equations", status: "done" },
-      { name: "Quadratic Equations", status: "done" },
-      { name: "Polynomials", status: "done" },
-      { name: "Factoring", status: "done" },
-      { name: "Systems of Equations", status: "done" },
-      { name: "Chapter 5: Polynomials (Advanced)", status: "in-progress" },
-      { name: "Exponential Functions", status: "in-progress" },
-      { name: "Logarithms", status: "not-started" },
-      { name: "Trigonometry Basics", status: "not-started" },
-      { name: "AP Calculus Intro", status: "not-started" },
-    ],
-  },
-  {
-    id: "physics",
-    subject: "Physics / SAT Prep",
-    teacher: "Prof. Vikram Rao",
-    teacherInitials: "VR",
-    coveragePct: 45,
-    barColor: "bg-[#1E3A5F]",
-    lastSession: "Mar 8, 2026",
-    teacherComment:
-      "Alex grasps concepts quickly. The force & motion unit went very well. Need to reinforce energy equations before the next session.",
-    chapters: [
-      { name: "Newton's Laws", status: "done" },
-      { name: "Forces & Motion", status: "done" },
-      { name: "Energy & Work", status: "done" },
-      { name: "SAT Reading Strategies", status: "done" },
-      { name: "Momentum & Collisions", status: "in-progress" },
-      { name: "SAT Math Grid-Ins", status: "in-progress" },
-      { name: "Waves & Sound", status: "not-started" },
-      { name: "Electricity Basics", status: "not-started" },
-      { name: "SAT Essay Writing", status: "not-started" },
-    ],
-  },
-]
+    // Group classes by subject
+    const subjectMap: Record<
+      string,
+      {
+        subjectName: string
+        teacherName: string
+        teacherInitials: string
+        totalClasses: number
+        completedClasses: number
+        cancelledClasses: number
+        noShowClasses: number
+        avgRating: number | null
+        ratingCount: number
+        lastSessionDate: string | null
+        lastSessionNotes: string | null
+        lastSessionTopic: string | null
+        recentFeedback: {
+          date: string
+          rating: number
+          note: string
+          teacher: string
+          teacherInitials: string
+        }[]
+      }
+    > = {}
 
-const FEEDBACK: FeedbackItem[] = [
-  {
-    id: "f1",
-    teacher: "Dr. Ananya Sharma",
-    teacherInitials: "AS",
-    subject: "Mathematics",
-    date: "Mar 10, 2026",
-    rating: 5,
-    note: "Alex demonstrated excellent problem-solving skills today. The quadratic equations topic was mastered quickly. Keep up the great work!",
-  },
-  {
-    id: "f2",
-    teacher: "Prof. Vikram Rao",
-    teacherInitials: "VR",
-    subject: "Physics",
-    date: "Mar 8, 2026",
-    rating: 4,
-    note: "Good session overall. Alex is strong on theory but needs more practice with numerical problems. Assigned extra exercises for next class.",
-  },
-  {
-    id: "f3",
-    teacher: "Dr. Ananya Sharma",
-    teacherInitials: "AS",
-    subject: "Mathematics",
-    date: "Mar 6, 2026",
-    rating: 5,
-    note: "Alex showed great improvement in factoring polynomials. The practice problems were completed accurately and ahead of schedule.",
-  },
-]
+    for (const cls of student.classes) {
+      const subName = cls.subject.name
+      if (!subjectMap[subName]) {
+        const tName = `${cls.teacher.user.firstName} ${cls.teacher.user.lastName}`
+        subjectMap[subName] = {
+          subjectName: subName,
+          teacherName: tName,
+          teacherInitials: `${cls.teacher.user.firstName[0]}${cls.teacher.user.lastName[0]}`,
+          totalClasses: 0,
+          completedClasses: 0,
+          cancelledClasses: 0,
+          noShowClasses: 0,
+          avgRating: null,
+          ratingCount: 0,
+          lastSessionDate: null,
+          lastSessionNotes: null,
+          lastSessionTopic: null,
+          recentFeedback: [],
+        }
+      }
+      const entry = subjectMap[subName]
+      entry.totalClasses++
 
-const ACHIEVEMENTS: Achievement[] = [
-  {
-    id: "a1",
-    label: "Perfect Attendance",
-    desc: "No missed classes",
-    icon: CheckCircle,
-    bg: "bg-green-50",
-    iconColor: "text-[#22C55E]",
-    textColor: "text-green-700",
-  },
-  {
-    id: "a2",
-    label: "Fast Learner",
-    desc: "Topics mastered quickly",
-    icon: Zap,
-    bg: "bg-amber-50",
-    iconColor: "text-[#F59E0B]",
-    textColor: "text-amber-700",
-  },
-  {
-    id: "a3",
-    label: "Consistent Student",
-    desc: "8-day learning streak",
-    icon: TrendingUp,
-    bg: "bg-blue-50",
-    iconColor: "text-blue-500",
-    textColor: "text-blue-700",
-  },
-  {
-    id: "a4",
-    label: "Top Rated",
-    desc: "4.9 avg teacher rating",
-    icon: Star,
-    bg: "bg-purple-50",
-    iconColor: "text-purple-500",
-    textColor: "text-purple-700",
-  },
-]
+      if (cls.status === "COMPLETED") {
+        entry.completedClasses++
+        if (cls.parentRating) {
+          entry.ratingCount++
+          entry.avgRating =
+            entry.avgRating === null
+              ? cls.parentRating
+              : (entry.avgRating * (entry.ratingCount - 1) + cls.parentRating) / entry.ratingCount
+        }
+        // Track latest completed session
+        const completedDate = cls.completedAt ?? cls.scheduledAt
+        if (!entry.lastSessionDate || completedDate > new Date(entry.lastSessionDate)) {
+          entry.lastSessionDate = completedDate.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+          entry.lastSessionNotes = cls.sessionNotes ?? null
+          entry.lastSessionTopic = cls.topicCovered ?? null
+        }
+        // Collect feedback (teacher notes on completed classes)
+        if (cls.sessionNotes || cls.parentFeedback) {
+          const tName = `${cls.teacher.user.firstName} ${cls.teacher.user.lastName}`
+          entry.recentFeedback.push({
+            date: (cls.completedAt ?? cls.scheduledAt).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            }),
+            rating: cls.parentRating ?? 0,
+            note: cls.sessionNotes ?? cls.parentFeedback ?? "",
+            teacher: tName,
+            teacherInitials: `${cls.teacher.user.firstName[0]}${cls.teacher.user.lastName[0]}`,
+          })
+        }
+      } else if (
+        cls.status === "CANCELLED_STUDENT" ||
+        cls.status === "CANCELLED_TEACHER"
+      ) {
+        entry.cancelledClasses++
+      } else if (
+        cls.status === "NO_SHOW_STUDENT" ||
+        cls.status === "NO_SHOW_TEACHER"
+      ) {
+        entry.noShowClasses++
+      }
+    }
 
-function ProgressBar({ pct, colorClass }: { pct: number; colorClass: string }) {
-  return (
-    <div className="w-full bg-gray-100 rounded-full h-2.5">
-      <div
-        className={`${colorClass} h-2.5 rounded-full transition-all duration-500`}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  )
-}
+    // Trim feedback to last 5 per subject
+    for (const key of Object.keys(subjectMap)) {
+      subjectMap[key].recentFeedback = subjectMap[key].recentFeedback.slice(0, 5)
+    }
 
-function MiniBar({ val, max, color }: { val: number; max: number; color: string }) {
-  const pct = Math.round((val / max) * 100)
-  return (
-    <div className="flex items-center gap-2 flex-1">
-      <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-        <div className={`${color} h-1.5 rounded-full`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs text-gray-500 w-6 text-right">{val}</span>
-    </div>
-  )
-}
+    // Overall stats for this student
+    const allClasses = student.classes
+    const totalCompleted = allClasses.filter((c) => c.status === "COMPLETED").length
+    const totalScheduled = allClasses.filter((c) =>
+      ["SCHEDULED", "CONFIRMED", "PENDING_PAYMENT"].includes(c.status)
+    ).length
+    const totalCancelled = allClasses.filter((c) =>
+      ["CANCELLED_STUDENT", "CANCELLED_TEACHER"].includes(c.status)
+    ).length
+    const totalNoShow = allClasses.filter((c) =>
+      ["NO_SHOW_STUDENT", "NO_SHOW_TEACHER"].includes(c.status)
+    ).length
+    const attendanceRate =
+      totalCompleted + totalCancelled + totalNoShow > 0
+        ? Math.round(
+            (totalCompleted / (totalCompleted + totalCancelled + totalNoShow)) * 100
+          )
+        : 100
+    const ratingsGiven = allClasses.filter((c) => c.parentRating !== null)
+    const avgRatingGiven =
+      ratingsGiven.length > 0
+        ? (ratingsGiven.reduce((sum, c) => sum + (c.parentRating ?? 0), 0) / ratingsGiven.length).toFixed(1)
+        : "—"
 
-const STATUS_CONFIG = {
-  done: { icon: CheckCircle, color: "text-[#22C55E]", label: "Completed" },
-  "in-progress": { icon: Clock, color: "text-[#F59E0B]", label: "In Progress" },
-  "not-started": { icon: BookOpen, color: "text-gray-300", label: "Not Started" },
-}
+    // Active subjects count
+    const activeSubjects = Object.keys(subjectMap).length
 
-export default function ProgressPage() {
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-[#1E293B]">Progress &amp; Performance (Demo)</h1>
-        <p className="text-sm text-gray-500 mt-1">Track Alex&apos;s learning journey and achievements</p>
-      </div>
+    // Current month classes
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const thisMonthCompleted = allClasses.filter(
+      (c) =>
+        c.status === "COMPLETED" &&
+        (c.completedAt ?? c.scheduledAt) >= monthStart
+    ).length
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard
-          title="Classes Completed"
-          value="47"
-          subtitle="Since Jan 2026"
-          change="+12 this month"
-          changeType="positive"
-          icon={CheckCircle}
-        />
-        <KPICard
-          title="Avg Rating Given"
-          value="4.9"
-          subtitle="To tutors"
-          change="Excellent"
-          changeType="positive"
-          icon={Star}
-        />
-        <KPICard
-          title="Current Streak"
-          value="8 days"
-          subtitle="Consecutive learning"
-          change="Keep it up!"
-          changeType="positive"
-          icon={Zap}
-        />
-        <KPICard
-          title="Subjects Active"
-          value="2"
-          subtitle="Mathematics & Physics"
-          change="On track"
-          changeType="positive"
-          icon={BookOpen}
-        />
-      </div>
+    return {
+      studentId: student.id,
+      studentName: fullName,
+      grade: student.grade,
+      subjects: Object.values(subjectMap),
+      stats: {
+        totalCompleted,
+        totalScheduled,
+        totalCancelled,
+        totalNoShow,
+        attendanceRate,
+        avgRatingGiven,
+        activeSubjects,
+        thisMonthCompleted,
+      },
+    }
+  })
 
-      {/* Subject Progress */}
-      <div>
-        <h2 className="text-base font-semibold text-[#1E293B] mb-3">Subject Progress</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {SUBJECTS.map((sub) => (
-            <div key={sub.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              {/* Subject header */}
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-[#1E293B]">{sub.subject}</h3>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <div className="w-5 h-5 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-[9px] font-bold">
-                      {sub.teacherInitials}
-                    </div>
-                    <span className="text-xs text-gray-500">{sub.teacher}</span>
-                  </div>
-                </div>
-                <span className="text-2xl font-bold text-[#1E293B]">{sub.coveragePct}%</span>
-              </div>
-
-              {/* Progress bar */}
-              <div className="mb-1">
-                <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
-                  <span>Topic Coverage</span>
-                  <span>{sub.coveragePct}% complete</span>
-                </div>
-                <ProgressBar pct={sub.coveragePct} colorClass={sub.barColor} />
-              </div>
-
-              {/* Chapter list */}
-              <div className="mt-4 space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                {sub.chapters.map((ch) => {
-                  const cfg = STATUS_CONFIG[ch.status]
-                  return (
-                    <div key={ch.name} className="flex items-center gap-2">
-                      <cfg.icon className={`w-3.5 h-3.5 flex-shrink-0 ${cfg.color}`} />
-                      <span className={`text-xs ${ch.status === "not-started" ? "text-gray-400" : "text-gray-600"}`}>
-                        {ch.name}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Footer */}
-              <div className="mt-4 pt-3 border-t border-gray-100">
-                <p className="text-xs text-gray-400 flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />
-                  Last session: {sub.lastSession}
-                </p>
-                <p className="text-xs text-gray-500 italic mt-1.5 leading-relaxed">&ldquo;{sub.teacherComment}&rdquo;</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Recent Feedback */}
-      <div>
-        <h2 className="text-base font-semibold text-[#1E293B] mb-3">Feedback &amp; Notes from Teachers</h2>
-        <div className="space-y-4">
-          {FEEDBACK.map((fb) => (
-            <div key={fb.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <div className="flex items-start gap-4">
-                {/* Avatar */}
-                <div className="w-9 h-9 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                  {fb.teacherInitials}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div>
-                      <span className="text-sm font-semibold text-[#1E293B]">{fb.teacher}</span>
-                      <span className="mx-2 text-gray-300">·</span>
-                      <span className="text-xs text-gray-500">{fb.subject}</span>
-                    </div>
-                    <span className="text-xs text-gray-400">{fb.date}</span>
-                  </div>
-                  <div className="mt-1.5">
-                    <RatingStars rating={fb.rating} size="sm" />
-                  </div>
-                  <p className="text-sm text-gray-600 mt-2 leading-relaxed">{fb.note}</p>
-                  <button className="flex items-center gap-1 mt-2 text-xs font-medium text-[#0D9488] hover:text-[#0D9488]/80 border border-[#0D9488]/30 px-2.5 py-1 rounded-lg hover:bg-[#0D9488]/5 transition-colors">
-                    <MessageCircle className="w-3 h-3" />
-                    View Note
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Performance Metrics */}
-      <div>
-        <h2 className="text-base font-semibold text-[#1E293B] mb-3">Performance Metrics</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Attendance */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-            <h3 className="text-sm font-semibold text-[#1E293B] mb-4">Attendance &amp; Punctuality</h3>
-            <div className="flex items-center gap-4 mb-5">
-              <div className="w-20 h-20 rounded-full border-4 border-[#0D9488] flex items-center justify-center flex-shrink-0">
-                <span className="text-2xl font-bold text-[#0D9488]">98%</span>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-[#1E293B]">Attendance Rate</p>
-                <p className="text-xs text-gray-500 mt-0.5">47 out of 48 classes attended</p>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {[
-                { label: "On Time", val: 44, max: 48, color: "bg-[#22C55E]" },
-                { label: "Late (< 5 min)", val: 3, max: 48, color: "bg-[#F59E0B]" },
-                { label: "Absent", val: 1, max: 48, color: "bg-[#EF4444]" },
-              ].map((row) => (
-                <div key={row.label} className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500 w-28 flex-shrink-0">{row.label}</span>
-                  <MiniBar val={row.val} max={row.max} color={row.color} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Session Stats */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-            <h3 className="text-sm font-semibold text-[#1E293B] mb-4">Session Stats</h3>
-            <div className="space-y-4">
-              {[
-                { label: "Avg Session Duration", val: "58 min", icon: Clock, color: "text-[#0D9488]" },
-                { label: "Topics Completed", val: "12 topics", icon: CheckCircle, color: "text-[#22C55E]" },
-                { label: "Homework Completion", val: "94%", icon: TrendingUp, color: "text-[#1E3A5F]" },
-              ].map((s) => (
-                <div key={s.label} className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl">
-                  <div className={`w-9 h-9 rounded-lg bg-white border border-gray-100 flex items-center justify-center`}>
-                    <s.icon className={`w-4 h-4 ${s.color}`} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-gray-500">{s.label}</p>
-                    <p className="text-sm font-semibold text-[#1E293B] mt-0.5">{s.val}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Achievements */}
-      <div>
-        <h2 className="text-base font-semibold text-[#1E293B] mb-3">Achievements</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {ACHIEVEMENTS.map((a) => (
-            <div key={a.id} className={`${a.bg} rounded-xl p-4 text-center border border-white`}>
-              <div className="flex items-center justify-center mb-2">
-                <a.icon className={`w-8 h-8 ${a.iconColor}`} />
-              </div>
-              <p className={`text-sm font-semibold ${a.textColor}`}>{a.label}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{a.desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
+  return <ProgressClient students={studentProgress} />
 }

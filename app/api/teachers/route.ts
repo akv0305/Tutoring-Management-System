@@ -334,6 +334,64 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ teacher: updated })
     }
 
+    // Action: update subjects
+    if (action === "update_subjects") {
+      const { subjectIds } = updates
+      if (!Array.isArray(subjectIds)) {
+        return NextResponse.json(
+          { error: "subjectIds must be an array." },
+          { status: 400 }
+        )
+      }
+
+      // Validate all subject IDs exist
+      if (subjectIds.length > 0) {
+        const existingSubjects = await prisma.subject.findMany({
+          where: { id: { in: subjectIds }, status: "ACTIVE" },
+          select: { id: true },
+        })
+        if (existingSubjects.length !== subjectIds.length) {
+          return NextResponse.json(
+            { error: "One or more subject IDs are invalid." },
+            { status: 400 }
+          )
+        }
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // Remove all existing teacher-subject links
+        await tx.teacherSubject.deleteMany({
+          where: { teacherId: id },
+        })
+        // Create new links
+        if (subjectIds.length > 0) {
+          await tx.teacherSubject.createMany({
+            data: subjectIds.map((subjectId: string) => ({
+              teacherId: id,
+              subjectId,
+            })),
+          })
+        }
+      })
+
+      const updatedTeacher = await prisma.teacherProfile.findUnique({
+        where: { id },
+        include: {
+          subjects: {
+            include: { subject: { select: { id: true, name: true } } },
+          },
+        },
+      })
+
+      return NextResponse.json({
+        message: "Subjects updated successfully",
+        subjects: updatedTeacher?.subjects.map((ts) => ({
+          id: ts.subject.id,
+          name: ts.subject.name,
+        })),
+      })
+    }    
+
     // Action: update compensation rate
     if (action === "update_rate") {
       const { compensationRate } = updates

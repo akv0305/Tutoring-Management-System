@@ -1038,6 +1038,27 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "Only scheduled or confirmed classes can be completed" }, { status: 400 })
       }
 
+      // ── NEW: Prevent completing future classes ──
+      const now = new Date()
+      const scheduledTime = new Date(classRecord.scheduledAt)
+      const bufferMs = 30 * 60 * 1000 // 30 minutes grace period
+      if (scheduledTime.getTime() > now.getTime() + bufferMs) {
+        const scheduledFormatted = `${scheduledTime.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        })} at ${scheduledTime.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        })}`
+        return NextResponse.json(
+          {
+            error: `Cannot mark a future class as completed. This class is scheduled for ${scheduledFormatted}. You can mark it complete during or after the scheduled time.`,
+          },
+          { status: 400 }
+        )
+      }
+      // ── END NEW ──
+
       const { topicCovered, sessionNotes } = body
 
       const updateData: any = {

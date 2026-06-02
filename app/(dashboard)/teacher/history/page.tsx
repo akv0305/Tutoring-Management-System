@@ -15,7 +15,6 @@ export default async function ClassHistoryPage() {
   })
   if (!teacher) redirect("/unauthorized")
 
-  // Fetch all past/completed/cancelled classes
   const classesRaw = await prisma.class.findMany({
     where: {
       teacherId: teacher.id,
@@ -37,7 +36,9 @@ export default async function ClassHistoryPage() {
   })
 
   const classes = classesRaw.map((c) => {
-    const endTime = new Date(c.scheduledAt.getTime() + (c.duration ?? 60) * 60000)
+    const endTime = new Date(
+      c.scheduledAt.getTime() + (c.duration ?? 60) * 60000
+    )
     return {
       id: c.id,
       date: c.scheduledAt.toLocaleDateString("en-US", {
@@ -59,14 +60,15 @@ export default async function ClassHistoryPage() {
       student: `${c.student.firstName} ${c.student.lastName}`,
       subject: c.subject.name,
       topic: c.topicCovered ?? "—",
+      sessionNotes: c.sessionNotes ?? null,
       duration: `${c.duration ?? 60} min`,
       status: c.status.toLowerCase(),
       feedbackRating: c.parentRating,
+      parentFeedback: c.parentFeedback ?? null,
       scheduledAt: c.scheduledAt.toISOString(),
     }
   })
 
-  // Stats
   const completed = classes.filter((c) => c.status === "completed").length
   const cancelled = classes.filter((c) =>
     ["cancelled_student", "cancelled_teacher"].includes(c.status)
@@ -78,13 +80,7 @@ export default async function ClassHistoryPage() {
   const completionRate =
     total > 0 ? ((completed / total) * 100).toFixed(0) : "—"
 
-  const stats = {
-    total,
-    completed,
-    cancelled,
-    noShow,
-    completionRate,
-  }
+  const stats = { total, completed, cancelled, noShow, completionRate }
 
   return <TeacherHistoryClient classes={classes} stats={stats} />
 }

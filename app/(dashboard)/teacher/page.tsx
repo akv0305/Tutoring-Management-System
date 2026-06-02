@@ -4,6 +4,17 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherDashboardClient } from "./TeacherDashboardClient"
 
+const DAY_OF_WEEK_MAP: Record<string, number> = {
+  MONDAY: 1,
+  TUESDAY: 2,
+  WEDNESDAY: 3,
+  THURSDAY: 4,
+  FRIDAY: 5,
+  SATURDAY: 6,
+  SUNDAY: 0,
+}
+
+
 export const dynamic = "force-dynamic"
 
 export default async function TeacherPage() {
@@ -12,7 +23,16 @@ export default async function TeacherPage() {
 
   const teacher = await prisma.teacherProfile.findFirst({
     where: { user: { email: session.user.email! } },
-    include: { user: { select: { firstName: true, lastName: true } } },
+    include: {
+      user: { select: { firstName: true, lastName: true } },
+      availabilities: {
+        select: { dayOfWeek: true, startTime: true, endTime: true },
+      },
+      blockedDates: {
+        where: { blockedDate: { gte: new Date() } },
+        select: { blockedDate: true, reason: true },
+      },
+    },
   })
   if (!teacher) redirect("/unauthorized")
 
@@ -43,36 +63,42 @@ export default async function TeacherPage() {
     orderBy: { scheduledAt: "asc" },
   })
 
-  // Today's classes
+  // Today's classes — now includes sessionNotes and scheduledAtISO
   const todayClasses = allClasses
-      .filter((c) => c.scheduledAt >= todayStart && c.scheduledAt <= todayEnd)
-      .map((c) => {
-        const initials = `${c.student.firstName[0]}${c.student.lastName[0]}`
-        return {
-          id: c.id,
-          time:
-            c.scheduledAt.toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-            }) +
-            " – " +
-            new Date(c.scheduledAt.getTime() + (c.duration ?? 60) * 60000).toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-            }) +
-            " " +
-            (c.timezone ?? "EST"),
-          studentName: `${c.student.firstName} ${c.student.lastName}`,
-          initials,
-          subject: `${c.subject.name} — Grade ${c.student.grade}`,
-          topic: c.topicCovered ?? "—",
-          status: c.isTrial ? "trial" : c.status.toLowerCase(),
-          isTrial: c.isTrial,
-          meetingLink: c.meetingLink,
-        }
-      })
+    .filter((c) => c.scheduledAt >= todayStart && c.scheduledAt <= todayEnd)
+    .map((c) => {
+      const initials = `${c.student.firstName[0]}${c.student.lastName[0]}`
+      return {
+        id: c.id,
+        time:
+          c.scheduledAt.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }) +
+          " – " +
+          new Date(
+            c.scheduledAt.getTime() + (c.duration ?? 60) * 60000
+          ).toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }) +
+          " " +
+          (c.timezone ?? "EST"),
+        studentName: `${c.student.firstName} ${c.student.lastName}`,
+        initials,
+        subject: `${c.subject.name} — Grade ${c.student.grade}`,
+        subjectName: c.subject.name,
+        topic: c.topicCovered ?? "—",
+        sessionNotes: c.sessionNotes ?? "",
+        status: c.isTrial ? "trial" : c.status.toLowerCase(),
+        isTrial: c.isTrial,
+        meetingLink: c.meetingLink,
+        scheduledAtISO: c.scheduledAt.toISOString(),
+        duration: c.duration ?? 60,
+      }
+    })
 
   // Upcoming this week (after today)
   const upcomingWeek = allClasses
@@ -128,19 +154,23 @@ export default async function TeacherPage() {
 
   // Feedback (recent rated classes)
   const feedback = completedClasses
-      .filter((c) => c.parentRating !== null)
-      .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0))
-      .slice(0, 3)
-      .map((c) => ({
-        rating: c.parentRating as number,
-        from: `${c.student.firstName} ${c.student.lastName}'s Parent`,
-        text: c.parentFeedback ?? "No feedback text.",
-        date: c.completedAt?.toLocaleDateString("en-US", {
+    .filter((c) => c.parentRating !== null)
+    .sort(
+      (a, b) =>
+        (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)
+    )
+    .slice(0, 3)
+    .map((c) => ({
+      rating: c.parentRating as number,
+      from: `${c.student.firstName} ${c.student.lastName}'s Parent`,
+      text: c.parentFeedback ?? "No feedback text.",
+      date:
+        c.completedAt?.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
         }) ?? "—",
-      }))
+    }))
 
   // Performance stats
   const cancelledCount = allClasses.filter(
@@ -157,8 +187,40 @@ export default async function TeacherPage() {
   ).length
   const completionRate =
     totalCompleted > 0
-      ? ((totalCompleted / (totalCompleted + cancelledCount + noShowCount)) * 100).toFixed(1)
+      ? (
+          (totalCompleted / (totalCompleted + cancelledCount + noShowCount)) *
+          100
+        ).toFixed(1)
       : "—"
+
+  // ── NEW: Build availability / booked-slots / blocked-dates for RescheduleModal ──
+  const availability = teacher.availabilities.map((a) => ({
+    dayOfWeek: DAY_OF_WEEK_MAP[a.dayOfWeek] ?? 0,
+    startTime: a.startTime,
+    endTime: a.endTime,
+  }))
+
+  // Booked slots: all future non-cancelled classes for this teacher
+  const futureClasses = allClasses.filter(
+    (c) =>
+      c.scheduledAt > now &&
+      ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
+  )
+  const bookedSlots = futureClasses.map((c) => ({
+    date: c.scheduledAt.toISOString().slice(0, 10),
+    time: c.scheduledAt.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }),
+    duration: c.duration ?? 60,
+  }))
+
+  const blockedDates = teacher.blockedDates.map((bd) => ({
+    date: bd.blockedDate.toISOString().slice(0, 10),
+    reason: bd.reason ?? "",
+  }))
+  // ── END NEW ──
 
   const data = {
     teacherFirstName: teacher.user.firstName,
@@ -179,6 +241,11 @@ export default async function TeacherPage() {
       noShows: String(noShowCount),
       cancellations: `${cancelledCount} of 3 allowed`,
     },
+    // New data for RescheduleModal
+    availability,
+    bookedSlots,
+    blockedDates,
+    teacherTimezone: teacher.timezone ?? "EST",
   }
 
   return <TeacherDashboardClient data={data} />

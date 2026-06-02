@@ -1,3 +1,4 @@
+// app/(dashboard)/parent/page.tsx
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
@@ -6,102 +7,146 @@ import { ParentDashboardClient } from "./ParentDashboardClient"
 
 export const dynamic = "force-dynamic"
 
-export default async function ParentDashboard() {
+export default async function ParentPage() {
   const session = await getServerSession(authOptions)
-  if (!session?.user) redirect("/login")
+  if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
 
-  // Find parent profile
-  const parentProfile = await prisma.parentProfile.findUnique({
-    where: { userId: session.user.id },
+  const parent = await prisma.parentProfile.findFirst({
+    where: { user: { email: session.user.email! } },
     include: {
-      user: { select: { firstName: true, lastName: true, email: true } },
+      user: { select: { firstName: true, lastName: true } },
+      students: {
+        include: {
+          coordinator: {
+            include: {
+              user: { select: { firstName: true, lastName: true, email: true, phone: true } },
+            },
+          },
+          classes: {
+            where: {
+              status: { in: ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED", "COMPLETED"] },
+            },
+            include: {
+              teacher: {
+                include: { user: { select: { firstName: true, lastName: true } } },
+              },
+              subject: { select: { name: true } },
+            },
+            orderBy: { scheduledAt: "asc" },
+          },
+          packages: {
+            where: { status: "ACTIVE" },
+            include: {
+              teacher: {
+                include: { user: { select: { firstName: true, lastName: true } } },
+              },
+            },
+          },
+        },
+      },
+      wallet: {
+        include: {
+          transactions: {
+            orderBy: { createdAt: "desc" },
+            take: 5,
+          },
+        },
+      },
     },
   })
 
-  if (!parentProfile) redirect("/login")
+  if (!parent) redirect("/unauthorized")
 
-  // Get children
-  const students = await prisma.student.findMany({
-    where: { parentId: parentProfile.id },
-    include: {
-      subjects: { include: { subject: { select: { name: true } } } },
-      coordinator: {
-        include: { user: { select: { firstName: true, lastName: true, email: true, phone: true } } },
-      },
-      packages: {
-        where: { status: "ACTIVE" },
-        include: {
-          teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
-          subject: { select: { name: true } },
-        },
-      },
-      classes: {
-        orderBy: { scheduledAt: "asc" },
-        include: {
-          teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
-          subject: { select: { name: true } },
-        },
-      },
-    },
-  })
-
-  // Aggregate data across all children
   const now = new Date()
+  const parentFirstName = parent.user.firstName
+  const childrenNames = parent.students.map((s) => s.firstName)
 
-  const upcomingClasses = students.flatMap((s) =>
-    s.classes
-      .filter((c) => c.scheduledAt > now && ["SCHEDULED", "CONFIRMED"].includes(c.status))
-      .map((c) => ({
+  // All classes across children
+  const allClasses = parent.students.flatMap((s) => s.classes)
+
+  // Upcoming classes
+  const upcomingClasses = allClasses
+    .filter(
+      (c) =>
+        c.scheduledAt >= now &&
+        ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
+    )
+    .slice(0, 5)
+    .map((c) => {
+      const dt = c.scheduledAt
+      const endTime = new Date(dt.getTime() + (c.duration ?? 60) * 60000)
+      const canJoin =
+        dt.getTime() - now.getTime() < 15 * 60000 &&
+        dt.getTime() > now.getTime() - 60 * 60000
+
+      const student = parent.students.find((s) =>
+        s.classes.some((cl) => cl.id === c.id)
+      )
+
+      return {
         id: c.id,
-        studentName: `${s.firstName} ${s.lastName}`,
-        day: c.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }),
-        time: `${c.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${new Date(c.scheduledAt.getTime() + c.duration * 60000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+        studentName: student ? `${student.firstName} ${student.lastName}` : "—",
+        day: dt.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+        }),
+        time:
+          dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) +
+          " – " +
+          endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
         teacherName: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
         initials: `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`,
-        subject: `${c.subject.name}${c.topicCovered ? ` — ${c.topicCovered}` : ""}`,
+        subject: c.subject.name,
         status: c.status.toLowerCase(),
-        canJoin: c.status === "CONFIRMED",
-        meetingLink: c.meetingLink || null,
-      }))
-  ).slice(0, 5)
+        canJoin,
+        meetingLink: c.meetingLink ?? null,
+      }
+    })
 
-  const completedCount = students.reduce(
-    (sum, s) => sum + s.classes.filter((c) => c.status === "COMPLETED").length, 0
+  // Completed count
+  const completedCount = allClasses.filter((c) => c.status === "COMPLETED").length
+
+  // Total remaining
+  const allPackages = parent.students.flatMap((s) => s.packages)
+  const totalRemaining = allPackages.reduce(
+    (sum, pkg) => sum + (pkg.classesIncluded - pkg.classesUsed),
+    0
   )
 
-  const ratingsGiven = students.flatMap((s) =>
-    s.classes
-      .filter((c) => c.parentRating !== null)
-      .map((c) => ({
-        date: `${c.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} — ${c.subject.name}`,
-        rating: c.parentRating!,
-        text: c.parentFeedback ?? "",
-      }))
-  ).slice(0, 3)
+  // Avg rating
+  const rated = allClasses.filter((c) => c.parentRating !== null)
+  const avgRating =
+    rated.length > 0
+      ? (
+          rated.reduce((sum, c) => sum + (c.parentRating ?? 0), 0) / rated.length
+        ).toFixed(1)
+      : "—"
 
-  const avgRating = ratingsGiven.length > 0
-    ? (ratingsGiven.reduce((sum, r) => sum + r.rating, 0) / ratingsGiven.length).toFixed(1)
-    : "—"
+  // Active packages
+  const activePackages = allPackages.map((pkg) => {
+    const remaining = pkg.classesIncluded - pkg.classesUsed
+    const isLow = remaining <= 2 && remaining > 0
+    return {
+      id: pkg.id,
+      name: pkg.name,
+      teacher: `${pkg.teacher.user.firstName} ${pkg.teacher.user.lastName}`,
+      total: pkg.classesIncluded,
+      used: pkg.classesUsed,
+      remaining,
+      expires: pkg.expiryDate.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      status: pkg.status.toLowerCase(),
+      barColor: isLow ? "bg-[#F59E0B]" : "bg-[#0D9488]",
+      isLow,
+    }
+  })
 
-  const activePackages = students.flatMap((s) =>
-    s.packages.map((p) => ({
-      id: p.id,
-      name: `${p.classesIncluded} Classes — ${p.subject.name}`,
-      teacher: `${p.teacher.user.firstName} ${p.teacher.user.lastName}`,
-      total: p.classesIncluded,
-      used: p.classesUsed,
-      remaining: p.classesIncluded - p.classesUsed,
-      expires: p.expiryDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-      status: p.status.toLowerCase(),
-      barColor: p.classesIncluded - p.classesUsed <= 2 ? "bg-[#F59E0B]" : "bg-[#0D9488]",
-      isLow: p.classesIncluded - p.classesUsed <= 2,
-    }))
-  )
-
-  const totalRemaining = activePackages.reduce((sum, p) => sum + p.remaining, 0)
-
-  // Coordinator info (from first child that has one)
-  const coordStudent = students.find((s) => s.coordinator)
+  // Coordinator
+  const coordStudent = parent.students.find((s) => s.coordinator)
   const coordinator = coordStudent?.coordinator
     ? {
         name: `${coordStudent.coordinator.user.firstName} ${coordStudent.coordinator.user.lastName}`,
@@ -111,16 +156,48 @@ export default async function ParentDashboard() {
       }
     : null
 
+  // Feedback given (last 3 rated classes)
+  const feedback = allClasses
+    .filter((c) => c.parentRating !== null && c.parentFeedback)
+    .sort(
+      (a, b) =>
+        (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)
+    )
+    .slice(0, 3)
+    .map((c) => ({
+      date: (c.completedAt ?? c.scheduledAt).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      }),
+      rating: c.parentRating ?? 0,
+      text: c.parentFeedback ?? "",
+    }))
+
+  // Wallet balance
+  const walletBalance = parent.wallet ? Number(parent.wallet.balance) : 0
+  const recentWalletTransactions = (parent.wallet?.transactions ?? []).map((t) => ({
+    id: t.id,
+    amount: Number(t.amount),
+    type: t.type,
+    description: t.description,
+    date: t.createdAt.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    }),
+  }))
+
   const data = {
-    parentFirstName: parentProfile.user.firstName,
-    childrenNames: students.map((s) => s.firstName),
+    parentFirstName,
+    childrenNames,
     upcomingClasses,
     completedCount,
     totalRemaining,
     avgRating,
     activePackages,
     coordinator,
-    feedback: ratingsGiven,
+    feedback,
+    walletBalance,
+    recentWalletTransactions,
   }
 
   return <ParentDashboardClient data={data} />

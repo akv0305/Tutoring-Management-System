@@ -67,6 +67,14 @@ type Feedback = {
   text: string
 }
 
+type WalletTxn = {
+  id: string
+  amount: number
+  type: string
+  description: string
+  date: string
+}
+
 type DashboardData = {
   parentFirstName: string
   childrenNames: string[]
@@ -77,6 +85,8 @@ type DashboardData = {
   activePackages: ActivePackage[]
   coordinator: Coordinator | null
   feedback: Feedback[]
+  walletBalance: number
+  recentWalletTransactions: WalletTxn[]
 }
 
 export function ParentDashboardClient({ data }: { data: DashboardData }) {
@@ -170,7 +180,15 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-5">
+        <KPICard
+          title="Wallet Balance"
+          value={`$${data.walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          subtitle={data.walletBalance > 0 ? "Available for bookings" : "No balance"}
+          change=""
+          changeType="neutral"
+          icon={CreditCard}
+        />
         <KPICard
           title="Classes Remaining"
           value={data.totalRemaining.toString()}
@@ -384,6 +402,45 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
               <p className="text-sm text-gray-400 text-center py-4">No coordinator assigned yet</p>
             )}
           </div>
+
+          {/* Wallet Summary */}
+          {data.walletBalance > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h2 className="text-base font-semibold text-[#1E293B] mb-3">Wallet</h2>
+              <div className="flex items-center gap-3 mb-4 p-3 bg-[#0D9488]/5 rounded-lg border border-[#0D9488]/20">
+                <CreditCard className="w-6 h-6 text-[#0D9488]" />
+                <div>
+                  <p className="text-xl font-bold text-[#0D9488]">
+                    ${data.walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-xs text-gray-500">Available balance</p>
+                </div>
+              </div>
+              {data.recentWalletTransactions.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Activity</h3>
+                  {data.recentWalletTransactions.map((txn) => (
+                    <div key={txn.id} className="flex items-center justify-between py-1.5">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-600 truncate">{txn.description}</p>
+                        <p className="text-[10px] text-gray-400">{txn.date}</p>
+                      </div>
+                      <span
+                        className={`text-xs font-semibold ml-2 ${
+                          txn.amount > 0 ? "text-[#22C55E]" : "text-[#EF4444]"
+                        }`}
+                      >
+                        {txn.amount > 0 ? "+" : ""}${Math.abs(txn.amount).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-3 pt-2 border-t border-gray-100">
+                Wallet balance is auto-applied to your next booking.
+              </p>
+            </div>
+          )}
 
           {/* Feedback Given */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

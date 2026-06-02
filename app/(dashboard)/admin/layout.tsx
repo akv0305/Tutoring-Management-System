@@ -14,12 +14,19 @@ import {
   Wallet,
   RotateCcw,
   BarChart3,
-  Settings, Bell, Ticket,
+  Settings,
+  Bell,
+  Ticket,
+  CalendarDays,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default function AdminLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   const { data: session } = useSession()
   const [pendingPayments, setPendingPayments] = useState(0)
   const [pendingRefunds, setPendingRefunds] = useState(0)
@@ -45,20 +52,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [])
 
   const navItems = [
-    { label: "Dashboard",       icon: LayoutDashboard, href: "/admin" },
-    { label: "Students",        icon: Users,           href: "/admin/students" },
-    { label: "Teachers",        icon: GraduationCap,   href: "/admin/teachers" },
-    { label: "Coordinators",    icon: UserCog,         href: "/admin/coordinators" },
-    { label: "User Management", icon: Shield,          href: "/admin/users" },
-    { label: "Subjects",        icon: BookOpen,        href: "/admin/subjects" },
-    { label: "Packages",        icon: Package,         href: "/admin/packages" },
-    { label: "Coupons",         icon: Ticket,          href: "/admin/coupons" },
-    { label: "Payments",        icon: CreditCard,      href: "/admin/payments",      ...(pendingPayments > 0 && { badge: pendingPayments }) },
-    { label: "Payouts",         icon: Wallet,          href: "/admin/payouts" },
-    { label: "Refund Requests", icon: RotateCcw,       href: "/admin/refunds",       ...(pendingRefunds > 0 && { badge: pendingRefunds }) },
-    { label: "Reports",         icon: BarChart3,       href: "/admin/reports" },
-    { label: "Notifications",    icon: Bell,       href: "/admin/notifications" },
-    { label: "Settings",        icon: Settings,        href: "/admin/settings" },
+    { label: "Dashboard", icon: LayoutDashboard, href: "/admin" },
+    { label: "Students", icon: Users, href: "/admin/students" },
+    { label: "Teachers", icon: GraduationCap, href: "/admin/teachers" },
+    { label: "Coordinators", icon: UserCog, href: "/admin/coordinators" },
+    { label: "User Management", icon: Shield, href: "/admin/users" },
+    { label: "Subjects", icon: BookOpen, href: "/admin/subjects" },
+    { label: "Classes", icon: CalendarDays, href: "/admin/classes" },
+    { label: "Packages", icon: Package, href: "/admin/packages" },
+    { label: "Coupons", icon: Ticket, href: "/admin/coupons" },
+    {
+      label: "Payments",
+      icon: CreditCard,
+      href: "/admin/payments",
+      ...(pendingPayments > 0 && { badge: pendingPayments }),
+    },
+    { label: "Payouts", icon: Wallet, href: "/admin/payouts" },
+    {
+      label: "Refund Requests",
+      icon: RotateCcw,
+      href: "/admin/refunds",
+      ...(pendingRefunds > 0 && { badge: pendingRefunds }),
+    },
+    { label: "Reports", icon: BarChart3, href: "/admin/reports" },
+    { label: "Notifications", icon: Bell, href: "/admin/notifications" },
+    { label: "Settings", icon: Settings, href: "/admin/settings" },
   ]
 
   const userName = session?.user
@@ -75,15 +93,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         userEmail={userEmail}
       />
 
-      <div className="flex flex-col flex-1 overflow-hidden" style={{ marginLeft: 260 }}>
+      <div
+        className="flex flex-col flex-1 overflow-hidden"
+        style={{ marginLeft: 260 }}
+      >
         <TopBar
           title="Admin Dashboard"
           userName={userName}
           notificationsHref="/admin/notifications"
         />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
   )

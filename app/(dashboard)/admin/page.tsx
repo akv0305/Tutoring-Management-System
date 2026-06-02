@@ -1,62 +1,68 @@
-import React from "react"
+// app/(dashboard)/admin/page.tsx
 import {
   Users,
   GraduationCap,
   Calendar,
   DollarSign,
-  UserPlus,
-  Package,
-  CreditCard,
-  Wallet,
-  Settings,
-  AlertCircle,
+  Clock,
   AlertTriangle,
-  Info,
   CheckCircle,
+  CreditCard,
+  ArrowRight,
+  BookOpen,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { prisma } from "@/lib/prisma"
 import Link from "next/link"
 
-/* ─────────────────── Static data (no DB equivalent yet) ─────────────── */
+export const dynamic = "force-dynamic"
 
 const quickActions = [
-  { icon: UserPlus,       label: "Add New Student",   href: "/admin/students" },
-  { icon: GraduationCap,  label: "Add New Teacher",   href: "/admin/teachers" },
-  { icon: Package,        label: "Create Package",    href: "/admin/packages" },
-  { icon: CreditCard,     label: "Confirm Payment",   href: "/admin/payments" },
-  { icon: Wallet,         label: "Process Payout",    href: "/admin/payouts" },
-  { icon: Settings,       label: "Platform Settings", href: "/admin/settings" },
+  { label: "Students", href: "/admin/students", icon: Users },
+  { label: "Teachers", href: "/admin/teachers", icon: GraduationCap },
+  { label: "Classes", href: "/admin/classes", icon: Calendar },
+  { label: "Packages", href: "/admin/packages", icon: BookOpen },
+  { label: "Payments", href: "/admin/payments", icon: CreditCard },
+  { label: "Payouts", href: "/admin/payouts", icon: DollarSign },
 ]
 
-/* ─────────────────────────── Helper ──────────────────────────────────── */
-
 function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
 }
 
-/* ─────────────────────────── Page (Server Component) ─────────────────── */
-
 export default async function AdminPage() {
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+
   const [
     totalStudents,
     totalTeachers,
     totalClasses,
     revenueResult,
-    recentPaymentsRaw,
-    payoutsRaw,
-    subjectStats,
+    recentPayments,
+    recentPayouts,
+    subjects,
     pendingRefundsCount,
     overduePayoutsCount,
     pendingPaymentsCount,
+    // New: class stats
+    completedClassesThisMonth,
+    scheduledClassesCount,
+    cancelledClassesThisMonth,
+    recentCredits,
   ] = await Promise.all([
     prisma.student.count(),
     prisma.teacherProfile.count({ where: { status: "ACTIVE" } }),
     prisma.class.count(),
     prisma.payment.aggregate({
-      _sum: { amount: true },
       where: { status: "CONFIRMED" },
+      _sum: { amount: true },
     }),
     prisma.payment.findMany({
       take: 5,
@@ -70,118 +76,100 @@ export default async function AdminPage() {
       take: 4,
       orderBy: { createdAt: "desc" },
       include: {
-        teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
+        teacher: {
+          include: { user: { select: { firstName: true, lastName: true } } },
+        },
       },
     }),
     prisma.subject.findMany({
       where: { status: "ACTIVE" },
-      include: {
-        _count: { select: { students: true } },
-      },
+      include: { _count: { select: { students: true } } },
       orderBy: { name: "asc" },
     }),
     prisma.refundRequest.count({ where: { status: "PENDING" } }),
-    prisma.payout.count({ where: { status: "PENDING" } }),
+    prisma.payout.count({
+      where: { status: "PENDING", periodEndDate: { lt: now } },
+    }),
     prisma.payment.count({ where: { status: "PENDING" } }),
+    // New queries
+    prisma.class.count({
+      where: {
+        status: "COMPLETED",
+        completedAt: { gte: monthStart, lte: monthEnd },
+      },
+    }),
+    prisma.class.count({
+      where: {
+        status: { in: ["SCHEDULED", "CONFIRMED"] },
+        scheduledAt: { gte: now },
+      },
+    }),
+    prisma.class.count({
+      where: {
+        status: { in: ["CANCELLED_STUDENT", "CANCELLED_TEACHER"] },
+        cancelledAt: { gte: monthStart, lte: monthEnd },
+      },
+    }),
+    // Recent wallet credits (admin adjustments — i.e., class credits)
+    prisma.walletTransaction.findMany({
+      where: {
+        type: "ADMIN_ADJUSTMENT",
+        amount: { gt: 0 },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      include: {
+        wallet: {
+          include: {
+            parentProfile: {
+              include: { user: { select: { firstName: true, lastName: true } } },
+            },
+          },
+        },
+      },
+    }),
   ])
 
-  // Build dynamic system alerts
-type SystemAlert = {
-  bg: string
-  border: string
-  Icon: React.ElementType
-  iconColor: string
-  message: string
-}
+  const revenue = Number(revenueResult._sum?.amount ?? 0)
 
-const systemAlerts: SystemAlert[] = []
+  // System alerts
+  const alerts: { message: string; color: string }[] = []
+  if (pendingRefundsCount > 0)
+    alerts.push({ message: `${pendingRefundsCount} refund request(s) awaiting review`, color: "text-red-600" })
+  if (overduePayoutsCount > 0)
+    alerts.push({ message: `${overduePayoutsCount} payout(s) overdue for processing`, color: "text-orange-600" })
+  if (pendingPaymentsCount > 0)
+    alerts.push({ message: `${pendingPaymentsCount} payment(s) pending confirmation`, color: "text-blue-600" })
+  if (cancelledClassesThisMonth > 3)
+    alerts.push({ message: `${cancelledClassesThisMonth} class cancellations this month`, color: "text-amber-600" })
+  if (alerts.length === 0)
+    alerts.push({ message: "All systems running smoothly", color: "text-green-600" })
 
-if (pendingRefundsCount > 0) {
-  systemAlerts.push({
-    bg: "bg-red-50",
-    border: "border-red-400",
-    Icon: AlertCircle,
-    iconColor: "text-red-500",
-    message: `${pendingRefundsCount} pending refund request${pendingRefundsCount !== 1 ? "s" : ""} require${pendingRefundsCount === 1 ? "s" : ""} immediate attention.`,
-  })
-}
-
-if (overduePayoutsCount > 0) {
-  systemAlerts.push({
-    bg: "bg-orange-50",
-    border: "border-orange-400",
-    Icon: AlertTriangle,
-    iconColor: "text-orange-500",
-    message: `${overduePayoutsCount} teacher payout${overduePayoutsCount !== 1 ? "s" : ""} pending processing.`,
-  })
-}
-
-if (pendingPaymentsCount > 0) {
-  systemAlerts.push({
-    bg: "bg-blue-50",
-    border: "border-blue-400",
-    Icon: Info,
-    iconColor: "text-blue-500",
-    message: `${pendingPaymentsCount} payment${pendingPaymentsCount !== 1 ? "s" : ""} awaiting confirmation.`,
-  })
-}
-
-if (systemAlerts.length === 0) {
-  systemAlerts.push({
-    bg: "bg-green-50",
-    border: "border-green-400",
-    Icon: CheckCircle,
-    iconColor: "text-green-500",
-    message: "All clear! No pending actions at this time.",
-  })
-}
-
-  const totalRevenue = revenueResult._sum.amount ?? 0
-
-  // Map recent payments
-  const recentPayments = recentPaymentsRaw.map((p) => ({
-    id: p.id,
-    student: `${p.student.firstName} ${p.student.lastName}`,
-    package: p.package?.name ?? "—",
-    amount: `$${Number(p.amount).toLocaleString()}`,
-    status: p.status.toLowerCase(),
-    date: formatDate(p.createdAt),
-  }))
-
-  // Map teacher payouts
-  const teacherPayouts = payoutsRaw.map((po) => ({
-    id: po.id,
-    teacher: `${po.teacher.user.firstName} ${po.teacher.user.lastName}`,
-    classes: po.classesCompleted,
-    rate: `$${Number(po.compensationRate)}`,
-    total: `$${Number(po.grossAmount).toLocaleString()}`,
-    status: po.status.toLowerCase(),
-  }))
-
-  // Subject distribution
-  const maxStudents = Math.max(
-    ...subjectStats.map((s) => s._count.students),
-    1
-  )
-  const popularSubjects = subjectStats
-    .sort((a, b) => b._count.students - a._count.students)
+  // Subject stats
+  const subjectStats = subjects
+    .map((s) => ({ name: s.name, count: s._count.students }))
+    .sort((a, b) => b.count - a.count)
     .slice(0, 6)
-    .map((s, idx) => ({
-      name: s.name,
-      count: `${s._count.students} student${s._count.students !== 1 ? "s" : ""}`,
-      percent: Math.round((s._count.students / maxStudents) * 100),
-      color: idx < 2 ? "#0D9488" : idx < 4 ? "#F59E0B" : "#1E3A5F",
-    }))
+
+  const maxSubCount = Math.max(...subjectStats.map((s) => s.count), 1)
+  const subjectColors = ["#0D9488", "#1E3A5F", "#F59E0B", "#8B5CF6", "#EC4899", "#EF4444"]
+
+  // Format credits
+  const creditsList = recentCredits.map((t) => ({
+    parentName: `${t.wallet.parentProfile.user.firstName} ${t.wallet.parentProfile.user.lastName}`,
+    amount: Number(t.amount),
+    description: t.description,
+    date: formatDate(t.createdAt),
+  }))
 
   return (
     <div className="space-y-6">
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+      {/* KPI Cards — now 6 cards in 3x2 grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
         <KPICard
           title="Total Students"
           value={totalStudents.toString()}
-          subtitle="All registered students"
+          subtitle="Registered"
           change=""
           changeType="neutral"
           icon={Users}
@@ -195,159 +183,204 @@ if (systemAlerts.length === 0) {
           icon={GraduationCap}
         />
         <KPICard
-          title="Total Classes"
-          value={totalClasses.toString()}
-          subtitle="All sessions"
-          change=""
-          changeType="neutral"
-          icon={Calendar}
-        />
-        <KPICard
           title="Revenue Collected"
-          value={`$${Number(totalRevenue).toLocaleString()}`}
+          value={`$${revenue.toLocaleString()}`}
           subtitle="Confirmed payments"
           change=""
           changeType="neutral"
           icon={DollarSign}
         />
+        <KPICard
+          title="Completed (This Month)"
+          value={completedClassesThisMonth.toString()}
+          subtitle={`${cancelledClassesThisMonth} cancelled`}
+          change=""
+          changeType="neutral"
+          icon={CheckCircle}
+        />
+        <KPICard
+          title="Upcoming Classes"
+          value={scheduledClassesCount.toString()}
+          subtitle="Scheduled & confirmed"
+          change=""
+          changeType="neutral"
+          icon={Calendar}
+        />
+        <KPICard
+          title="Total Classes"
+          value={totalClasses.toString()}
+          subtitle="All time"
+          change=""
+          changeType="neutral"
+          icon={BookOpen}
+        />
       </div>
 
-      {/* Two-column section */}
+      {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* LEFT COLUMN */}
-        <div className="flex flex-col gap-6">
-
-          {/* Recent Payments */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-[#1E293B]">Recent Payments</h2>
-                <Link href="/admin/payments" className="text-xs text-[#0D9488] font-medium hover:underline">View All →</Link>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 text-left">
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Package</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {recentPayments.length > 0 ? (
-                    recentPayments.map((row) => (
-                      <tr key={row.id} className="hover:bg-gray-50/60 transition-colors">
-                        <td className="px-5 py-3 font-medium text-[#1E293B]">{row.student}</td>
-                        <td className="px-5 py-3 text-gray-500">{row.package}</td>
-                        <td className="px-5 py-3 font-semibold text-[#1E293B]">{row.amount}</td>
-                        <td className="px-5 py-3"><StatusBadge status={row.status} size="sm" /></td>
-                        <td className="px-5 py-3 text-gray-400 text-xs">{row.date}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400 text-sm">No payments recorded yet</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+        {/* Recent Payments */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-[#1E293B]">Recent Payments</h2>
+            <Link href="/admin/payments" className="text-sm text-[#0D9488] font-medium hover:underline flex items-center gap-1">
+              View All <ArrowRight className="w-3 h-3" />
+            </Link>
           </div>
-
-          {/* Teacher Payouts Summary */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-[#1E293B]">Teacher Payouts Summary</h2>
-                <Link href="/admin/payouts" className="text-xs text-[#0D9488] font-medium hover:underline">View All →</Link>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 text-left">
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Teacher</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Classes</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Rate</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Due</th>
-                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Student</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Package</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Amount</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Status</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {recentPayments.map((p) => (
+                  <tr key={p.id} className="hover:bg-gray-50/50">
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                      {p.student.firstName} {p.student.lastName}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500 text-xs">{p.package?.name ?? "—"}</td>
+                    <td className="px-3 py-2 font-medium text-[#1E293B]">
+                      ${Number(p.amount).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusBadge status={p.status.toLowerCase()} size="sm" />
+                    </td>
+                    <td className="px-3 py-2 text-gray-400 text-xs">{formatDate(p.createdAt)}</td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {teacherPayouts.length > 0 ? (
-                    teacherPayouts.map((row) => (
-                      <tr key={row.id} className="hover:bg-gray-50/60 transition-colors">
-                        <td className="px-5 py-3 font-medium text-[#1E293B]">{row.teacher}</td>
-                        <td className="px-5 py-3 text-gray-500">{row.classes}</td>
-                        <td className="px-5 py-3 text-gray-500">{row.rate}</td>
-                        <td className="px-5 py-3 font-semibold text-[#1E293B]">{row.total}</td>
-                        <td className="px-5 py-3"><StatusBadge status={row.status} size="sm" /></td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400 text-sm">No payouts recorded yet</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
-
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div className="flex flex-col gap-6">
-
-          {/* Quick Actions */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
-              <div className="grid grid-cols-2 gap-3">
-                {quickActions.map(({ icon: Icon, label, href }) => (
-                  <Link key={label} href={href} className="flex items-center gap-2.5 px-4 py-3 rounded-lg border border-gray-200 text-sm font-medium text-[#1E293B] hover:border-[#0D9488] hover:text-[#0D9488] hover:bg-teal-50 transition-all duration-150 group">
-                    <Icon className="w-4 h-4 text-gray-400 group-hover:text-[#0D9488] transition-colors flex-shrink-0" />
-                    <span className="text-left leading-tight">{label}</span>
-                  </Link>
-                ))}
-            </div>
+        {/* Teacher Payouts Summary */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-[#1E293B]">Teacher Payouts</h2>
+            <Link href="/admin/payouts" className="text-sm text-[#0D9488] font-medium hover:underline flex items-center gap-1">
+              View All <ArrowRight className="w-3 h-3" />
+            </Link>
           </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Teacher</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Classes</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Net</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {recentPayouts.map((p) => (
+                  <tr key={p.id} className="hover:bg-gray-50/50">
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                      {p.teacher.user.firstName} {p.teacher.user.lastName}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500">{p.classesCompleted}</td>
+                    <td className="px-3 py-2 font-medium text-[#1E293B]">
+                      ${Number(p.netAmount).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusBadge status={p.status.toLowerCase()} size="sm" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
-          {/* System Alerts */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">System Alerts</h2>
+      {/* Row: Quick Actions + System Alerts + Recent Credits */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Quick Actions */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {quickActions.map(({ label, href, icon: Icon }) => (
+              <Link
+                key={label}
+                href={href}
+                className="flex flex-col items-center gap-2 p-3 rounded-xl border border-gray-100 hover:border-[#0D9488] hover:bg-[#0D9488]/5 transition-all text-center"
+              >
+                <Icon className="w-5 h-5 text-[#0D9488]" />
+                <span className="text-xs font-medium text-[#1E293B]">{label}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        {/* System Alerts */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-base font-semibold text-[#1E293B] mb-4">System Alerts</h2>
+          <div className="space-y-3">
+            {alerts.map((a, i) => (
+              <div key={i} className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg">
+                <AlertTriangle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${a.color}`} />
+                <p className={`text-sm ${a.color}`}>{a.message}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Class Credits */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-[#1E293B]">Recent Credits</h2>
+            <Link href="/admin/classes" className="text-sm text-[#0D9488] font-medium hover:underline flex items-center gap-1">
+              Classes <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+          {creditsList.length > 0 ? (
             <div className="space-y-3">
-              {systemAlerts.map((alert, idx) => (
-                <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg ${alert.bg} border-l-4 ${alert.border}`}>
-                  <alert.Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${alert.iconColor}`} />
+              {creditsList.map((c, i) => (
+                <div key={i} className="flex items-start gap-3 p-3 bg-amber-50/50 rounded-lg border border-amber-100">
+                  <CreditCard className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#1E293B] leading-snug">{alert.message}</p>
+                    <p className="text-sm font-medium text-[#1E293B]">
+                      ${c.amount.toFixed(2)}{" "}
+                      <span className="font-normal text-gray-500">to {c.parentName}</span>
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{c.description}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{c.date}</p>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          ) : (
+            <p className="text-sm text-gray-400 text-center py-6">No class credits issued yet.</p>
+          )}
+        </div>
+      </div>
 
-          {/* Subject Distribution */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-            <h2 className="text-base font-semibold text-[#1E293B] mb-4">Subject Distribution</h2>
-            <div className="space-y-3">
-              {popularSubjects.length > 0 ? (
-                popularSubjects.map((subject) => (
-                  <div key={subject.name}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-medium text-[#1E293B]">{subject.name}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-gray-400">{subject.count}</span>
-                        <span className="text-xs font-semibold" style={{ color: subject.color }}>{subject.percent}%</span>
-                      </div>
-                    </div>
-                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${subject.percent}%`, backgroundColor: subject.color }} />
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-400 text-center py-4">No subjects found</p>
-              )}
-            </div>
-          </div>
-
+      {/* Subject Distribution */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 className="text-base font-semibold text-[#1E293B] mb-4">Subject Distribution</h2>
+        <div className="space-y-3">
+          {subjectStats.map((s, i) => {
+            const pct = Math.round((s.count / maxSubCount) * 100)
+            return (
+              <div key={s.name} className="flex items-center gap-3">
+                <span className="text-sm text-gray-600 w-40 flex-shrink-0 truncate">{s.name}</span>
+                <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${pct}%`,
+                      backgroundColor: subjectColors[i % subjectColors.length],
+                    }}
+                  />
+                </div>
+                <span className="text-sm font-medium text-[#1E293B] w-10 text-right">{s.count}</span>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

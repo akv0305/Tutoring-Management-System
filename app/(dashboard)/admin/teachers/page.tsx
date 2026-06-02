@@ -26,6 +26,7 @@ export default async function TeachersPage() {
       email: t.user.email,
       qualification: t.qualification ?? "—",
       subjects: t.subjects.map((ts) => ts.subject.name),
+      subjectIds: t.subjects.map((ts) => ts.subject.id),
       hourlyRate: `$${Number(t.compensationRate)}/hr`,
       studentFacingRate: `$${Number(t.studentFacingRate)}/hr`,
       rating: Number(t.rating),
@@ -38,9 +39,12 @@ export default async function TeachersPage() {
 
   const activeCount = teachers.filter((t) => t.status === "active").length
   const onLeaveCount = teachers.filter((t) => t.status === "on leave").length
-  const avgRating = teachers.length > 0
-    ? (teachers.reduce((sum, t) => sum + t.rating, 0) / teachers.length).toFixed(1)
-    : "0.0"
+  const avgRating =
+    teachers.length > 0
+      ? (
+          teachers.reduce((sum, t) => sum + t.rating, 0) / teachers.length
+        ).toFixed(1)
+      : "0.0"
 
   const kpis = {
     total: teachers.length,
@@ -49,12 +53,14 @@ export default async function TeachersPage() {
     avgRating: `${avgRating} ★`,
   }
 
-  // Fetch subjects for the AddTeacher modal
+  // Fetch subjects for modals
   const subjectsRaw = await prisma.subject.findMany({
     where: { status: "ACTIVE" },
     orderBy: { name: "asc" },
     select: { id: true, name: true, category: true },
   })
 
-  return <TeachersClient teachers={teachers} kpis={kpis} subjects={subjectsRaw} />
+  return (
+    <TeachersClient teachers={teachers} kpis={kpis} subjects={subjectsRaw} />
+  )
 }

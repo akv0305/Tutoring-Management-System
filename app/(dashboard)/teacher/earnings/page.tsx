@@ -1,3 +1,4 @@
+// app/(dashboard)/teacher/earnings/page.tsx
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
@@ -34,6 +35,7 @@ export default async function EarningsPage() {
     classes: p.classesCompleted,
     gross: Number(p.grossAmount),
     deductions: Number(p.deductions),
+    bonus: Number(p.bonus),
     net: Number(p.netAmount),
     status: p.status.toLowerCase(),
     paidDate: p.paidAt
@@ -43,6 +45,7 @@ export default async function EarningsPage() {
           year: "numeric",
         })
       : "—",
+    adminNotes: p.adminNotes ?? null,
   }))
 
   // This month's completed classes & estimated earnings
@@ -61,7 +64,7 @@ export default async function EarningsPage() {
   const rate = Number(teacher.compensationRate)
   const thisMonthEarnings = thisMonthCompleted * rate
 
-  // Last month
+  // Last month payout
   const lastMonthPayout = payouts.find(
     (p) =>
       (p.periodMonth === now.getUTCMonth() && p.periodYear === now.getUTCFullYear()) ||
