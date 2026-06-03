@@ -1,3 +1,4 @@
+// app/api/admin/settings/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
@@ -22,6 +23,8 @@ export async function GET() {
       ...settings,
       teacherNoShowRatingHit: Number(settings.teacherNoShowRatingHit),
       referralRewardAmount: Number(settings.referralRewardAmount),
+      welcomeOfferEnabled: settings.welcomeOfferEnabled,
+      welcomeOfferAmount: Number(settings.welcomeOfferAmount),
     },
   })
 }
@@ -53,6 +56,7 @@ export async function PATCH(req: NextRequest) {
     packages: ["trialClassEnabled", "lowBalanceThreshold"],
     users: ["minPasswordLength", "passwordResetExpiry", "maxLoginAttempts", "lockoutDuration"],
     referral: ["referralEnabled", "referralRewardAmount"],
+    welcome_offer: ["welcomeOfferEnabled", "welcomeOfferAmount"],
   }
 
   const tabAllowed = allowed[tab]
@@ -82,6 +86,7 @@ export async function PATCH(req: NextRequest) {
       ...updated,
       teacherNoShowRatingHit: Number(updated.teacherNoShowRatingHit),
       referralRewardAmount: Number(updated.referralRewardAmount),
+      welcomeOfferAmount: Number(updated.welcomeOfferAmount),
     },
   })
 }

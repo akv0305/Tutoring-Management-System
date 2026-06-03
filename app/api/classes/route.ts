@@ -805,6 +805,8 @@ export async function POST(req: NextRequest) {
       }      
 
       // 3. Create all Class records linked to the BookingOrder
+      // If fully paid (wallet/coupon covered entire amount), set status to SCHEDULED
+      const classStatus = finalAmountDue === 0 ? "SCHEDULED" : "PENDING_PAYMENT"
       const classRecords = []
       for (const slot of slotList) {
         const newClass = await tx.class.create({
@@ -819,7 +821,7 @@ export async function POST(req: NextRequest) {
             topicCovered: topicCovered || null,
             meetingLink: meetingLink || null,
             isTrial: false,
-            status: "PENDING_PAYMENT",
+            status: classStatus,
           },
         })
         classRecords.push(newClass)
@@ -876,8 +878,12 @@ export async function POST(req: NextRequest) {
           data: uniqueNotifyIds.map((userId) => ({
             userId,
             type: "PAYMENT" as const,
-            title: "New Booking — Payment Pending",
-            message: `${studentName} booked ${slotList.length} class${slotList.length > 1 ? "es" : ""} with ${teacherName}${packageNote}. Order: ${orderRef}. Amount: $${totalAmount.toFixed(2)}. Awaiting payment confirmation.`,
+            title: result.bookingOrder.status === "PAID"
+              ? "New Booking — Paid"
+              : "New Booking — Payment Pending",
+            message: result.bookingOrder.status === "PAID"
+              ? `${studentName} booked ${slotList.length} class${slotList.length > 1 ? "es" : ""} with ${teacherName}${packageNote}. Order: ${orderRef}. Amount: $${totalAmount.toFixed(2)} — fully paid via ${Number(result.bookingOrder.walletDeduction) > 0 ? "wallet" : "coupon"}.`
+              : `${studentName} booked ${slotList.length} class${slotList.length > 1 ? "es" : ""} with ${teacherName}${packageNote}. Order: ${orderRef}. Amount: $${totalAmount.toFixed(2)}. Awaiting payment confirmation.`,
           })),
         })
       }

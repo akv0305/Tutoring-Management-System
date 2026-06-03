@@ -165,6 +165,7 @@ enum WalletTransactionType {
   REFERRAL_REWARD
   BOOKING_DISCOUNT
   ADMIN_ADJUSTMENT
+  WELCOME_OFFER
 }
 
 enum CouponScope {
@@ -759,7 +760,8 @@ model PlatformSettings {
   maxReschedulesPerClass   Int     @default(2)
   referralEnabled          Boolean @default(true)
   referralRewardAmount     Decimal @default(25) @db.Decimal(10, 2)  // USD credited to referrer's wallet
-
+  welcomeOfferEnabled   Boolean @default(true)
+  welcomeOfferAmount    Decimal @default(10) @db.Decimal(10, 2)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

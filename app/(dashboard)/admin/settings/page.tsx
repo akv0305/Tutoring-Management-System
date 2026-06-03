@@ -13,7 +13,7 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
-  Gift,
+  Gift, Sparkles,
 } from "lucide-react"
 
 /* ═══════════════════════════════════════════════════════════════
@@ -47,6 +47,8 @@ type PlatformSettings = {
   lockoutDuration: number
   referralEnabled: boolean
   referralRewardAmount: number
+  welcomeOfferEnabled: boolean
+  welcomeOfferAmount: number
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -615,9 +617,238 @@ function TabReferral({ s, set, onSave, saving, saved }: {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TAB 7 — Welcome Offer
+═══════════════════════════════════════════════════════════════ */
+type WelcomeOfferParent = {
+  id: string
+  parentName: string
+  email: string
+  amount: number
+  creditedAt: string
+  registeredAt: string
+  hasBooked: boolean
+  hasRedeemed: boolean
+}
+
+type WelcomeOfferKPIs = {
+  totalCredited: number
+  totalParents: number
+  avgAmount: number
+  convertedCount: number
+  conversionRate: number
+  redeemedCount: number
+  thisMonthCredited: number
+  thisMonthCount: number
+}
+
+function TabWelcomeOffer({ s, set, onSave, saving, saved }: {
+  s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+  onSave: () => void; saving: boolean; saved: boolean
+}) {
+  const [kpis, setKpis] = useState<WelcomeOfferKPIs | null>(null)
+  const [parents, setParents] = useState<WelcomeOfferParent[]>([])
+  const [loadingStats, setLoadingStats] = useState(true)
+
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const res = await fetch("/api/admin/welcome-offer")
+        if (res.ok) {
+          const data = await res.json()
+          setKpis(data.kpis)
+          setParents(data.parents)
+        }
+      } catch {
+        // silently fail — stats are optional
+      } finally {
+        setLoadingStats(false)
+      }
+    }
+    loadStats()
+  }, [])
+
+  return (
+    <div className="space-y-6">
+      {/* Settings Card */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <SectionTitle>Welcome Offer Settings</SectionTitle>
+
+        <InfoBanner>
+          When enabled, every new parent who registers will automatically receive a wallet credit.
+          This credit is applied as a discount on their first booking, encouraging conversion from
+          registration to paid class.
+        </InfoBanner>
+
+        <div className="border border-gray-100 rounded-lg px-4 mb-6">
+          <Toggle
+            checked={s.welcomeOfferEnabled}
+            onChange={(v) => set("welcomeOfferEnabled", v)}
+            label="Enable Welcome Offer"
+            description="Automatically credit new parent registrations with a wallet bonus"
+          />
+        </div>
+
+        <div className={s.welcomeOfferEnabled ? "" : "opacity-50 pointer-events-none"}>
+          <FormRow label="Welcome Credit Amount" htmlFor="wo-amount">
+            <NumberInputWithSuffix
+              id="wo-amount"
+              value={s.welcomeOfferAmount}
+              onChange={(v) => set("welcomeOfferAmount", v)}
+              prefix="$"
+              suffix="credited to new parent's wallet"
+              min={0}
+              step="0.01"
+            />
+          </FormRow>
+
+          <Divider />
+
+          <SectionTitle>How It Works</SectionTitle>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              {
+                step: 1,
+                title: "Parent Registers",
+                desc: "A new parent creates an account and verifies their email address.",
+                color: "bg-[#0D9488]",
+              },
+              {
+                step: 2,
+                title: "Wallet Credited",
+                desc: `$${s.welcomeOfferAmount.toFixed(2)} is automatically added to their wallet as a welcome bonus.`,
+                color: "bg-[#1E3A5F]",
+              },
+              {
+                step: 3,
+                title: "Applied on Booking",
+                desc: "The credit is auto-applied as a discount when they book their first paid class.",
+                color: "bg-[#F59E0B]",
+              },
+            ].map((item) => (
+              <div key={item.step} className="rounded-xl border border-gray-100 p-4 text-center">
+                <div className={`w-10 h-10 rounded-full ${item.color} text-white flex items-center justify-center mx-auto mb-3 text-lg font-bold`}>
+                  {item.step}
+                </div>
+                <p className="text-sm font-semibold text-[#1E293B] mb-1">{item.title}</p>
+                <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <SaveButton onClick={onSave} saving={saving} saved={saved} />
+      </div>
+
+      {/* KPI Cards */}
+      {loadingStats ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 className="w-6 h-6 animate-spin text-[#0D9488]" />
+          <span className="ml-2 text-sm text-gray-500">Loading usage stats…</span>
+        </div>
+      ) : kpis ? (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Total Credited</p>
+              <p className="text-2xl font-bold text-[#0D9488] mt-1">${kpis.totalCredited.toFixed(2)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{kpis.totalParents} parents</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Avg. Per Parent</p>
+              <p className="text-2xl font-bold text-[#1E3A5F] mt-1">${kpis.avgAmount.toFixed(2)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Average credit amount</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Converted</p>
+              <p className="text-2xl font-bold text-[#22C55E] mt-1">{kpis.convertedCount}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{kpis.conversionRate}% booked a class</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">Redeemed</p>
+              <p className="text-2xl font-bold text-[#F59E0B] mt-1">{kpis.redeemedCount}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Used wallet credit</p>
+            </div>
+          </div>
+
+          {/* This Month Banner */}
+          <div className="flex items-center gap-4 px-5 py-3 bg-teal-50 border border-teal-200 rounded-xl">
+            <Sparkles className="w-5 h-5 text-[#0D9488] flex-shrink-0" />
+            <p className="text-sm text-[#1E293B]">
+              <span className="font-semibold">This month:</span>{" "}
+              {kpis.thisMonthCount} new parent{kpis.thisMonthCount !== 1 ? "s" : ""} received a
+              total of <span className="font-semibold text-[#0D9488]">${kpis.thisMonthCredited.toFixed(2)}</span> in
+              welcome credits.
+            </p>
+          </div>
+
+          {/* Usage Table */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <h3 className="text-sm font-semibold text-[#1E3A5F] uppercase tracking-wide mb-4">
+              Welcome Offer Recipients
+            </h3>
+            {parents.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-10">
+                No welcome offers have been issued yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {["Parent", "Email", "Credited", "Amount", "Registered", "Booked?", "Redeemed?"].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {parents.map((p) => (
+                      <tr key={p.id} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="px-4 py-3 font-medium text-[#1E293B] whitespace-nowrap">{p.parentName}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{p.email}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{p.creditedAt}</td>
+                        <td className="px-4 py-3 font-semibold text-[#0D9488]">${p.amount.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{p.registeredAt}</td>
+                        <td className="px-4 py-3">
+                          {p.hasBooked ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs font-medium rounded-full border border-green-200">
+                              <CheckCircle className="w-3 h-3" /> Yes
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 text-gray-500 text-xs font-medium rounded-full border border-gray-200">
+                              Not yet
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {p.hasRedeemed ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-full border border-amber-200">
+                              <CheckCircle className="w-3 h-3" /> Yes
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 text-gray-500 text-xs font-medium rounded-full border border-gray-200">
+                              Not yet
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
    TAB DEFINITIONS
 ═══════════════════════════════════════════════════════════════ */
-type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users" | "referral"
+type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users" | "referral" | "welcome_offer"
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "general",       label: "General",              icon: Settings    },
@@ -626,6 +857,7 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "notifications", label: "Notifications",        icon: Bell        },
   { key: "users",         label: "User Management",      icon: Users       },
   { key: "referral",      label: "Referral Program",     icon: Gift        },
+  { key: "welcome_offer", label: "Welcome Offer",        icon: Sparkles    },
 ]
 
 /* ═══════════════════════════════════════════════════════════════
@@ -753,6 +985,7 @@ export default function SettingsPage() {
       {activeTab === "notifications" && <TabNotifications onSave={handleSave} saving={saving} saved={saved} />}
       {activeTab === "users"         && <TabUserManagement s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
       {activeTab === "referral"      && <TabReferral s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "welcome_offer" && <TabWelcomeOffer s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
     </div>
   )
 }

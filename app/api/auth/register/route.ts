@@ -137,13 +137,38 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // 3. Create wallet for the parent (starts at $0)
-      await tx.wallet.create({
+      // 3. Create wallet for the parent + apply welcome offer if enabled
+      const platformSettings = await tx.platformSettings.findFirst({
+        where: { id: "default" },
+        select: { welcomeOfferEnabled: true, welcomeOfferAmount: true },
+      })
+
+      const welcomeAmount =
+        platformSettings?.welcomeOfferEnabled
+          ? Number(platformSettings.welcomeOfferAmount)
+          : 0
+
+      const wallet = await tx.wallet.create({
         data: {
           parentProfileId: parentProfile.id,
-          balance: 0,
+          balance: welcomeAmount,
         },
       })
+
+      // If welcome offer is active, record the transaction
+      let welcomeOfferApplied = false
+      if (welcomeAmount > 0) {
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            amount: welcomeAmount,
+            type: "WELCOME_OFFER",
+            description: `Welcome offer: $${welcomeAmount.toFixed(2)} credited to your wallet`,
+            referenceId: user.id,
+          },
+        })
+        welcomeOfferApplied = true
+      }      
 
       // 4. Create student
       const student = await tx.student.create({
@@ -213,7 +238,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      return { user, student, referralCreated }
+      return { user, student, referralCreated, welcomeOfferApplied, welcomeAmount }
     })
 
     // ─── Send verification email (non-blocking) ───
@@ -291,6 +316,8 @@ export async function POST(req: NextRequest) {
         userId: result.user.id,
         studentId: result.student.id,
         referralApplied: result.referralCreated,
+        welcomeOfferApplied: result.welcomeOfferApplied,
+        welcomeOfferAmount: result.welcomeAmount,
       },
       { status: 201 }
     )
