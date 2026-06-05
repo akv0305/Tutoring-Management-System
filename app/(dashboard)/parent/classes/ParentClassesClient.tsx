@@ -16,6 +16,9 @@ import {
   Plus,
   XCircle,
   ExternalLink,
+  FileText,
+  Save,
+  Loader2,
 } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
@@ -39,6 +42,7 @@ type UpcomingClass = {
   isTrial: boolean
   teacherId: string
   meetingLink: string | null
+  studentNotes: string
 }
 
 type CompletedClass = {
@@ -133,6 +137,113 @@ function MiniCalendar({ data }: { data: CalendarData }) {
   )
 }
 
+/* ────────────────────────────────────────────────
+   Student Notes Modal
+   ──────────────────────────────────────────────── */
+
+function StudentNotesModal({
+  open,
+  onClose,
+  cls,
+}: {
+  open: boolean
+  onClose: () => void
+  cls: UpcomingClass
+}) {
+  const [notes, setNotes] = useState(cls.studentNotes || "")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [saved, setSaved] = useState(false)
+
+  if (!open) return null
+
+  async function handleSave() {
+    setSaving(true)
+    setError("")
+    try {
+      const res = await fetch("/api/classes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId: cls.id,
+          action: "update_student_notes",
+          studentNotes: notes.trim(),
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to save notes")
+      }
+      setSaved(true)
+      setTimeout(() => {
+        onClose()
+        window.location.reload()
+      }, 1500)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+          <XCircle className="w-5 h-5" />
+        </button>
+        <h3 className="text-lg font-bold text-[#1E293B] mb-1">
+          {cls.studentNotes ? "Edit" : "Add"} Notes for Tutor
+        </h3>
+        <p className="text-sm text-gray-500 mb-4">
+          {cls.subject} — {cls.time}
+        </p>
+        <p className="text-xs text-gray-400 mb-3">
+          Share your syllabus, topics to cover, or any preparation notes. Your tutor will see these before the class.
+        </p>
+
+        {error && (
+          <div className="mb-3 p-3 rounded-lg bg-red-50 text-sm text-red-600 border border-red-200 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
+          </div>
+        )}
+
+        {saved && (
+          <div className="mb-3 p-3 rounded-lg bg-green-50 text-sm text-green-700 border border-green-200 flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 flex-shrink-0" />Notes saved! Your tutor has been notified.
+          </div>
+        )}
+
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={5}
+          placeholder="e.g., Please focus on Chapter 5 — Quadratic Equations. Student is struggling with word problems. Textbook: NCERT Class 10 Mathematics."
+          className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488] focus:border-transparent resize-none"
+          disabled={saving || saved}
+        />
+
+        <div className="flex justify-end gap-3 mt-5">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || saved || !notes.trim()}
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-[#0D9488] text-white text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50"
+          >
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" />Saving...</> : <><Save className="w-4 h-4" />Save Notes</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────
+   Main Component
+   ──────────────────────────────────────────────── */
+
 type Tab = "upcoming" | "completed" | "cancelled"
 
 export function ParentClassesClient({
@@ -175,6 +286,9 @@ export function ParentClassesClient({
 
   // Details modal
   const [detailsClass, setDetailsClass] = useState<UpcomingClass | null>(null)
+
+  // Student notes modal
+  const [notesClass, setNotesClass] = useState<UpcomingClass | null>(null)
 
   const tabs: { key: Tab; label: string; badge?: number }[] = [
     { key: "upcoming", label: "Upcoming", badge: upcoming.length || undefined },
@@ -285,6 +399,15 @@ export function ParentClassesClient({
                             <div className="w-7 h-7 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-xs font-bold">{cls.teacherInitials}</div>
                             <span className="text-xs text-gray-600 font-medium">{cls.teacher}</span>
                           </div>
+
+                          {/* Show existing student notes indicator */}
+                          {cls.studentNotes && (
+                            <div className="mt-2 flex items-start gap-1.5 p-2 bg-blue-50 border border-blue-100 rounded-lg">
+                              <FileText className="w-3 h-3 text-blue-500 mt-0.5 flex-shrink-0" />
+                              <p className="text-xs text-blue-700 line-clamp-2">{cls.studentNotes}</p>
+                            </div>
+                          )}
+
                           {isPending ? (
                             <div className="mt-3">
                               <p className="text-xs text-amber-600">
@@ -318,6 +441,13 @@ export function ParentClassesClient({
                                 className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
                               >
                                 <XCircle className="w-3 h-3" />Cancel
+                              </button>
+                              <button
+                                onClick={() => setNotesClass(cls)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 border border-teal-200 text-teal-700 rounded-lg text-xs font-medium hover:bg-teal-50 transition-colors"
+                              >
+                                <FileText className="w-3 h-3" />
+                                {cls.studentNotes ? "Edit Notes" : "Add Notes"}
                               </button>
                             </div>
                           )}
@@ -500,6 +630,15 @@ export function ParentClassesClient({
           subject={rateClass.subject}
           teacherName={rateClass.teacher}
           classDate={rateClass.date}
+        />
+      )}
+
+      {/* Student Notes Modal */}
+      {notesClass && (
+        <StudentNotesModal
+          open={!!notesClass}
+          onClose={() => setNotesClass(null)}
+          cls={notesClass}
         />
       )}
     </div>

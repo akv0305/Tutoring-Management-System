@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherDashboardClient } from "./TeacherDashboardClient"
+import { utcToLocal, localToUTC, getTzAbbr, getWeekDatesInTZ, refDateToLocalStr } from "@/lib/timezone"
 
 const DAY_OF_WEEK_MAP: Record<string, number> = {
   MONDAY: 1,
@@ -13,7 +14,6 @@ const DAY_OF_WEEK_MAP: Record<string, number> = {
   SATURDAY: 6,
   SUNDAY: 0,
 }
-
 
 export const dynamic = "force-dynamic"
 
@@ -36,22 +36,24 @@ export default async function TeacherPage() {
   })
   if (!teacher) redirect("/unauthorized")
 
-  // Today boundaries
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const todayEnd = new Date()
-  todayEnd.setHours(23, 59, 59, 999)
+  // ── Timezone setup ──
+  const teacherTZ = teacher.timezone || "America/New_York"
+  const tzAbbr = getTzAbbr(teacherTZ)
 
-  // This week boundaries (Mon-Sun)
   const now = new Date()
-  const dayOfWeek = now.getDay()
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-  const weekStart = new Date(now)
-  weekStart.setDate(now.getDate() + mondayOffset)
-  weekStart.setHours(0, 0, 0, 0)
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekStart.getDate() + 7)
-  weekEnd.setHours(0, 0, 0, 0)
+  const nowLocal = utcToLocal(now, teacherTZ)
+
+  // Today boundaries in teacher's timezone
+  const todayStr = nowLocal.dateStr
+  const todayStart = localToUTC(todayStr, "00:00", teacherTZ)
+  const todayEnd = localToUTC(todayStr, "23:59", teacherTZ)
+
+  // This week boundaries (Mon-Sun) in teacher's timezone
+  const weekDates = getWeekDatesInTZ(0, teacherTZ)
+  const mondayStr = refDateToLocalStr(weekDates[0])
+  const sundayStr = refDateToLocalStr(weekDates[6])
+  const weekStart = localToUTC(mondayStr, "00:00", teacherTZ)
+  const weekEnd = localToUTC(sundayStr, "23:59", teacherTZ)
 
   // Fetch all classes for this teacher
   const allClasses = await prisma.class.findMany({
@@ -63,11 +65,12 @@ export default async function TeacherPage() {
     orderBy: { scheduledAt: "asc" },
   })
 
-  // Today's classes — now includes sessionNotes and scheduledAtISO
+  // Today's classes — formatted in teacher's timezone
   const todayClasses = allClasses
     .filter((c) => c.scheduledAt >= todayStart && c.scheduledAt <= todayEnd)
     .map((c) => {
       const initials = `${c.student.firstName[0]}${c.student.lastName[0]}`
+      const endTime = new Date(c.scheduledAt.getTime() + (c.duration ?? 60) * 60000)
       return {
         id: c.id,
         time:
@@ -75,17 +78,16 @@ export default async function TeacherPage() {
             hour: "numeric",
             minute: "2-digit",
             hour12: true,
+            timeZone: teacherTZ,
           }) +
           " – " +
-          new Date(
-            c.scheduledAt.getTime() + (c.duration ?? 60) * 60000
-          ).toLocaleTimeString("en-US", {
+          endTime.toLocaleTimeString("en-US", {
             hour: "numeric",
             minute: "2-digit",
             hour12: true,
+            timeZone: teacherTZ,
           }) +
-          " " +
-          (c.timezone ?? "EST"),
+          " " + tzAbbr,
         studentName: `${c.student.firstName} ${c.student.lastName}`,
         initials,
         subject: `${c.subject.name} — Grade ${c.student.grade}`,
@@ -97,10 +99,11 @@ export default async function TeacherPage() {
         meetingLink: c.meetingLink,
         scheduledAtISO: c.scheduledAt.toISOString(),
         duration: c.duration ?? 60,
+        studentNotes: c.studentNotes ?? "",
       }
     })
 
-  // Upcoming this week (after today)
+  // Upcoming this week (after today) — formatted in teacher's timezone
   const upcomingWeek = allClasses
     .filter(
       (c) =>
@@ -113,11 +116,13 @@ export default async function TeacherPage() {
         weekday: "short",
         month: "short",
         day: "numeric",
+        timeZone: teacherTZ,
       }),
       time: c.scheduledAt.toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
+        timeZone: teacherTZ,
       }),
       student: `${c.student.firstName} ${c.student.lastName}`,
       subject: c.subject.name,
@@ -169,6 +174,7 @@ export default async function TeacherPage() {
           month: "short",
           day: "numeric",
           year: "numeric",
+          timeZone: teacherTZ,
         }) ?? "—",
     }))
 
@@ -193,34 +199,35 @@ export default async function TeacherPage() {
         ).toFixed(1)
       : "—"
 
-  // ── NEW: Build availability / booked-slots / blocked-dates for RescheduleModal ──
+  // ── Availability / booked-slots / blocked-dates for RescheduleModal ──
   const availability = teacher.availabilities.map((a) => ({
     dayOfWeek: DAY_OF_WEEK_MAP[a.dayOfWeek] ?? 0,
     startTime: a.startTime,
     endTime: a.endTime,
   }))
 
-  // Booked slots: all future non-cancelled classes for this teacher
+  // Booked slots: all future non-cancelled classes — converted to teacher's TZ
   const futureClasses = allClasses.filter(
     (c) =>
       c.scheduledAt > now &&
       ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
   )
-  const bookedSlots = futureClasses.map((c) => ({
-    date: c.scheduledAt.toISOString().slice(0, 10),
-    time: c.scheduledAt.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }),
-    duration: c.duration ?? 60,
-  }))
+  const bookedSlots = futureClasses.map((c) => {
+    const local = utcToLocal(c.scheduledAt, teacherTZ)
+    return {
+      date: local.dateStr,
+      time: local.timeStr,
+      duration: c.duration ?? 60,
+    }
+  })
 
-  const blockedDates = teacher.blockedDates.map((bd) => ({
-    date: bd.blockedDate.toISOString().slice(0, 10),
-    reason: bd.reason ?? "",
-  }))
-  // ── END NEW ──
+  const blockedDates = teacher.blockedDates.map((bd) => {
+    const local = utcToLocal(bd.blockedDate, teacherTZ)
+    return {
+      date: local.dateStr,
+      reason: bd.reason ?? "",
+    }
+  })
 
   const data = {
     teacherFirstName: teacher.user.firstName,
@@ -241,11 +248,10 @@ export default async function TeacherPage() {
       noShows: String(noShowCount),
       cancellations: `${cancelledCount} of 3 allowed`,
     },
-    // New data for RescheduleModal
     availability,
     bookedSlots,
     blockedDates,
-    teacherTimezone: teacher.timezone ?? "EST",
+    teacherTimezone: teacherTZ,
   }
 
   return <TeacherDashboardClient data={data} />

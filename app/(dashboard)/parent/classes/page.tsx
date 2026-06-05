@@ -90,6 +90,7 @@ export default async function ClassesPage({
         isTrial: c.isTrial,
         teacherId: c.teacherId,
         meetingLink: c.meetingLink || null,
+        studentNotes: c.studentNotes ?? "",
       }
     })
 

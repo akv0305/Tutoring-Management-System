@@ -76,6 +76,7 @@ export default async function TeacherSchedulePage({
     scheduledAt: string
     time: string
     topicCovered: string
+    studentNotes: string
   }
 
   const blocks: ScheduleBlock[] = classes
@@ -97,7 +98,7 @@ export default async function TeacherSchedulePage({
         sublabel: `${c.subject.name} G${c.student.grade}`,
         subject: c.subject.name,
         studentName: `${c.student.firstName} ${c.student.lastName}`,
-        startSlot: Math.max(0, startSlot),
+        startSlot: local.hour,
         duration: 1,
         dayIndex,
         colorClass: SUBJECT_COLORS[c.subject.name] ?? DEFAULT_COLOR,
@@ -107,6 +108,7 @@ export default async function TeacherSchedulePage({
         scheduledAt: c.scheduledAt.toISOString(),
         time: local.formatted12h,
         topicCovered: c.topicCovered || "",
+        studentNotes: c.studentNotes || "",
       }
     })
     .filter((b): b is ScheduleBlock => b !== null)

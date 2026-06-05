@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentDashboardClient } from "./ParentDashboardClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -57,6 +58,10 @@ export default async function ParentPage() {
 
   if (!parent) redirect("/unauthorized")
 
+  // ── Timezone setup ──
+  const parentTZ = (parent as any).timezone || "America/New_York"
+  const tzAbbr = getTzAbbr(parentTZ)
+
   const now = new Date()
   const parentFirstName = parent.user.firstName
   const childrenNames = parent.students.map((s) => s.firstName)
@@ -90,11 +95,23 @@ export default async function ParentPage() {
           weekday: "long",
           month: "short",
           day: "numeric",
+          timeZone: parentTZ,
         }),
         time:
-          dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) +
+          dt.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: parentTZ,
+          }) +
           " – " +
-          endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
+          endTime.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: parentTZ,
+          }) +
+          " " + tzAbbr,
         teacherName: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
         initials: `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`,
         subject: c.subject.name,
@@ -138,6 +155,7 @@ export default async function ParentPage() {
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: parentTZ,
       }),
       status: pkg.status.toLowerCase(),
       barColor: isLow ? "bg-[#F59E0B]" : "bg-[#0D9488]",
@@ -168,6 +186,7 @@ export default async function ParentPage() {
       date: (c.completedAt ?? c.scheduledAt).toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
+        timeZone: parentTZ,
       }),
       rating: c.parentRating ?? 0,
       text: c.parentFeedback ?? "",
@@ -183,6 +202,7 @@ export default async function ParentPage() {
     date: t.createdAt.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      timeZone: parentTZ,
     }),
   }))
 

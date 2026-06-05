@@ -40,6 +40,7 @@ type Block = {
   scheduledAt: string
   time: string
   topicCovered: string
+  studentNotes: string
 }
 
 type LegendItem = { label: string; cls: string }
@@ -47,12 +48,22 @@ type Availability = { dayOfWeek: string; startTime: string; endTime: string }
 type BookedSlot = { start: string; duration: number }
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-const TIME_SLOTS = [
-  "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM",
-  "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM",
-  "4:00 PM", "5:00 PM", "6:00 PM",
-]
 const SLOT_H = 56
+
+// TIME_SLOTS is now dynamic — generated inside the component
+function generateTimeSlots(startHour: number, endHour: number): string[] {
+  const slots: string[] = []
+  for (let h = startHour; h <= endHour; h++) {
+    const ampm = h >= 12 ? "PM" : "AM"
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
+    slots.push(`${h12}:00 ${ampm}`)
+  }
+  return slots
+}
+
+const DEFAULT_START_HOUR = 8
+const DEFAULT_END_HOUR = 18
+
 
 /* ────── Meeting Link Modal (inline) ────── */
 
@@ -349,6 +360,16 @@ function SelectedClassPanel({
           {block.topicCovered && (
             <p className="text-xs text-gray-400 mt-1">Topic: {block.topicCovered}</p>
           )}
+
+          {block.studentNotes && (
+            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs font-semibold text-blue-700 mb-1 flex items-center gap-1">
+                <span>📝</span> Student&apos;s Notes
+              </p>
+              <p className="text-xs text-blue-600 whitespace-pre-wrap">{block.studentNotes}</p>
+            </div>
+          )}
+          
           {block.meetingLink && (
             <div className="flex items-center gap-1 mt-1">
               <LinkIcon className="w-3 h-3 text-gray-400" />
@@ -465,6 +486,31 @@ export function TeacherScheduleClient({
     setSelectedBlockId(null) // deselect when changing week
   }, [initialBlocks])
 
+  // Compute dynamic time range based on actual class hours
+  const { timeSlots, gridStartHour } = React.useMemo(() => {
+    let minHour = DEFAULT_START_HOUR
+    let maxHour = DEFAULT_END_HOUR
+
+    blocks.forEach((b) => {
+      const h = b.startSlot // raw hour from server
+      if (h < minHour) minHour = h
+      if (h >= maxHour) maxHour = h + 1
+    })
+
+    return {
+      timeSlots: generateTimeSlots(minHour, maxHour),
+      gridStartHour: minHour,
+    }
+  }, [blocks])
+
+  // Adjust block positions relative to the grid's start hour
+  const positionedBlocks = React.useMemo(() => {
+    return blocks.map(b => ({
+      ...b,
+      startSlot: b.startSlot - gridStartHour,
+    }))
+  }, [blocks, gridStartHour]) 
+
   // Modal state
   const [completeBlock, setCompleteBlock] = useState<Block | null>(null)
   const [cancelBlock, setCancelBlock] = useState<Block | null>(null)
@@ -513,7 +559,7 @@ export function TeacherScheduleClient({
   }
 
   /* ---- Day view blocks ---- */
-  const dayBlocks = blocks.filter((b) => b.dayIndex === selectedDayIdx)
+  const dayBlocks = positionedBlocks.filter((b) => b.dayIndex === selectedDayIdx)
 
   return (
     <div className="space-y-5">
@@ -590,7 +636,7 @@ export function TeacherScheduleClient({
               {/* Time slots + blocks */}
               <div className="flex">
                 <div className="w-16 flex-shrink-0">
-                  {TIME_SLOTS.map((t) => (
+                  {timeSlots.map((t) => (
                     <div key={t} className="flex items-start justify-end pr-2 pt-1" style={{ height: SLOT_H }}>
                       <span className="text-[10px] text-gray-400 whitespace-nowrap">{t}</span>
                     </div>
@@ -598,14 +644,14 @@ export function TeacherScheduleClient({
                 </div>
 
                 {DAYS.map((day, dayIdx) => {
-                  const dayBlocksCol = blocks.filter((b) => b.dayIndex === dayIdx)
+                  const dayBlocksCol = positionedBlocks.filter((b) => b.dayIndex === dayIdx)
                   return (
                     <div
                       key={day}
                       className={`flex-1 relative border-l border-gray-100 ${dayIdx === todayIdx ? "bg-[#0D9488]/[0.03]" : ""}`}
-                      style={{ height: TIME_SLOTS.length * SLOT_H }}
+                      style={{ height: timeSlots.length * SLOT_H }}
                     >
-                      {TIME_SLOTS.map((_, i) => (
+                      {timeSlots.map((_, i) => (
                         <div key={i} className="absolute left-0 right-0 border-t border-gray-50" style={{ top: i * SLOT_H }} />
                       ))}
                       {dayBlocksCol.map((block) => (
@@ -654,14 +700,14 @@ export function TeacherScheduleClient({
           {/* Single-day grid */}
           <div className="flex">
             <div className="w-20 flex-shrink-0">
-              {TIME_SLOTS.map((t) => (
+              {timeSlots.map((t) => (
                 <div key={t} className="flex items-start justify-end pr-3 pt-1" style={{ height: SLOT_H }}>
                   <span className="text-xs text-gray-400 whitespace-nowrap">{t}</span>
                 </div>
               ))}
             </div>
-            <div className="flex-1 relative border-l border-gray-100" style={{ height: TIME_SLOTS.length * SLOT_H }}>
-              {TIME_SLOTS.map((_, i) => (
+            <div className="flex-1 relative border-l border-gray-100" style={{ height: timeSlots.length * SLOT_H }}>
+              {timeSlots.map((_, i) => (
                 <div key={i} className="absolute left-0 right-0 border-t border-gray-50" style={{ top: i * SLOT_H }} />
               ))}
               {dayBlocks.map((block) => (

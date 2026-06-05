@@ -456,6 +456,7 @@ model Class {
   meetingLink   String?
   topicCovered  String?
   sessionNotes  String?
+  studentNotes  String?
   parentRating  Int?        // 1-5
   parentFeedback String?
   isTrial       Boolean     @default(false)

@@ -43,6 +43,7 @@ type TodayClass = {
   meetingLink: string | null
   scheduledAtISO: string
   duration: number
+  studentNotes: string
 }
 
 type UpcomingRow = {
@@ -892,6 +893,14 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
                         <p className="text-xs text-gray-400 mt-0.5">
                           {cls.topic}
                         </p>
+
+                        {cls.studentNotes && (
+                          <div className="mt-1.5 flex items-start gap-1.5 p-2 bg-blue-50 border border-blue-100 rounded-lg">
+                            <span className="text-[10px]">📝</span>
+                            <p className="text-[11px] text-blue-700 line-clamp-2">{cls.studentNotes}</p>
+                          </div>
+                        )}
+
                         {/* Meeting link indicator */}
                         {cls.meetingLink && (
                           <div className="flex items-center gap-1 mt-1.5">

@@ -6,6 +6,7 @@ interface BookingConfirmationProps {
   parentName: string
   studentName: string
   teacherName: string
+  teacherEmail?: string
   subject: string
   scheduledSlots: string[]
   duration: number
@@ -20,6 +21,7 @@ export function BookingConfirmation({
   parentName,
   studentName,
   teacherName,
+  teacherEmail,
   subject,
   scheduledSlots,
   duration,
@@ -95,6 +97,25 @@ export function BookingConfirmation({
 
       {!isTrial && (
         <Section style={emailStyles.warningBox}>
+          <Section style={nextStepsBox}>
+            <Text style={nextStepsTitle}>Next Steps — Help Your Tutor Prepare</Text>
+            <Text style={nextStepsText}>
+              Please send your child&apos;s syllabus, textbook chapters, or specific topics
+              to cover <strong>at least 24 hours before the class</strong> so the tutor can prepare
+              a personalized session.
+            </Text>
+            {teacherEmail && (
+              <Text style={nextStepsText}>
+                <strong>Tutor&apos;s Email:</strong>{" "}
+                <a href={`mailto:${teacherEmail}`} style={{ color: "#0D9488", textDecoration: "underline" }}>
+                  {teacherEmail}
+                </a>
+              </Text>
+            )}
+            <Text style={nextStepsText}>
+              Include your child&apos;s name, grade, subject, and any specific areas of focus.
+            </Text>
+          </Section>
           <Text style={warningTitle}>Payment Required</Text>
           <Text style={warningText}>
             Your classes are reserved but will only be confirmed once payment is
@@ -159,6 +180,28 @@ const warningText: React.CSSProperties = {
   lineHeight: "20px",
   color: "#92400E",
   margin: "0",
+}
+
+const nextStepsBox: React.CSSProperties = {
+  backgroundColor: "#EFF6FF",
+  border: "1px solid #BFDBFE",
+  borderRadius: "8px",
+  padding: "16px",
+  margin: "16px 0",
+}
+
+const nextStepsTitle: React.CSSProperties = {
+  fontSize: "13px",
+  fontWeight: "700",
+  color: "#1E40AF",
+  margin: "0 0 8px 0",
+}
+
+const nextStepsText: React.CSSProperties = {
+  fontSize: "13px",
+  lineHeight: "20px",
+  color: "#1E40AF",
+  margin: "0 0 6px 0",
 }
 
 export default BookingConfirmation

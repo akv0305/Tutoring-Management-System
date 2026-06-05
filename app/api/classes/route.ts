@@ -551,6 +551,7 @@ export async function POST(req: NextRequest) {
             parentName: student.parent.user.firstName,
             studentName: studentFullName,
             teacherName: teacherFullName,
+            teacherEmail: teacher.user.email,
             subject: subject.name,
             scheduledSlots: formattedSlots,
             duration: classDuration,
@@ -908,6 +909,7 @@ export async function POST(req: NextRequest) {
           parentName: student.parent.user.firstName,
           studentName: studentFullName,
           teacherName: teacherFullName,
+          teacherEmail: teacher.user.email,
           subject: subject.name,
           scheduledSlots: formattedSlots,
           duration: classDuration,
@@ -1420,6 +1422,58 @@ export async function PATCH(req: NextRequest) {
         rating: updated.parentRating,
       })
     }
+
+// ──────────────────────────────────────────────
+// ACTION: update_student_notes
+// ──────────────────────────────────────────────
+if (action === "update_student_notes") {
+  if (!["ADMIN", "COORDINATOR", "PARENT"].includes(userRole)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  // Parents can only update notes for their own children's classes
+  if (userRole === "PARENT") {
+    const parent = await prisma.parentProfile.findUnique({
+      where: { userId: session.user.id },
+      include: { students: { select: { id: true } } },
+    })
+    if (!parent || !parent.students.some((s) => s.id === classRecord.studentId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+  }
+
+  if (!["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED", "COMPLETED"].includes(classRecord.status)) {
+    return NextResponse.json({ error: "Cannot update notes for this class" }, { status: 400 })
+  }
+
+  const { studentNotes } = body
+  if (studentNotes === undefined) {
+    return NextResponse.json({ error: "studentNotes is required" }, { status: 400 })
+  }
+
+  const updated = await prisma.class.update({
+    where: { id: classId },
+    data: { studentNotes: studentNotes.trim() || null },
+  })
+
+  // Notify the teacher that the student added notes
+  if (studentNotes && studentNotes.trim()) {
+    await prisma.notification.create({
+      data: {
+        userId: classRecord.teacher.user.id,
+        type: "CLASS",
+        title: "Student Notes Added",
+        message: `${classRecord.student.firstName} ${classRecord.student.lastName} added notes for the ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}: "${studentNotes.trim().substring(0, 100)}${studentNotes.trim().length > 100 ? "..." : ""}"`,
+      },
+    })
+  }
+
+  return NextResponse.json({
+    message: "Student notes updated",
+    classId: updated.id,
+    studentNotes: updated.studentNotes,
+  })
+}
 
     // ──────────────────────────────────────────────
     // ACTION: reschedule

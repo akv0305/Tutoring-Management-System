@@ -21,7 +21,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   const teacher = await prisma.teacherProfile.findUnique({
     where: { id: params.id },
     include: {
-      user: { select: { firstName: true, lastName: true } },
+      user: { select: { firstName: true, lastName: true, email: true } },
       subjects: { include: { subject: { select: { id: true, name: true } } } },
       availabilities: { where: { isEnabled: true }, orderBy: { dayOfWeek: "asc" } },
       blockedDates: { where: { blockedDate: { gte: new Date() } }, select: { blockedDate: true } },
@@ -93,6 +93,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     reviews: ratingAgg._count.parentRating,
     totalClasses: completedClasses,
     timezone: teacher.timezone,
+    email: teacher.user.email,
     subjects: teacher.subjects.map((ts) => ({ id: ts.subject.id, name: ts.subject.name })),
     availability: teacher.availabilities.map((a) => ({
       dayOfWeek: a.dayOfWeek,

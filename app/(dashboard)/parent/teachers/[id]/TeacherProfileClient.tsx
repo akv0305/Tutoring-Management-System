@@ -27,7 +27,7 @@ type PackageTemplateOpt = {
 type TeacherData = {
   id: string; name: string; initials: string; qualification: string; bio: string
   experience: number; rate: string; rateNum: number; rating: number; reviews: number; totalClasses: number
-  timezone: string; subjects: Subject[]; availability: Availability[]
+  timezone: string; email: string; subjects: Subject[]; availability: Availability[]
   blockedDates: string[]; bookedSlots: BookedSlot[]
 }
 
@@ -488,6 +488,29 @@ export function TeacherProfileClient({
             </button>
           </div>
 
+          {/* Next Steps for Student */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2">
+              <BookOpen className="w-4 h-4" /> Important Next Steps
+            </h3>
+            <div className="text-sm text-blue-700 space-y-2">
+              <p>
+                To help your tutor prepare for the best possible session, please email your
+                syllabus, textbook chapters, or specific topics you&apos;d like to cover
+                <strong> at least 24 hours before the class</strong>.
+              </p>
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-2 border border-blue-200">
+                <span className="text-xs text-blue-500 font-medium">Tutor&apos;s Email:</span>
+                <a href={`mailto:${teacher.email}`} className="text-sm font-semibold text-blue-800 hover:underline">
+                  {teacher.email}
+                </a>
+              </div>
+              <p className="text-xs text-blue-600">
+                Include your child&apos;s name, grade, subject, and any specific areas of focus in the email.
+              </p>
+            </div>
+          </div>
+
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
             <p className="font-semibold mb-1">Time slots are reserved</p>
             <p>Your selected class times are held for you. Classes will be confirmed once payment is received and verified.</p>
@@ -503,18 +526,38 @@ export function TeacherProfileClient({
     }
 
     return (
-      <div className="max-w-md mx-auto mt-20 text-center space-y-4">
+      <div className="max-w-md mx-auto mt-20 text-center space-y-5">
         <CheckCircle className="w-16 h-16 text-[#22C55E] mx-auto" />
         <h2 className="text-2xl font-bold text-[#1E293B]">Classes Booked!</h2>
         <p className="text-gray-500">
           {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} scheduled with {teacher.name}.
         </p>
-        <div className="flex justify-center gap-3 pt-4">
+    
+        {/* Next Steps */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3 text-left">
+          <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2">
+            <BookOpen className="w-4 h-4" /> Important Next Steps
+          </h3>
+          <div className="text-sm text-blue-700 space-y-2">
+            <p>
+              Please email your syllabus or topics to cover
+              <strong> at least 24 hours before the class</strong> so your tutor can prepare.
+            </p>
+            <div className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-2 border border-blue-200">
+              <span className="text-xs text-blue-500 font-medium">Tutor&apos;s Email:</span>
+              <a href={`mailto:${teacher.email}`} className="text-sm font-semibold text-blue-800 hover:underline">
+                {teacher.email}
+              </a>
+            </div>
+          </div>
+        </div>
+    
+        <div className="flex justify-center gap-3 pt-2">
           <button onClick={() => router.push("/parent/classes")} className="px-5 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors">View My Classes</button>
           <button onClick={() => router.push("/parent/teachers")} className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Back to Teachers</button>
         </div>
       </div>
-    )
+    )    
   }
 
   // ── CONFIRMATION STEP ──
@@ -1016,9 +1059,17 @@ export function TeacherProfileClient({
                         // Check if this slot exists in converted availability
                         const isAvailable = availSlots.get(dateStr)?.includes(timeSlot) ?? false
 
-                        // Past check (in viewer's timezone)
+                        // 24-hour minimum booking window check
                         const isPast = dateStr < todayLocal.dateStr
                         const isPastToday = dateStr === todayLocal.dateStr && parseInt(timeSlot.split(":")[0]) <= todayLocal.hour
+
+                        // Enforce 24-hour advance booking rule
+                        let isTooSoon = false
+                        if (!isPast && !isPastToday && utcISO) {
+                          const slotUTC = new Date(utcISO)
+                          const hoursUntilSlot = (slotUTC.getTime() - now.getTime()) / (1000 * 60 * 60)
+                          isTooSoon = hoursUntilSlot < 24
+                        }
 
                         // Blocked check — need to check the teacher's date for this slot
                         let isBlocked = false
@@ -1029,7 +1080,7 @@ export function TeacherProfileClient({
                         }
 
                         const isBooked = bookedSet.has(slotKey)
-                        const unavailable = !isAvailable || isPast || isPastToday || isBlocked || isBooked
+                        const unavailable = !isAvailable || isPast || isPastToday || isTooSoon || isBlocked || isBooked
                         const selected = isSelected(dateStr, timeSlot)
 
                         const atMax = !selected && (
@@ -1040,12 +1091,14 @@ export function TeacherProfileClient({
                         if (unavailable) {
                           return (
                             <div key={dayIdx} className={`py-2 rounded-md text-center text-xs ${
-                              isBooked ? "bg-red-50 text-red-300 line-through" : "bg-gray-50 text-gray-300"
+                              isBooked ? "bg-red-50 text-red-300 line-through"
+                                : (isTooSoon && isAvailable) ? "bg-amber-50 text-amber-400"
+                                : "bg-gray-50 text-gray-300"
                             }`}>
-                              {isBooked ? "Booked" : isAvailable ? "Past" : ""}
+                              {isBooked ? "Booked" : (isTooSoon && isAvailable) ? "Unavailable" : isAvailable ? "Past" : ""}
                             </div>
                           )
-                        }
+                        }                        
 
                         if (atMax && !selected) {
                           return (
