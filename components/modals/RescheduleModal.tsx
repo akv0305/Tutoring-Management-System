@@ -2,6 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from "react"
 import { X, CalendarClock, Loader2, AlertTriangle, CheckCircle, Info, ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  getWeekDatesInTZ, utcToLocal, localToUTC, refDateToLocalStr,
+  getTzAbbr, convertAvailabilitySlots,
+} from "@/lib/timezone"
 
 type BookedSlot = { start: string; duration: number }
 type Availability = { dayOfWeek: string; startTime: string; endTime: string }
@@ -18,37 +22,8 @@ type Props = {
   teacherAvailability: Availability[]
   teacherBookedSlots: BookedSlot[]
   teacherBlockedDates: string[]
-}
-
-const DAY_JS_MAP: Record<number, string> = {
-  1: "MONDAY", 2: "TUESDAY", 3: "WEDNESDAY", 4: "THURSDAY",
-  5: "FRIDAY", 6: "SATURDAY", 0: "SUNDAY",
-}
-
-function getWeekDates(weekOffset: number): Date[] {
-  const now = new Date()
-  const dayOfWeek = now.getUTCDay()
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-  const monday = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() + mondayOffset + weekOffset * 7
-  ))
-  return Array.from({ length: 7 }, (_, i) => {
-    return new Date(Date.UTC(
-      monday.getUTCFullYear(),
-      monday.getUTCMonth(),
-      monday.getUTCDate() + i
-    ))
-  })
-}
-
-function generateSlots(startTime: string, endTime: string): string[] {
-  const slots: string[] = []
-  const [sh] = startTime.split(":").map(Number)
-  const [eh] = endTime.split(":").map(Number)
-  for (let h = sh; h < eh; h++) slots.push(`${String(h).padStart(2, "0")}:00`)
-  return slots
+  viewerTimezone?: string
+  teacherTimezone?: string
 }
 
 function formatTime(t: string): string {
@@ -61,7 +36,14 @@ function formatTime(t: string): string {
 export function RescheduleModal({
   open, onClose, onSuccess, classId, currentDate, currentTime,
   teacherName, subject, teacherAvailability, teacherBookedSlots, teacherBlockedDates,
-}: Props) {
+  viewerTimezone,
+  teacherTimezone,
+}: Props): React.ReactNode {
+  // Determine effective timezones
+  const effectiveViewerTZ = viewerTimezone || (typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "America/New_York")
+  const effectiveTeacherTZ = teacherTimezone || "America/New_York"
+  const tzAbbr = getTzAbbr(effectiveViewerTZ)
+
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedDate, setSelectedDate] = useState("")
   const [selectedTime, setSelectedTime] = useState("")
@@ -79,7 +61,6 @@ export function RescheduleModal({
       setSuccess(false)
       setPolicy(null)
       setWeekOffset(0)
-      // Fetch policy
       setPolicyLoading(true)
       fetch(`/api/classes/policy?classId=${classId}&action=reschedule`)
         .then((r) => r.json())
@@ -89,24 +70,23 @@ export function RescheduleModal({
     }
   }, [open, classId])
 
-  const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset])
+  const weekDates = useMemo(() => getWeekDatesInTZ(weekOffset, effectiveViewerTZ), [weekOffset, effectiveViewerTZ])
   const now = new Date()
 
-  const availMap = useMemo(() => {
-    const m = new Map<string, Availability>()
-    teacherAvailability.forEach((a) => m.set(a.dayOfWeek, a))
-    return m
-  }, [teacherAvailability])
+  const { availSlots, slotToUTC } = useMemo(
+    () => convertAvailabilitySlots(teacherAvailability, weekDates, effectiveTeacherTZ, effectiveViewerTZ),
+    [teacherAvailability, weekDates, effectiveTeacherTZ, effectiveViewerTZ]
+  )
 
   const bookedSet = useMemo(() => {
     const s = new Set<string>()
     teacherBookedSlots.forEach((b) => {
       const d = new Date(b.start)
-      const key = `${d.toISOString().split("T")[0]}_${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`
-      s.add(key)
+      const local = utcToLocal(d, effectiveViewerTZ)
+      s.add(`${local.dateStr}_${local.timeStr}`)
     })
     return s
-  }, [teacherBookedSlots])
+  }, [teacherBookedSlots, effectiveViewerTZ])
 
   const blockedSet = useMemo(() => new Set(teacherBlockedDates), [teacherBlockedDates])
 
@@ -115,7 +95,8 @@ export function RescheduleModal({
     setError("")
     setLoading(true)
     try {
-      const scheduledAt = new Date(`${selectedDate}T${selectedTime}:00Z`).toISOString()
+      const utcISO = slotToUTC.get(`${selectedDate}_${selectedTime}`)
+      const scheduledAt = utcISO || localToUTC(selectedDate, selectedTime, effectiveViewerTZ).toISOString()
       const res = await fetch("/api/classes", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -161,7 +142,15 @@ export function RescheduleModal({
             <CheckCircle className="w-12 h-12 text-[#22C55E] mx-auto" />
             <p className="text-lg font-semibold text-[#1E293B] mt-3">Class Rescheduled!</p>
             <p className="text-sm text-gray-500 mt-1">
-              Moved to {selectedDate && new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {selectedTime && formatTime(selectedTime)}
+              Moved to{" "}
+              {selectedDate &&
+                new Date(selectedDate + "T00:00:00Z").toLocaleDateString("en-US", {
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                  timeZone: "UTC",
+                })}{" "}
+              at {selectedTime && formatTime(selectedTime)} {tzAbbr}
             </p>
           </div>
         ) : (
@@ -213,79 +202,130 @@ export function RescheduleModal({
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-[#1E293B]">Pick a new slot</h3>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => setWeekOffset((w) => Math.max(0, w - 1))} disabled={weekOffset === 0}
-                      className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"><ChevronLeft className="w-4 h-4" /></button>
+                    <button
+                      onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
+                      disabled={weekOffset === 0}
+                      className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
                     <span className="text-xs text-gray-500">
                       {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
                     </span>
-                    <button onClick={() => setWeekOffset((w) => Math.min(3, w + 1))} disabled={weekOffset >= 3}
-                      className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
+                    <button
+                      onClick={() => setWeekOffset((w) => Math.min(3, w + 1))}
+                      disabled={weekOffset >= 3}
+                      className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
                 <div className="overflow-x-auto">
                   <div className="min-w-[600px]">
+                    {/* Column headers */}
                     <div className="grid grid-cols-8 gap-1 mb-1">
-                      <div className="text-xs text-gray-400 text-center py-1">UTC</div>
+                      <div className="text-xs text-gray-400 text-center py-1">{tzAbbr}</div>
                       {weekDates.map((d, i) => {
-                        const isToday = d.toISOString().split("T")[0] === now.toISOString().split("T")[0]
+                        const dateStr = refDateToLocalStr(d)
+                        const todayLocal = utcToLocal(now, effectiveViewerTZ)
+                        const isToday = dateStr === todayLocal.dateStr
                         return (
                           <div key={i} className={`text-center py-1 rounded ${isToday ? "bg-[#1E3A5F] text-white" : ""}`}>
                             <p className={`text-[10px] ${isToday ? "text-white/80" : "text-gray-500"}`}>
-                            {d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}
+                              {d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}
                             </p>
-                            <p className={`text-xs font-bold ${isToday ? "text-white" : "text-[#1E293B]"}`}>{d.getUTCDate()}</p>
+                            <p className={`text-xs font-bold ${isToday ? "text-white" : "text-[#1E293B]"}`}>
+                              {d.getUTCDate()}
+                            </p>
                           </div>
                         )
                       })}
                     </div>
-                    {(() => {
-                      const allSlots = new Set<string>()
-                      teacherAvailability.forEach((a) => generateSlots(a.startTime, a.endTime).forEach((s) => allSlots.add(s)))
-                      return Array.from(allSlots).sort().map((timeSlot) => (
-                        <div key={timeSlot} className="grid grid-cols-8 gap-1 mb-0.5">
-                          <div className="text-[10px] text-gray-400 py-1.5 text-center">{formatTime(timeSlot)}</div>
-                          {weekDates.map((dateObj, dayIdx) => {
-                            const dayName = DAY_JS_MAP[dateObj.getUTCDay()]
-                            const avail = availMap.get(dayName)
-                            const dateStr = dateObj.toISOString().split("T")[0]
-                            const todayStr = now.toISOString().split("T")[0]
-                            const isPast = dateStr < todayStr
-                            const isPastToday = dateStr === todayStr && Number(timeSlot.split(":")[0]) <= now.getUTCHours()
-                            const isBlocked = blockedSet.has(dateStr)
-                            const isBooked = bookedSet.has(`${dateStr}_${timeSlot}`)
-                            const inWindow = avail && timeSlot >= avail.startTime && timeSlot < avail.endTime
-                            const unavailable = !inWindow || isPast || isPastToday || isBlocked || isBooked
-                            const isSelected = selectedDate === dateStr && selectedTime === timeSlot
 
-                            if (unavailable) {
-                              return <div key={dayIdx} className={`py-1.5 rounded text-center text-[10px] ${isBooked ? "bg-red-50 text-red-300" : "bg-gray-50 text-gray-300"}`}>
-                                {isBooked ? "Booked" : "—"}
-                              </div>
-                            }
-                            return (
-                              <button key={dayIdx}
-                                onClick={() => { setSelectedDate(dateStr); setSelectedTime(timeSlot) }}
-                                className={`py-1.5 rounded text-center text-[10px] font-medium transition-all ${
-                                  isSelected
-                                    ? "bg-[#0D9488] text-white shadow-sm ring-2 ring-[#0D9488]/30"
-                                    : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                                }`}>
-                                {isSelected ? "✓ New" : "Open"}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      ))
+                    {/* Time slot rows */}
+                    {(() => {
+                      const allViewerTimeSlots = new Set<string>()
+                      for (const [, times] of availSlots) {
+                        times.forEach((t) => allViewerTimeSlots.add(t))
+                      }
+                      const todayLocal = utcToLocal(now, effectiveViewerTZ)
+
+                      return Array.from(allViewerTimeSlots)
+                        .sort()
+                        .map((timeSlot) => (
+                          <div key={timeSlot} className="grid grid-cols-8 gap-1 mb-0.5">
+                            <div className="text-[10px] text-gray-400 py-1.5 text-center">
+                              {formatTime(timeSlot)}
+                            </div>
+                            {weekDates.map((dateObj, dayIdx) => {
+                              const dateStr = refDateToLocalStr(dateObj)
+                              const slotKey = `${dateStr}_${timeSlot}`
+                              const isAvailable = availSlots.get(dateStr)?.includes(timeSlot) ?? false
+                              const isPast = dateStr < todayLocal.dateStr
+                              const isPastToday =
+                                dateStr === todayLocal.dateStr &&
+                                Number(timeSlot.split(":")[0]) <= todayLocal.hour
+                              const isBooked = bookedSet.has(slotKey)
+
+                              let isBlocked = false
+                              const utcISO = slotToUTC.get(slotKey)
+                              if (utcISO) {
+                                const teacherLocal = utcToLocal(new Date(utcISO), effectiveTeacherTZ)
+                                isBlocked = blockedSet.has(teacherLocal.dateStr)
+                              }
+
+                              const unavailable = !isAvailable || isPast || isPastToday || isBlocked || isBooked
+                              const isSelectedSlot = selectedDate === dateStr && selectedTime === timeSlot
+
+                              if (unavailable) {
+                                return (
+                                  <div
+                                    key={dayIdx}
+                                    className={`py-1.5 rounded text-center text-[10px] ${
+                                      isBooked ? "bg-red-50 text-red-300" : "bg-gray-50 text-gray-300"
+                                    }`}
+                                  >
+                                    {isBooked ? "Booked" : "—"}
+                                  </div>
+                                )
+                              }
+                              return (
+                                <button
+                                  key={dayIdx}
+                                  onClick={() => {
+                                    setSelectedDate(dateStr)
+                                    setSelectedTime(timeSlot)
+                                  }}
+                                  className={`py-1.5 rounded text-center text-[10px] font-medium transition-all ${
+                                    isSelectedSlot
+                                      ? "bg-[#0D9488] text-white shadow-sm ring-2 ring-[#0D9488]/30"
+                                      : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                                  }`}
+                                >
+                                  {isSelectedSlot ? "✓ New" : "Open"}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ))
                     })()}
                   </div>
                 </div>
 
                 {selectedDate && selectedTime && (
                   <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 text-sm text-teal-800">
-                    New time: <strong>
-                      {new Date(selectedDate + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}
-                    </strong> at <strong>{formatTime(selectedTime)} UTC</strong>
+                    New time:{" "}
+                    <strong>
+                      {new Date(selectedDate + "T00:00:00Z").toLocaleDateString("en-US", {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                        timeZone: "UTC",
+                      })}
+                    </strong>{" "}
+                    at <strong>{formatTime(selectedTime)} {tzAbbr}</strong>
                   </div>
                 )}
               </>
@@ -293,7 +333,8 @@ export function RescheduleModal({
 
             {error && (
               <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" />{error}
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                {error}
               </div>
             )}
           </div>
@@ -302,18 +343,34 @@ export function RescheduleModal({
         {/* Footer */}
         {!success && policy?.allowed && (
           <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-100">
-            <button onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+            >
               Cancel
             </button>
-            <button onClick={handleReschedule} disabled={loading || !selectedDate || !selectedTime}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50">
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Rescheduling…</> : "Confirm Reschedule"}
+            <button
+              onClick={handleReschedule}
+              disabled={loading || !selectedDate || !selectedTime}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Rescheduling…
+                </>
+              ) : (
+                "Confirm Reschedule"
+              )}
             </button>
           </div>
         )}
         {!success && policy && !policy.allowed && (
           <div className="flex items-center justify-end p-5 border-t border-gray-100">
-            <button onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+            >
               Close
             </button>
           </div>

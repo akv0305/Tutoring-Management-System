@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherScheduleClient } from "./TeacherScheduleClient"
+import { getWeekDatesInTZ, utcToLocal, refDateToLocalStr, getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -37,29 +38,20 @@ export default async function TeacherSchedulePage({
 
   // Calculate Mon-Sun for the requested week
   const now = new Date()
-  const utcDay = now.getUTCDay()
-  const mondayOffset = utcDay === 0 ? -6 : 1 - utcDay
-  const weekStart = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + mondayOffset + weekOffset * 7,
-      0, 0, 0, 0
-    )
-  )
-  const weekEnd = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + mondayOffset + weekOffset * 7 + 7,
-      0, 0, 0, 0
-    )
-  )
+  const teacherTZ = teacher.timezone || "America/New_York"
+  const tzWeekDates = getWeekDatesInTZ(weekOffset, teacherTZ)
+  // weekStart = Monday midnight UTC ref, weekEnd = next Monday midnight UTC ref
+  const weekStartRef = tzWeekDates[0]
+  const weekEndRef = new Date(tzWeekDates[6].getTime() + 86400000)
+
+  // For DB query, expand the window by ±1 day to catch timezone edge cases
+  const queryStart = new Date(weekStartRef.getTime() - 86400000)
+  const queryEnd = new Date(weekEndRef.getTime() + 86400000)
 
   const classes = await prisma.class.findMany({
     where: {
       teacherId: teacher.id,
-      scheduledAt: { gte: weekStart, lt: weekEnd },
+      scheduledAt: { gte: queryStart, lt: queryEnd },
     },
     include: {
       student: { select: { firstName: true, lastName: true, grade: true } },
@@ -68,50 +60,71 @@ export default async function TeacherSchedulePage({
     orderBy: { scheduledAt: "asc" },
   })
 
-  const blocks = classes.map((c) => {
-    const dt = new Date(c.scheduledAt)
-    const jsDay = dt.getUTCDay()
-    const dayIndex = jsDay === 0 ? 6 : jsDay - 1
-    const hour = dt.getUTCHours()
-    const startSlot = hour - 8
+  type ScheduleBlock = {
+    id: string
+    label: string
+    sublabel: string
+    subject: string
+    studentName: string
+    startSlot: number
+    duration: number
+    dayIndex: number
+    colorClass: string
+    isTrial: boolean
+    status: string
+    meetingLink: string | null
+    scheduledAt: string
+    time: string
+    topicCovered: string
+  }
 
-    return {
-      id: c.id,
-      label: `${c.student.firstName} ${c.student.lastName}`,
-      sublabel: `${c.subject.name} G${c.student.grade}`,
-      subject: c.subject.name,
-      studentName: `${c.student.firstName} ${c.student.lastName}`,
-      startSlot: Math.max(0, startSlot),
-      duration: 1,
-      dayIndex,
-      colorClass: SUBJECT_COLORS[c.subject.name] ?? DEFAULT_COLOR,
-      isTrial: c.isTrial,
-      status: c.status.toLowerCase(),
-      meetingLink: c.meetingLink || null,
-      scheduledAt: c.scheduledAt.toISOString(),
-      time: `${dt.getUTCHours() % 12 || 12}:${String(dt.getUTCMinutes()).padStart(2, "0")} ${dt.getUTCHours() >= 12 ? "PM" : "AM"}`,
-      topicCovered: c.topicCovered || "",
-    }
-  })
+  const blocks: ScheduleBlock[] = classes
+    .map((c) => {
+      const dt = new Date(c.scheduledAt)
+      const local = utcToLocal(dt, teacherTZ)
 
-  // Week dates for header
-  const dates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart)
-    d.setUTCDate(weekStart.getUTCDate() + i)
-    return d.getUTCDate().toString()
-  })
+      // Only include if the local date falls within our week
+      const localDateStr = local.dateStr
+      const weekDateStrs = tzWeekDates.map(refDateToLocalStr)
+      const dayIndex = weekDateStrs.indexOf(localDateStr)
+      if (dayIndex === -1) return null
 
-  const monthYear = `${weekStart.toLocaleDateString("en-US", {
-    month: "short",
-    timeZone: "UTC",
-  })} ${dates[0]}–${dates[6]}, ${weekStart.getUTCFullYear()}`
+      const startSlot = local.hour - 8
 
-  // Today's day index for highlighting
-  const todayUtcDay = now.getUTCDay()
-  const todayIdx = todayUtcDay === 0 ? 6 : todayUtcDay - 1
+      return {
+        id: c.id,
+        label: `${c.student.firstName} ${c.student.lastName}`,
+        sublabel: `${c.subject.name} G${c.student.grade}`,
+        subject: c.subject.name,
+        studentName: `${c.student.firstName} ${c.student.lastName}`,
+        startSlot: Math.max(0, startSlot),
+        duration: 1,
+        dayIndex,
+        colorClass: SUBJECT_COLORS[c.subject.name] ?? DEFAULT_COLOR,
+        isTrial: c.isTrial,
+        status: c.status.toLowerCase(),
+        meetingLink: c.meetingLink || null,
+        scheduledAt: c.scheduledAt.toISOString(),
+        time: local.formatted12h,
+        topicCovered: c.topicCovered || "",
+      }
+    })
+    .filter((b): b is ScheduleBlock => b !== null)
 
-  // Is this the current week?
-  const isCurrentWeek = weekOffset === 0
+    // Week dates for header (in teacher TZ)
+    const dates = tzWeekDates.map((d) => d.getUTCDate().toString())
+
+    const monthYear = `${tzWeekDates[0].toLocaleDateString("en-US", {
+      month: "short",
+      timeZone: "UTC",
+    })} ${dates[0]}–${dates[6]}, ${tzWeekDates[0].getUTCFullYear()}`
+  
+    // Today's day index for highlighting (in teacher TZ)
+    const todayLocal = utcToLocal(now, teacherTZ)
+    const todayDateStr = todayLocal.dateStr
+    const weekDateStrs = tzWeekDates.map(refDateToLocalStr)
+    const todayIdx = weekDateStrs.indexOf(todayDateStr)
+    const isCurrentWeek = todayIdx !== -1  
 
   // Legend from actual subjects
   const usedSubjects = [

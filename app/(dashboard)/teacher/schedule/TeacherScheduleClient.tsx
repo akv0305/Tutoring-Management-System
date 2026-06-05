@@ -508,7 +508,7 @@ export function TeacherScheduleClient({
       weekday: "long",
       month: "long",
       day: "numeric",
-      timeZone: "UTC",
+      timeZone: teacherTimezone,   // ← was "UTC"
     })
   }
 
@@ -709,9 +709,9 @@ export function TeacherScheduleClient({
       <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 p-4">
         <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
         <p className="text-xs text-blue-700">
-          All times shown in <strong>UTC</strong> (your configured timezone:{" "}
-          <strong>{teacherTimezone}</strong>). Students see your availability
-          converted to their local timezone. All class times are stored in UTC.{" "}
+          All times shown in your timezone: <strong>{teacherTimezone}</strong>.
+          Students see your availability converted to their local timezone.
+          All class times are stored in UTC internally.{" "}
           <strong>Cancellation limit: 3/month.</strong>
         </p>
       </div>
@@ -774,6 +774,8 @@ export function TeacherScheduleClient({
           teacherAvailability={teacherAvailability}
           teacherBookedSlots={teacherBookedSlots}
           teacherBlockedDates={teacherBlockedDates}
+          viewerTimezone={teacherTimezone} 
+          teacherTimezone={teacherTimezone}
         />
       )}
 

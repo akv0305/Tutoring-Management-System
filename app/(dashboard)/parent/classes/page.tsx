@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentClassesClient } from "./ParentClassesClient"
+import { getTzAbbr, utcToLocal } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -32,6 +33,9 @@ export default async function ClassesPage({
     include: { students: { select: { id: true, firstName: true } } },
   })
   if (!parent) redirect("/unauthorized")
+  
+  const parentTZ = parent.timezone || "America/New_York"
+  const tzLabel = getTzAbbr(parentTZ)
 
   // Resolve default tab from query param
   const rawStatus = (searchParams.status ?? "").toLowerCase().trim()
@@ -69,14 +73,14 @@ export default async function ClassesPage({
 
       return {
         id: c.id,
-        dayLabel: dt.toLocaleDateString("en-US", { weekday: "long" }),
-        dateNum: dt.getDate(),
-        month: dt.toLocaleDateString("en-US", { month: "short" }),
+        dayLabel: dt.toLocaleDateString("en-US", { weekday: "long", timeZone: parentTZ }),
+        dateNum: parseInt(utcToLocal(dt, parentTZ).dateStr.split("-")[2]),
+        month: dt.toLocaleDateString("en-US", { month: "short", timeZone: parentTZ }),
         time:
-          dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) +
+          dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: parentTZ }) +
           " – " +
-          endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) +
-          " " + (c.timezone ?? "EST"),
+          endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: parentTZ }) +
+          " " + tzLabel,
         duration: `${c.duration ?? 60} min`,
         teacher: teacherName,
         teacherInitials: initials,
@@ -99,6 +103,7 @@ export default async function ClassesPage({
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: parentTZ,   // ← ADD THIS
       }),
       subject: c.subject.name,
       topic: c.topicCovered ?? "—",
@@ -121,6 +126,7 @@ export default async function ClassesPage({
         month: "short",
         day: "numeric",
         year: "numeric",
+        timeZone: parentTZ,   // ← ADD THIS
       }),
       subject: c.subject.name,
       teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
@@ -142,6 +148,9 @@ export default async function ClassesPage({
   }
 
   // Calendar class dates this month — include PENDING_PAYMENT
+  const todayLocal = utcToLocal(now, parentTZ)
+
+  // Calendar class dates this month
   const classDates = [
     ...new Set(
       allClasses
@@ -151,17 +160,20 @@ export default async function ClassesPage({
             c.scheduledAt <= monthEnd &&
             ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
         )
-        .map((c) => c.scheduledAt.getDate())
+        .map((c) => {
+          const local = utcToLocal(c.scheduledAt, parentTZ)
+          return local.day
+        })
     ),
   ]
 
   const calendarData = {
-    year: now.getFullYear(),
-    month: now.toLocaleDateString("en-US", { month: "long" }),
-    startDay: new Date(now.getFullYear(), now.getMonth(), 1).getDay(),
-    days: new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(),
+    year: todayLocal.year,
+    month: now.toLocaleDateString("en-US", { month: "long", timeZone: parentTZ }),
+    startDay: new Date(todayLocal.year, todayLocal.month - 1, 1).getDay(),
+    days: new Date(todayLocal.year, todayLocal.month, 0).getDate(),
     classDates,
-    today: now.getDate(),
+    today: todayLocal.day,
   }
 
   return (

@@ -7,6 +7,11 @@ import {
   ChevronRight, CheckCircle, Loader2, AlertTriangle, X, Package, Ticket, Wallet,
 } from "lucide-react"
 import { RatingStars } from "@/components/ui/RatingStars"
+import {
+  getWeekDatesInTZ, utcToLocal, localToUTC, refDateToLocalStr,
+  getTzAbbr, to24 as tzTo24, convertAvailabilitySlots,
+} from "@/lib/timezone"
+
 
 type Subject = { id: string; name: string }
 type Availability = { dayOfWeek: string; startTime: string; endTime: string }
@@ -79,7 +84,7 @@ function formatTime(t: string): string {
   return `${h12}:${String(m).padStart(2, "0")} ${ampm}`
 }
 
-type SelectedSlot = { date: string; time: string; dateObj: Date }
+type SelectedSlot = { date: string; time: string; dateObj: Date; utcISO: string }
 
 export function TeacherProfileClient({
   teacher,
@@ -87,12 +92,14 @@ export function TeacherProfileClient({
   packageTemplates,
   trialEligibility,
   walletBalance = 0,
+  parentTimezone = "America/New_York",
 }: {
   teacher: TeacherData
   students: Student[]
   packageTemplates: PackageTemplateOpt[]
   trialEligibility: TrialEligibility[]
   walletBalance?: number
+  parentTimezone?: string
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -120,25 +127,34 @@ export function TeacherProfileClient({
   const [couponDiscountAmount, setCouponDiscountAmount] = useState(0)
   const [couponName, setCouponName] = useState("")
 
-  const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset])
+  const weekDates = useMemo(() => getWeekDatesInTZ(weekOffset, parentTimezone), [weekOffset, parentTimezone])
 
-  const availMap = useMemo(() => {
-    const m = new Map<string, Availability>()
-    teacher.availability.forEach((a) => m.set(a.dayOfWeek, a))
-    return m
-  }, [teacher.availability])
+    // OLD availMap — REMOVE
+  // OLD bookedSet — REMOVE
+
+  // NEW — timezone-aware availability + booked slots
+  const { availSlots, slotToUTC } = useMemo(
+    () => convertAvailabilitySlots(teacher.availability, weekDates, teacher.timezone, parentTimezone),
+    [teacher.availability, weekDates, teacher.timezone, parentTimezone]
+  )
 
   const bookedSet = useMemo(() => {
     const s = new Set<string>()
     teacher.bookedSlots.forEach((b) => {
       const d = new Date(b.start)
-      const key = `${d.toISOString().split("T")[0]}_${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`
-      s.add(key)
+      const local = utcToLocal(d, parentTimezone)
+      s.add(`${local.dateStr}_${local.timeStr}`)
     })
     return s
-  }, [teacher.bookedSlots])
+  }, [teacher.bookedSlots, parentTimezone])
 
-  const blockedSet = useMemo(() => new Set(teacher.blockedDates), [teacher.blockedDates])
+  const blockedSet = useMemo(() => {
+    // blockedDates from server are in YYYY-MM-DD format (teacher's local dates)
+    // Convert them: for each blocked date, the teacher is blocked all day in their TZ
+    // For simplicity, keep the set as-is — we'll check against the teacher's date for each slot via slotToUTC
+    return new Set(teacher.blockedDates)
+  }, [teacher.blockedDates])
+
   const now = new Date()
 
   // Filter package templates by selected subject
@@ -200,6 +216,9 @@ export function TeacherProfileClient({
       : 0
   
     const amountAfterDiscount = totalAmount - (discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview)
+
+    const tzAbbr = useMemo(() => getTzAbbr(parentTimezone), [parentTimezone])
+    const teacherTzAbbr = useMemo(() => getTzAbbr(teacher.timezone), [teacher.timezone])  
   
     async function validateCoupon() {
       if (!couponCode.trim()) return
@@ -286,23 +305,20 @@ export function TeacherProfileClient({
     }
   }
 
-  function toggleSlot(dateObj: Date, time: string) {
-    const dateStr = dateObj.toISOString().split("T")[0]
-    const key = `${dateStr}_${time}`
+  function toggleSlot(viewerDateStr: string, viewerTimeStr: string) {
+    const key = `${viewerDateStr}_${viewerTimeStr}`
+    const utcISO = slotToUTC.get(key) || ""
     setSelectedSlots((prev) => {
       const exists = prev.find((s) => `${s.date}_${s.time}` === key)
       if (exists) return prev.filter((s) => `${s.date}_${s.time}` !== key)
-      // Enforce max slots for trial
       if (bookingType === "trial" && prev.length >= 1) return prev
-      // Enforce max slots for package
       if (bookingType === "package" && selectedTemplate && prev.length >= selectedTemplate.classesIncluded) return prev
-      return [...prev, { date: dateStr, time, dateObj }]
+      return [...prev, { date: viewerDateStr, time: viewerTimeStr, dateObj: new Date(viewerDateStr + "T00:00:00Z"), utcISO }]
     })
   }
 
-  function isSelected(dateObj: Date, time: string) {
-    const dateStr = dateObj.toISOString().split("T")[0]
-    return selectedSlots.some((s) => s.date === dateStr && s.time === time)
+  function isSelected(viewerDateStr: string, viewerTimeStr: string) {
+    return selectedSlots.some((s) => s.date === viewerDateStr && s.time === viewerTimeStr)
   }
 
   function canContinueToConfirm(): { ok: boolean; message: string } {
@@ -330,9 +346,7 @@ export function TeacherProfileClient({
 
     setLoading(true)
 
-    const slots = selectedSlots.map(
-      (slot) => new Date(`${slot.date}T${slot.time}:00Z`).toISOString()
-    )
+    const slots = selectedSlots.map((slot) => slot.utcISO)
 
     try {
       const payload: any = {
@@ -561,7 +575,7 @@ export function TeacherProfileClient({
                 .map((s) => (
                   <span key={`${s.date}_${s.time}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm">
                     <Calendar className="w-3.5 h-3.5 text-[#0D9488]" />
-                    {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} at {formatTime(s.time)}
+                    {new Date(s.date + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })} at {formatTime(s.time)} {tzAbbr}
                   </span>
                 ))}
             </div>
@@ -957,9 +971,11 @@ export function TeacherProfileClient({
           <div className="p-4 overflow-x-auto">
             <div className="min-w-[700px]">
               <div className="grid grid-cols-8 gap-1 mb-2">
-                <div className="text-xs text-gray-400 font-medium py-2 text-center">Time (UTC)</div>
+                <div className="text-xs text-gray-400 font-medium py-2 text-center">Time ({tzAbbr})</div>
                 {weekDates.map((d, i) => {
-                  const isToday = d.toISOString().split("T")[0] === now.toISOString().split("T")[0]
+                  const dateStr = refDateToLocalStr(d)
+                  const todayLocal = utcToLocal(now, parentTimezone)
+                  const isToday = dateStr === todayLocal.dateStr
                   return (
                     <div key={i} className={`text-center py-2 rounded-lg ${isToday ? "bg-[#1E3A5F] text-white" : ""}`}>
                       <p className={`text-xs font-medium ${isToday ? "text-white/80" : "text-gray-500"}`}>
@@ -974,67 +990,86 @@ export function TeacherProfileClient({
               </div>
 
               {(() => {
-                const allSlots = new Set<string>()
-                teacher.availability.forEach((a) => {
-                  generateSlots(a.startTime, a.endTime).forEach((s) => allSlots.add(s))
+                // Collect all unique viewer time slots from the converted availability
+                const allViewerTimeSlots = new Set<string>()
+                for (const [, times] of availSlots) {
+                  times.forEach((t) => allViewerTimeSlots.add(t))
+                }
+                const sortedSlots = Array.from(allViewerTimeSlots).sort()
+
+                const todayLocal = utcToLocal(now, parentTimezone)
+
+                return sortedSlots.map((timeSlot) => {
+                  const hour = parseInt(timeSlot.split(":")[0])
+                  const ampm = hour >= 12 ? "PM" : "AM"
+                  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+                  const timeLabel = `${h12}:${timeSlot.split(":")[1]} ${ampm}`
+
+                  return (
+                    <div key={timeSlot} className="grid grid-cols-8 gap-1 mb-1">
+                      <div className="text-xs text-gray-400 py-2 text-center font-medium">{timeLabel}</div>
+                      {weekDates.map((dateObj, dayIdx) => {
+                        const dateStr = refDateToLocalStr(dateObj)
+                        const slotKey = `${dateStr}_${timeSlot}`
+                        const utcISO = slotToUTC.get(slotKey)
+
+                        // Check if this slot exists in converted availability
+                        const isAvailable = availSlots.get(dateStr)?.includes(timeSlot) ?? false
+
+                        // Past check (in viewer's timezone)
+                        const isPast = dateStr < todayLocal.dateStr
+                        const isPastToday = dateStr === todayLocal.dateStr && parseInt(timeSlot.split(":")[0]) <= todayLocal.hour
+
+                        // Blocked check — need to check the teacher's date for this slot
+                        let isBlocked = false
+                        if (utcISO) {
+                          const utcDate = new Date(utcISO)
+                          const teacherLocal = utcToLocal(utcDate, teacher.timezone)
+                          isBlocked = blockedSet.has(teacherLocal.dateStr)
+                        }
+
+                        const isBooked = bookedSet.has(slotKey)
+                        const unavailable = !isAvailable || isPast || isPastToday || isBlocked || isBooked
+                        const selected = isSelected(dateStr, timeSlot)
+
+                        const atMax = !selected && (
+                          (bookingType === "trial" && selectedSlots.length >= 1) ||
+                          (bookingType === "package" && selectedTemplate && selectedSlots.length >= selectedTemplate.classesIncluded)
+                        )
+
+                        if (unavailable) {
+                          return (
+                            <div key={dayIdx} className={`py-2 rounded-md text-center text-xs ${
+                              isBooked ? "bg-red-50 text-red-300 line-through" : "bg-gray-50 text-gray-300"
+                            }`}>
+                              {isBooked ? "Booked" : isAvailable ? "Past" : ""}
+                            </div>
+                          )
+                        }
+
+                        if (atMax && !selected) {
+                          return (
+                            <div key={dayIdx} className="py-2 rounded-md text-center text-xs bg-gray-50 text-gray-300" />
+                          )
+                        }
+
+                        return (
+                          <button
+                            key={dayIdx}
+                            onClick={() => toggleSlot(dateStr, timeSlot)}
+                            className={`py-2 rounded-md text-center text-xs font-medium transition-all ${
+                              selected
+                                ? "bg-[#0D9488] text-white shadow-sm ring-2 ring-[#0D9488]/30"
+                                : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                            }`}
+                          >
+                            {selected ? "Selected" : "Available"}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
                 })
-                const sortedSlots = Array.from(allSlots).sort()
-
-                return sortedSlots.map((timeSlot) => (
-                  <div key={timeSlot} className="grid grid-cols-8 gap-1 mb-1">
-                    <div className="text-xs text-gray-400 py-2 text-center font-medium">{formatTime(timeSlot)}</div>
-                    {weekDates.map((dateObj, dayIdx) => {
-                      const dayName = DAY_JS_MAP[dateObj.getUTCDay()]
-                      const avail = availMap.get(dayName)
-                      const dateStr = dateObj.toISOString().split("T")[0]
-                      const todayStr = now.toISOString().split("T")[0]
-                      const isPast = dateStr < todayStr
-                      const isPastToday = dateStr === todayStr && Number(timeSlot.split(":")[0]) <= now.getUTCHours()
-                      const isBlocked = blockedSet.has(dateStr)
-                      const isBooked = bookedSet.has(`${dateStr}_${timeSlot}`)
-                      const inWindow = avail && timeSlot >= to24(avail.startTime) && timeSlot < to24(avail.endTime)
-                      const unavailable = !inWindow || isPast || isPastToday || isBlocked || isBooked
-                      const selected = isSelected(dateObj, timeSlot)
-
-                      // Check if max slots reached (for non-selected slots)
-                      const atMax = !selected && (
-                        (bookingType === "trial" && selectedSlots.length >= 1) ||
-                        (bookingType === "package" && selectedTemplate && selectedSlots.length >= selectedTemplate.classesIncluded)
-                      )
-
-                      if (unavailable) {
-                        return (
-                          <div key={dayIdx} className={`py-2 rounded-md text-center text-xs ${
-                            isBooked ? "bg-red-50 text-red-300 line-through" : "bg-gray-50 text-gray-300"
-                          }`}>
-                            {isBooked ? "Booked" : inWindow ? "Past" : ""}
-                          </div>
-                        )
-                      }
-
-                      if (atMax && !selected) {
-                        return (
-                          <div key={dayIdx} className="py-2 rounded-md text-center text-xs bg-gray-50 text-gray-300">
-                          </div>
-                        )
-                      }
-
-                      return (
-                        <button
-                          key={dayIdx}
-                          onClick={() => toggleSlot(dateObj, timeSlot)}
-                          className={`py-2 rounded-md text-center text-xs font-medium transition-all ${
-                            selected
-                              ? "bg-[#0D9488] text-white shadow-sm ring-2 ring-[#0D9488]/30"
-                              : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                          }`}
-                        >
-                          {selected ? "Selected" : "Available"}
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))
               })()}
             </div>
           </div>
@@ -1063,7 +1098,7 @@ export function TeacherProfileClient({
               {selectedSlots
                 .sort((a, b) => a.date.localeCompare(b.date))
                 .slice(0, 4)
-                .map((s) => `${new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${formatTime(s.time)}`)
+                .map((s) => `${new Date(s.date + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })} ${formatTime(s.time)} ${tzAbbr}`)
                 .join(" · ")}
               {selectedSlots.length > 4 && ` +${selectedSlots.length - 4} more`}
             </p>

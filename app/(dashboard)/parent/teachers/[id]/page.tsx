@@ -16,6 +16,8 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   })
   if (!parent) redirect("/unauthorized")
 
+  const parentTimezone = parent.timezone || "America/New_York"
+
   const teacher = await prisma.teacherProfile.findUnique({
     where: { id: params.id },
     include: {
@@ -141,6 +143,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
       packageTemplates={packageTemplatesData}
       trialEligibility={trialEligibility}
       walletBalance={walletBalance}
+      parentTimezone={parentTimezone}
     />
   )
 }
