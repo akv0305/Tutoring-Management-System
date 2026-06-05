@@ -4,9 +4,12 @@ import { TeachersClient } from "./TeachersClient"
 export const dynamic = "force-dynamic"
 
 export default async function TeachersPage() {
+  const now = new Date()
+  const fourWeeksFromNow = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
+
   const teachersRaw = await prisma.teacherProfile.findMany({
     include: {
-      user: { select: { firstName: true, lastName: true, email: true } },
+      user: { select: { firstName: true, lastName: true, email: true, phone: true } },
       subjects: {
         include: { subject: { select: { id: true, name: true, category: true } } },
       },
@@ -14,17 +17,49 @@ export default async function TeachersPage() {
         where: { status: "ACTIVE" },
         select: { studentId: true },
       },
+      availabilities: {
+        where: { isEnabled: true },
+        select: { dayOfWeek: true, startTime: true, endTime: true },
+      },
+      blockedDates: {
+        where: { blockedDate: { gte: now } },
+        select: { blockedDate: true },
+      },
+      classes: {
+        where: {
+          status: { in: ["SCHEDULED", "CONFIRMED"] },
+          scheduledAt: { gte: now, lte: fourWeeksFromNow },
+        },
+        select: {
+          scheduledAt: true,
+          duration: true,
+          subject: { select: { name: true } },
+          student: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: { scheduledAt: "asc" },
+      },
     },
     orderBy: { createdAt: "desc" },
   })
 
   const teachers = teachersRaw.map((t) => {
     const uniqueStudentIds = new Set(t.packages.map((p) => p.studentId))
+
+    let weeklyHours = 0
+    t.availabilities.forEach((a) => {
+      const startH = parseInt(a.startTime.split(":")[0], 10)
+      const endH = parseInt(a.endTime.split(":")[0], 10)
+      weeklyHours += Math.max(0, endH - startH)
+    })
+
     return {
       id: t.id,
       teacherName: `${t.user.firstName} ${t.user.lastName}`,
+      initials: `${t.user.firstName[0] || ""}${t.user.lastName[0] || ""}`.toUpperCase(),
       email: t.user.email,
+      phone: t.user.phone || null,
       qualification: t.qualification ?? "—",
+      bio: t.bio || null,
       subjects: t.subjects.map((ts) => ts.subject.name),
       subjectIds: t.subjects.map((ts) => ts.subject.id),
       hourlyRate: `$${Number(t.compensationRate)}/hr`,
@@ -34,6 +69,21 @@ export default async function TeachersPage() {
       activeStudents: uniqueStudentIds.size,
       experience: t.experience,
       status: t.status.toLowerCase().replace("_", " "),
+      timezone: t.timezone,
+      availabilitySlots: t.availabilities.map((a) => ({
+        dayOfWeek: a.dayOfWeek,
+        startTime: a.startTime,
+        endTime: a.endTime,
+      })),
+      blockedDates: t.blockedDates.map((b) => b.blockedDate.toISOString().split("T")[0]),
+      upcomingClasses: t.classes.map((c) => ({
+        scheduledAt: c.scheduledAt.toISOString(),
+        duration: c.duration,
+        subject: c.subject.name,
+        student: `${c.student.firstName} ${c.student.lastName}`,
+      })),
+      weeklyHours,
+      upcomingClassCount: t.classes.length,
     }
   })
 

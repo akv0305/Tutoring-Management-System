@@ -47,7 +47,7 @@ export default function CoordinatorLayout({
   const navItems = [
     { label: "Dashboard",   icon: LayoutDashboard, href: "/coordinator" },
     { label: "My Students", icon: Users,           href: "/coordinator/students",   ...(totalStudents > 0 ? { badge: totalStudents } : {}) },
-    { label: "Schedule",    icon: Calendar,        href: "/coordinator/schedule" },
+    { label: "Classes",     icon: Calendar,        href: "/coordinator/classes" },
     { label: "Onboarding",  icon: UserPlus,        href: "/coordinator/onboarding", ...(pendingOnboarding > 0 ? { badge: pendingOnboarding } : {}) },
     { label: "Payments",    icon: CreditCard,      href: "/coordinator/payments",   ...(pendingPayments > 0 ? { badge: pendingPayments } : {}) },
     { label: "Teachers",    icon: GraduationCap,   href: "/coordinator/teachers" },

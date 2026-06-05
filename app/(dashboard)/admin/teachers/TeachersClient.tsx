@@ -3,18 +3,27 @@
 import React, { useState } from "react"
 import {
   UserPlus, Eye, DollarSign, UserX, UserCheck, X, Loader2,
-  AlertCircle, BookOpen, Check,
+  AlertCircle, BookOpen, Check, MapPin,
 } from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
 import { AddTeacherModal } from "@/components/modals/AddTeacherModal"
+import { TeacherAvailabilityList } from "@/components/teachers/TeacherAvailabilityList"
+
+/* ──────────────────── Types ──────────────────── */
+
+type AvailabilitySlot = { dayOfWeek: string; startTime: string; endTime: string }
+type UpcomingClass = { scheduledAt: string; duration: number; subject: string; student: string }
 
 type Teacher = Record<string, unknown> & {
   id: string
   teacherName: string
+  initials: string
   email: string
+  phone: string | null
   qualification: string
+  bio: string | null
   subjects: string[]
   subjectIds: string[]
   hourlyRate: string
@@ -24,52 +33,219 @@ type Teacher = Record<string, unknown> & {
   activeStudents: number
   experience: number
   status: string
+  timezone: string
+  availabilitySlots: AvailabilitySlot[]
+  blockedDates: string[]
+  upcomingClasses: UpcomingClass[]
+  weeklyHours: number
+  upcomingClassCount: number
 }
 
 type KPIs = { total: number; active: number; onLeave: number; avgRating: string }
 type SubjectOption = { id: string; name: string; category: string }
 
-/* ─── Teacher Detail Modal ─── */
+/* ─── Fixed dual timezones ─── */
+const TZ_CST = "America/Chicago"
+const TZ_IST = "Asia/Kolkata"
+
+const DAY_ORDER: Record<string, number> = { MONDAY:0,TUESDAY:1,WEDNESDAY:2,THURSDAY:3,FRIDAY:4,SATURDAY:5,SUNDAY:6 }
+const DAY_LABELS: Record<string, string> = { MONDAY:"Monday",TUESDAY:"Tuesday",WEDNESDAY:"Wednesday",THURSDAY:"Thursday",FRIDAY:"Friday",SATURDAY:"Saturday",SUNDAY:"Sunday" }
+
+function tzAbbr(tz: string, date: Date = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(date)
+    return parts.find((p) => p.type === "timeZoneName")?.value || tz
+  } catch { return tz }
+}
+
+function utcToLocal12h(utcDate: Date, timezone: string): string {
+  return utcDate.toLocaleTimeString("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit", hour12: true })
+}
+
+function utcToLocalDate(utcDate: Date, timezone: string): string {
+  return utcDate.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" })
+}
+
+function formatTime12(time24: string) {
+  const h = parseInt(time24.split(":")[0], 10)
+  if (h === 0) return "12 AM"; if (h < 12) return `${h} AM`; if (h === 12) return "12 PM"; return `${h - 12} PM`
+}
+
+/* ──────────────────── Teacher Detail Modal (Tabbed) ──────────────────── */
 
 function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: () => void }) {
+  const [tab, setTab] = useState<"profile" | "availability" | "classes">("profile")
+
+  const availByDay = (() => {
+    const map: Record<string, { start: string; end: string }[]> = {}
+    teacher.availabilitySlots
+      .sort((a, b) => (DAY_ORDER[a.dayOfWeek] ?? 99) - (DAY_ORDER[b.dayOfWeek] ?? 99))
+      .forEach((a) => {
+        const day = a.dayOfWeek
+        if (!map[day]) map[day] = []
+        map[day].push({ start: a.startTime, end: a.endTime })
+      })
+    return map
+  })()
+
+  const istLabel = tzAbbr(TZ_IST)
+  const cstLabel = tzAbbr(TZ_CST)
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <h3 className="text-lg font-bold text-[#1E293B]">Teacher Details</h3>
           <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100"><X className="w-5 h-5 text-gray-400" /></button>
         </div>
+
+        {/* Scrollable content */}
         <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+          {/* Teacher header info */}
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-[#1E3A5F] flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
-              {teacher.teacherName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+              {teacher.initials}
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-[#1E293B] text-lg">{teacher.teacherName}</p>
               <p className="text-xs text-gray-400">{teacher.qualification}</p>
-              <StatusBadge status={teacher.status} size="sm" />
+              <div className="flex items-center gap-2 mt-0.5">
+                <StatusBadge status={teacher.status} size="sm" />
+                <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+                  <MapPin className="w-3 h-3" /> {teacher.timezone}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-4 space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Email</span><span className="font-medium text-[#1E293B]">{teacher.email}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Experience</span><span className="font-medium text-[#1E293B]">{teacher.experience} year{teacher.experience !== 1 ? "s" : ""}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Active Students</span><span className="font-medium text-[#1E293B]">{teacher.activeStudents}</span></div>
-            <div className="flex justify-between items-center"><span className="text-gray-500">Rating</span><div className="flex items-center gap-1.5"><RatingStars rating={teacher.rating} size="sm" /><span className="text-xs text-gray-400">({teacher.totalReviews})</span></div></div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-gray-100">
+            {([
+              { key: "profile" as const, label: "Profile" },
+              { key: "availability" as const, label: "Availability" },
+              { key: "classes" as const, label: `Upcoming (${teacher.upcomingClassCount})` },
+            ]).map((t) => (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${tab === t.key ? "border-[#0D9488] text-[#0D9488]" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+                {t.label}
+              </button>
+            ))}
           </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2 text-sm">
-            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide flex items-center gap-1"><span>🔒</span> Confidential Rates</p>
-            <div className="flex justify-between"><span className="text-amber-800">Compensation Rate</span><span className="font-bold text-amber-900">{teacher.hourlyRate}</span></div>
-            <div className="flex justify-between"><span className="text-amber-800">Student-Facing Rate</span><span className="font-bold text-amber-900">{teacher.studentFacingRate}</span></div>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Subjects</p>
-            <div className="flex flex-wrap gap-1.5">
-              {teacher.subjects.length > 0 ? teacher.subjects.map((s) => (
-                <span key={s} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-[#1E3A5F]/10 text-[#1E3A5F] border border-[#1E3A5F]/20">{s}</span>
-              )) : <span className="text-sm text-gray-400">No subjects assigned</span>}
+
+          {/* ─── Profile Tab ─── */}
+          {tab === "profile" && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-4 space-y-3 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">Email</span><span className="font-medium text-[#1E293B]">{teacher.email}</span></div>
+                {teacher.phone && <div className="flex justify-between"><span className="text-gray-500">Phone</span><span className="font-medium text-[#1E293B]">{teacher.phone}</span></div>}
+                <div className="flex justify-between"><span className="text-gray-500">Experience</span><span className="font-medium text-[#1E293B]">{teacher.experience} year{teacher.experience !== 1 ? "s" : ""}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Active Students</span><span className="font-medium text-[#1E293B]">{teacher.activeStudents}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Weekly Hours</span><span className="font-medium text-[#1E293B]">{teacher.weeklyHours}h</span></div>
+                <div className="flex justify-between items-center"><span className="text-gray-500">Rating</span><div className="flex items-center gap-1.5"><RatingStars rating={teacher.rating} size="sm" /><span className="text-xs text-gray-400">({teacher.totalReviews})</span></div></div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2 text-sm">
+                <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide flex items-center gap-1"><span>🔒</span> Confidential Rates</p>
+                <div className="flex justify-between"><span className="text-amber-800">Compensation Rate</span><span className="font-bold text-amber-900">{teacher.hourlyRate}</span></div>
+                <div className="flex justify-between"><span className="text-amber-800">Student-Facing Rate</span><span className="font-bold text-amber-900">{teacher.studentFacingRate}</span></div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Subjects</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {teacher.subjects.length > 0 ? teacher.subjects.map((s) => (
+                    <span key={s} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-[#1E3A5F]/10 text-[#1E3A5F] border border-[#1E3A5F]/20">{s}</span>
+                  )) : <span className="text-sm text-gray-400">No subjects assigned</span>}
+                </div>
+              </div>
+              {teacher.bio && <div><p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Bio</p><p className="text-sm text-gray-700 leading-relaxed">{teacher.bio}</p></div>}
             </div>
-          </div>
+          )}
+
+          {/* ─── Availability Tab ─── */}
+          {tab === "availability" && (
+            <div className="space-y-4">
+              <TeacherAvailabilityList
+                teacherId={teacher.id}
+                teacherTimezone={teacher.timezone}
+                availabilitySlots={teacher.availabilitySlots}
+                blockedDates={teacher.blockedDates}
+              />
+
+              {/* Recurring Slot Details */}
+              {Object.keys(availByDay).length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                  <p className="text-xs text-gray-400 uppercase tracking-wide">Recurring Slot Details (Teacher Local Time)</p>
+                  {Object.entries(availByDay).map(([day, slots]) => (
+                    <div key={day} className="flex items-center gap-2 text-sm">
+                      <span className="w-20 text-xs font-medium text-[#1E293B]">{DAY_LABELS[day] || day}</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {slots.map((s, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded bg-green-50 border border-green-200 text-[10px] font-medium text-green-700">{formatTime12(s.start)} – {formatTime12(s.end)}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Blocked Dates */}
+              {teacher.blockedDates.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Blocked Dates</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {teacher.blockedDates.slice(0, 10).map((d) => <span key={d} className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-[10px] font-medium text-red-600">{d}</span>)}
+                    {teacher.blockedDates.length > 10 && <span className="text-[10px] text-gray-400">+{teacher.blockedDates.length - 10} more</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── Upcoming Classes Tab ─── */}
+          {tab === "classes" && (
+            <div className="space-y-2">
+              {teacher.upcomingClasses.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">No upcoming classes in the next 4 weeks.</p>
+              ) : (
+                teacher.upcomingClasses.map((c, i) => {
+                  const utc = new Date(c.scheduledAt)
+                  const utcEnd = new Date(utc.getTime() + (c.duration || 60) * 60000)
+                  const istStart = utcToLocal12h(utc, TZ_IST)
+                  const istEnd = utcToLocal12h(utcEnd, TZ_IST)
+                  const cstStart = utcToLocal12h(utc, TZ_CST)
+                  const cstEnd = utcToLocal12h(utcEnd, TZ_CST)
+                  const istDate = utcToLocalDate(utc, TZ_IST)
+                  const cstDate = utcToLocalDate(utc, TZ_CST)
+                  const il = tzAbbr(TZ_IST, utc)
+                  const cl = tzAbbr(TZ_CST, utc)
+
+                  return (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="w-11 h-11 rounded-lg bg-[#0D9488]/10 flex flex-col items-center justify-center flex-shrink-0">
+                        <span className="text-[9px] font-bold text-[#0D9488] uppercase">
+                          {utc.toLocaleDateString("en-US", { month: "short", timeZone: TZ_IST })}
+                        </span>
+                        <span className="text-sm font-bold text-[#1E293B] -mt-0.5">
+                          {utc.toLocaleDateString("en-US", { day: "numeric", timeZone: TZ_IST })}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-[#1E293B] truncate">{c.subject} — {c.student}</p>
+                        <p className="text-[11px] text-gray-600 mt-0.5">
+                          {istStart} – {istEnd} {il}  ·  {cstStart} – {cstEnd} {cl}
+                          {istDate !== cstDate && <span className="text-gray-400"> ({cstDate})</span>}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">{c.duration} min</p>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Footer */}
         <div className="border-t border-gray-100 px-5 py-4 shrink-0">
           <button onClick={onClose} className="w-full py-2.5 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">Close</button>
         </div>
@@ -78,7 +254,7 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
   )
 }
 
-/* ─── Set Rate Modal ─── */
+/* ──────────────────── Set Rate Modal ──────────────────── */
 
 function SetRateModal({ teacher, onClose, onSuccess }: { teacher: Teacher; onClose: () => void; onSuccess: () => void }) {
   const currentCompRate = teacher.hourlyRate.replace("$", "").replace("/hr", "")
@@ -138,7 +314,7 @@ function SetRateModal({ teacher, onClose, onSuccess }: { teacher: Teacher; onClo
   )
 }
 
-/* ─── Toggle Status Modal ─── */
+/* ──────────────────── Toggle Status Modal ──────────────────── */
 
 function ToggleStatusModal({ teacher, onClose, onSuccess }: { teacher: Teacher; onClose: () => void; onSuccess: () => void }) {
   const [loading, setLoading] = useState(false)
@@ -176,7 +352,7 @@ function ToggleStatusModal({ teacher, onClose, onSuccess }: { teacher: Teacher; 
   )
 }
 
-/* ─── Manage Subjects Modal ─── */
+/* ──────────────────── Manage Subjects Modal ──────────────────── */
 
 function ManageSubjectsModal({
   teacher,
@@ -228,7 +404,6 @@ function ManageSubjectsModal({
     }
   }
 
-  // Group subjects by category
   const grouped = allSubjects.reduce<Record<string, SubjectOption[]>>((acc, s) => {
     const cat = s.category || "OTHER"
     if (!acc[cat]) acc[cat] = []
@@ -251,108 +426,48 @@ function ManageSubjectsModal({
     !teacher.subjectIds.every((id) => selected.has(id))
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h3 className="text-lg font-bold text-[#1E293B]">Manage Subjects</h3>
             <p className="text-xs text-gray-500">{teacher.teacherName}</p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100">
-            <X className="w-5 h-5 text-gray-400" />
-          </button>
+          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100"><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
         <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
-          <p className="text-sm text-gray-600">
-            Select the subjects this teacher can teach. Changes take effect immediately for new bookings.
-          </p>
-
+          <p className="text-sm text-gray-600">Select the subjects this teacher can teach. Changes take effect immediately for new bookings.</p>
           {Object.entries(grouped).map(([cat, subjects]) => (
             <div key={cat}>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                {categoryLabels[cat] || cat}
-              </p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{categoryLabels[cat] || cat}</p>
               <div className="space-y-1.5">
                 {subjects.map((s) => {
                   const isChecked = selected.has(s.id)
                   return (
-                    <label
-                      key={s.id}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
-                        isChecked
-                          ? "border-[#0D9488] bg-[#0D9488]/5"
-                          : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                      }`}
-                    >
-                      <div
-                        className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors flex-shrink-0 ${
-                          isChecked
-                            ? "bg-[#0D9488] border-[#0D9488]"
-                            : "border-gray-300"
-                        }`}
-                      >
+                    <label key={s.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${isChecked ? "border-[#0D9488] bg-[#0D9488]/5" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"}`}>
+                      <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors flex-shrink-0 ${isChecked ? "bg-[#0D9488] border-[#0D9488]" : "border-gray-300"}`}>
                         {isChecked && <Check className="w-3 h-3 text-white" />}
                       </div>
-                      <span
-                        className={`text-sm font-medium ${
-                          isChecked ? "text-[#0D9488]" : "text-[#1E293B]"
-                        }`}
-                      >
-                        {s.name}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggle(s.id)}
-                        className="sr-only"
-                      />
+                      <span className={`text-sm font-medium ${isChecked ? "text-[#0D9488]" : "text-[#1E293B]"}`}>{s.name}</span>
+                      <input type="checkbox" checked={isChecked} onChange={() => toggle(s.id)} className="sr-only" />
                     </label>
                   )
                 })}
               </div>
             </div>
           ))}
-
           <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-500">
             <strong>{selected.size}</strong> subject{selected.size !== 1 ? "s" : ""} selected
-            {hasChanges && (
-              <span className="ml-2 text-[#0D9488] font-medium">· Unsaved changes</span>
-            )}
+            {hasChanges && <span className="ml-2 text-[#0D9488] font-medium">· Unsaved changes</span>}
           </div>
-
-          {error && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-2.5 text-sm text-red-700">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
+          {error && <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-2.5 text-sm text-red-700"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span></div>}
         </div>
 
         <div className="border-t border-gray-100 px-5 py-4 shrink-0 flex gap-2">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading || !hasChanges}
-            className="flex-1 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
-          >
-            {loading ? (
-              <><Loader2 className="w-4 h-4 animate-spin" />Saving…</>
-            ) : (
-              <><BookOpen className="w-4 h-4" />Save Subjects</>
-            )}
+          <button onClick={onClose} disabled={loading} className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">Cancel</button>
+          <button onClick={handleSave} disabled={loading || !hasChanges} className="flex-1 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
+            {loading ? (<><Loader2 className="w-4 h-4 animate-spin" />Saving…</>) : (<><BookOpen className="w-4 h-4" />Save Subjects</>)}
           </button>
         </div>
       </div>
@@ -360,7 +475,7 @@ function ManageSubjectsModal({
   )
 }
 
-/* ─── MiniKPI ─── */
+/* ──────────────────── MiniKPI ──────────────────── */
 
 function MiniKPI({ label, value, valueClass = "text-[#1E293B]" }: { label: string; value: string | number; valueClass?: string }) {
   return (
@@ -371,7 +486,7 @@ function MiniKPI({ label, value, valueClass = "text-[#1E293B]" }: { label: strin
   )
 }
 
-/* ─── Main Component ─── */
+/* ──────────────────── Main Component ──────────────────── */
 
 export function TeachersClient({
   teachers,

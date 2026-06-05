@@ -1,10 +1,21 @@
 import { prisma } from "@/lib/prisma"
-import { AdminClassesClient } from "./AdminClassesClient"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
+import { redirect } from "next/navigation"
+import { CoordinatorClassesClient } from "./CoordinatorClassesClient"
 import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
-export default async function AdminClassesPage() {
+export default async function CoordinatorClassesPage() {
+  const session = await getServerSession(authOptions)
+  if (!session || session.user.role !== "COORDINATOR") redirect("/unauthorized")
+
+  const coordinator = await prisma.coordinatorProfile.findFirst({
+    where: { user: { email: session.user.email! } },
+  })
+  if (!coordinator) redirect("/unauthorized")
+
   // Default to current month
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -12,6 +23,7 @@ export default async function AdminClassesPage() {
 
   const classesRaw = await prisma.class.findMany({
     where: {
+      student: { coordinatorId: coordinator.id },
       scheduledAt: { gte: monthStart, lte: monthEnd },
     },
     include: {
@@ -33,8 +45,6 @@ export default async function AdminClassesPage() {
       teacher: {
         select: {
           id: true,
-          compensationRate: true,
-          studentFacingRate: true,
           user: { select: { firstName: true, lastName: true } },
         },
       },
@@ -47,8 +57,7 @@ export default async function AdminClassesPage() {
 
   const classes = classesRaw.map((c) => {
     const classDuration = c.duration || 60
-    const studentRate = Number(c.teacher.studentFacingRate ?? c.teacher.compensationRate)
-    const compRate = Number(c.teacher.compensationRate)
+    const classTZ = c.timezone || "America/New_York"
 
     return {
       id: c.id,
@@ -69,34 +78,31 @@ export default async function AdminClassesPage() {
         weekday: "short",
         month: "short",
         day: "numeric",
-        timeZone: c.timezone || "America/New_York",
+        timeZone: classTZ,
       }),
       time: `${c.scheduledAt.toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
-        timeZone: c.timezone || "America/New_York",
+        timeZone: classTZ,
       })} – ${new Date(
         c.scheduledAt.getTime() + classDuration * 60000
       ).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
-        timeZone: c.timezone || "America/New_York",
-      })} ${getTzAbbr(c.timezone || "America/New_York")}`,
+        timeZone: classTZ,
+      })} ${getTzAbbr(classTZ)}`,
       duration: classDuration,
       status: c.status,
       statusLower: c.status.toLowerCase().replace(/_/g, " "),
       meetingLink: c.meetingLink ?? "",
       topicCovered: c.topicCovered ?? "",
       sessionNotes: c.sessionNotes ?? "",
+      studentNotes: c.studentNotes ?? "",
       parentRating: c.parentRating,
       parentFeedback: c.parentFeedback ?? "",
       isTrial: c.isTrial,
       completedAt: c.completedAt?.toISOString() ?? null,
       cancelReason: c.cancelReason ?? "",
-      timezone: c.timezone || "America/New_York",
-      // Calculated amounts for credit modal
-      calculatedCreditAmount: Math.round(studentRate * (classDuration / 60) * 100) / 100,
-      calculatedDeductionAmount: Math.round(compRate * (classDuration / 60) * 100) / 100,
     }
   })
 
@@ -110,9 +116,6 @@ export default async function AdminClassesPage() {
     pendingPayment: classes.filter((c) => c.status === "PENDING_PAYMENT").length,
     cancelled: classes.filter((c) => c.status.startsWith("CANCELLED")).length,
     noShow: classes.filter((c) => c.status.startsWith("NO_SHOW")).length,
-    credited: classes.filter(
-      (c) => c.cancelReason.startsWith("[ADMIN CREDIT]")
-    ).length,
   }
 
   // Distinct teacher list for filter dropdown
@@ -127,11 +130,24 @@ export default async function AdminClassesPage() {
     (a, b) => a.name.localeCompare(b.name)
   )
 
+  // Distinct student list for filter dropdown
+  const studentMap = new Map<string, string>()
+  classesRaw.forEach((c) => {
+    studentMap.set(
+      c.student.id,
+      `${c.student.firstName} ${c.student.lastName}`
+    )
+  })
+  const students = Array.from(studentMap, ([id, name]) => ({ id, name })).sort(
+    (a, b) => a.name.localeCompare(b.name)
+  )
+
   return (
-    <AdminClassesClient
+    <CoordinatorClassesClient
       classes={classes}
       kpis={kpis}
       teachers={teachers}
+      students={students}
       defaultMonth={now.toISOString().slice(0, 7)}
     />
   )

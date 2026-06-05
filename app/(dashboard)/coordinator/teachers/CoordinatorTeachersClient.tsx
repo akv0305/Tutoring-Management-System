@@ -1,10 +1,10 @@
 "use client"
 
-import React, { useState, useMemo, useEffect } from "react"
+import React, { useState, useMemo } from "react"
 import {
-  Filter, Star, X, Calendar, Clock, MapPin, Mail, Phone,
-  ChevronLeft, ChevronRight, Check, Loader2
+  Filter, Star, X, Calendar, MapPin, Mail, Phone,
 } from "lucide-react"
+import { TeacherAvailabilityList } from "@/components/teachers/TeacherAvailabilityList"
 
 /* ─── Types ─── */
 type AvailabilitySlot = { dayOfWeek: string; startTime: string; endTime: string }
@@ -19,7 +19,24 @@ type Teacher = {
   weeklyHours: number; upcomingClassCount: number
 }
 
-type BookedSlot = { start: string; duration: number }
+/* ─── Fixed dual timezones ─── */
+const TZ_CST = "America/Chicago"
+const TZ_IST = "Asia/Kolkata"
+
+function tzAbbr(tz: string, date: Date = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(date)
+    return parts.find((p) => p.type === "timeZoneName")?.value || tz
+  } catch { return tz }
+}
+
+function utcToLocal12h(utcDate: Date, timezone: string): string {
+  return utcDate.toLocaleTimeString("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit", hour12: true })
+}
+
+function utcToLocalDate(utcDate: Date, timezone: string): string {
+  return utcDate.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" })
+}
 
 /* ─── Constants ─── */
 const AVATAR_COLORS = ["bg-[#1E3A5F]","bg-[#0D9488]","bg-purple-700","bg-emerald-700","bg-rose-700","bg-indigo-700","bg-amber-700","bg-cyan-700"]
@@ -70,166 +87,9 @@ function StarRating({ rating, count }: { rating: number; count: number }) {
   )
 }
 
-/* ─── Weekly Schedule Grid with Navigation & Booked Slots ─── */
-function WeeklyScheduleGrid({ teacherId, availability }: { teacherId: string; availability: AvailabilitySlot[] }) {
-  const [weekOffset, setWeekOffset] = useState(0)
-  const [bookedSlots, setBookedSlots] = useState<BookedSlot[]>([])
-  const [blockedDates, setBlockedDates] = useState<string[]>([])
-  const [loadingSchedule, setLoadingSchedule] = useState(false)
-
-  // Fetch booked slots from API
-  useEffect(() => {
-    setLoadingSchedule(true)
-    fetch(`/api/classes/teacher-slots?teacherId=${teacherId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setBookedSlots(d.bookedSlots || [])
-        setBlockedDates(d.blockedDates || [])
-      })
-      .catch(() => {})
-      .finally(() => setLoadingSchedule(false))
-  }, [teacherId])
-
-  const hours = Array.from({ length: 12 }, (_, i) => i + 8)
-  const now = new Date()
-
-  const weekDates = useMemo(() => {
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const dayOfWeek = today.getDay()
-    const startMonday = new Date(today)
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) startMonday.setDate(today.getDate() - (dayOfWeek - 1))
-    else if (dayOfWeek === 6) startMonday.setDate(today.getDate() + 2)
-    else startMonday.setDate(today.getDate() + 1)
-    startMonday.setDate(startMonday.getDate() + weekOffset * 7)
-    return Array.from({ length: 7 }, (_, i) => { const d = new Date(startMonday); d.setDate(startMonday.getDate() + i); return d })
-  }, [weekOffset])
-
-  const availByDay = useMemo(() => {
-    const map: Record<number, { start: number; end: number }[]> = {}
-    availability.forEach((a) => {
-      const dayIdx = DAY_ORDER[a.dayOfWeek]; if (dayIdx === undefined) return
-      if (!map[dayIdx]) map[dayIdx] = []
-      map[dayIdx].push({ start: parseInt(a.startTime.split(":")[0], 10), end: parseInt(a.endTime.split(":")[0], 10) })
-    })
-    return map
-  }, [availability])
-
-  const bookedSet = useMemo(() => {
-    const set = new Set<string>()
-    bookedSlots.forEach((b) => {
-      const d = new Date(b.start)
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-      set.add(`${iso}_${String(d.getHours()).padStart(2, "0")}:00`)
-    })
-    return set
-  }, [bookedSlots])
-
-  const blockedSet = useMemo(() => new Set(blockedDates), [blockedDates])
-
-  if (availability.length === 0) {
-    return <div className="text-center py-4 text-sm text-gray-400">No availability set for this teacher.</div>
-  }
-
-  return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
-      {/* Week navigation */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
-        <button onClick={() => setWeekOffset((o) => Math.max(0, o - 1))} disabled={weekOffset === 0}
-          className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 transition-colors">
-          <ChevronLeft className="w-3.5 h-3.5" />
-        </button>
-        <span className="text-xs font-semibold text-[#1E293B]">
-          {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-        </span>
-        <button onClick={() => setWeekOffset((o) => Math.min(3, o + 1))} disabled={weekOffset >= 3}
-          className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 transition-colors">
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {loadingSchedule ? (
-        <div className="py-6 text-center"><Loader2 className="w-5 h-5 text-[#0D9488] animate-spin mx-auto" /><p className="text-xs text-gray-400 mt-1">Loading schedule…</p></div>
-      ) : (
-        <div className="overflow-x-auto">
-          <div className="min-w-[490px]">
-            <div className="flex border-b border-gray-100">
-              <div className="w-14 flex-shrink-0" />
-              {weekDates.map((d, i) => {
-                const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-                const isBlocked = blockedSet.has(iso)
-                const isToday = d.toDateString() === now.toDateString()
-                return (
-                  <div key={i} className={`flex-1 text-center py-1.5 border-l border-gray-100 ${isBlocked ? "bg-red-50" : isToday ? "bg-teal-50/50" : ""}`}>
-                    <p className="text-[9px] font-semibold text-gray-500">{DAYS_SHORT[i]}</p>
-                    <p className={`text-xs font-bold ${isToday ? "text-[#0D9488]" : "text-[#1E293B]"}`}>{d.getDate()}</p>
-                    {isBlocked && <p className="text-[7px] text-red-500 font-medium">Blocked</p>}
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="flex">
-              <div className="w-14 flex-shrink-0">
-                {hours.map((h) => (
-                  <div key={h} className="h-[26px] flex items-center justify-end pr-1.5">
-                    <span className="text-[9px] text-gray-400">{formatTime12(`${h}:00`)}</span>
-                  </div>
-                ))}
-              </div>
-              {weekDates.map((d, dayIdx) => {
-                const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-                const jsDay = d.getDay()
-                const calDayIdx = jsDay === 0 ? 6 : jsDay - 1
-                const daySlots = availByDay[calDayIdx] || []
-                const isBlocked = blockedSet.has(iso)
-                const isPastDay = d < new Date(now.getFullYear(), now.getMonth(), now.getDate())
-
-                return (
-                  <div key={dayIdx} className="flex-1 border-l border-gray-100">
-                    {hours.map((h) => {
-                      const timeStr = `${String(h).padStart(2, "0")}:00`
-                      const slotKey = `${iso}_${timeStr}`
-                      const isAvailable = !isBlocked && !isPastDay && daySlots.some((s) => h >= s.start && h < s.end)
-                      const isBooked = bookedSet.has(slotKey)
-                      const isPastHour = isPastDay || (d.toDateString() === now.toDateString() && h <= now.getHours())
-
-                      let cellCls = "bg-white"
-                      let content: React.ReactNode = null
-
-                      if (isBooked) {
-                        cellCls = "bg-red-50"
-                        content = <span className="text-[7px] text-red-500 font-semibold">Booked</span>
-                      } else if (isAvailable && !isPastHour) {
-                        cellCls = "bg-green-50"
-                        content = <span className="text-[7px] text-green-600 font-semibold">Available</span>
-                      }
-
-                      return (
-                        <div key={h} className={`h-[26px] border-t border-gray-50 flex items-center justify-center ${cellCls}`}>
-                          {content}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 px-3 py-1.5 bg-gray-50 border-t border-gray-100">
-        <span className="flex items-center gap-1 text-[9px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-green-50 border border-green-300" /> Available</span>
-        <span className="flex items-center gap-1 text-[9px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-red-50 border border-red-300" /> Booked</span>
-        <span className="flex items-center gap-1 text-[9px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-white border border-gray-200" /> Unavailable</span>
-      </div>
-    </div>
-  )
-}
-
 /* ─── Teacher Detail Modal ─── */
 function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: () => void }) {
-  const [tab, setTab] = useState<"profile" | "schedule" | "classes">("profile")
+  const [tab, setTab] = useState<"profile" | "availability" | "classes">("profile")
   const avail = getAvailability(teacher.status)
 
   const availByDay = useMemo(() => {
@@ -240,15 +100,19 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
     return map
   }, [teacher.availabilitySlots])
 
+  const istLabel = tzAbbr(TZ_IST)
+  const cstLabel = tzAbbr(TZ_CST)
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="text-base font-semibold text-[#1E293B]">Teacher Profile</h3>
           <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 rounded"><X className="w-4 h-4" /></button>
         </div>
 
         <div className="p-5 space-y-4">
+          {/* Header info */}
           <div className="flex items-center gap-4">
             <div className={`w-14 h-14 rounded-full ${getAvatarBg(teacher.name)} flex items-center justify-center flex-shrink-0 shadow-sm`}>
               <span className="text-white text-lg font-bold">{teacher.initials}</span>
@@ -267,10 +131,11 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
             <span className="inline-flex items-center gap-1.5 text-gray-600"><MapPin className="w-3.5 h-3.5 text-gray-400" /> {teacher.timezone}</span>
           </div>
 
+          {/* Tabs */}
           <div className="flex border-b border-gray-100">
             {([
               { key: "profile" as const, label: "Profile" },
-              { key: "schedule" as const, label: "Weekly Schedule" },
+              { key: "availability" as const, label: "Availability" },
               { key: "classes" as const, label: `Upcoming (${teacher.upcomingClassCount})` },
             ]).map((t) => (
               <button key={t.key} onClick={() => setTab(t.key)}
@@ -280,6 +145,7 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
             ))}
           </div>
 
+          {/* Profile tab */}
           {tab === "profile" && (
             <div className="space-y-4">
               <div>
@@ -297,13 +163,20 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
             </div>
           )}
 
-          {tab === "schedule" && (
-            <div className="space-y-3">
-              <WeeklyScheduleGrid teacherId={teacher.id} availability={teacher.availabilitySlots} />
+          {/* Availability tab */}
+          {tab === "availability" && (
+            <div className="space-y-4">
+              <TeacherAvailabilityList
+                teacherId={teacher.id}
+                teacherTimezone={teacher.timezone}
+                availabilitySlots={teacher.availabilitySlots}
+                blockedDates={teacher.blockedDates}
+              />
 
+              {/* Recurring Slot Details */}
               {Object.keys(availByDay).length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide">Recurring Slot Details</p>
+                <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                  <p className="text-xs text-gray-400 uppercase tracking-wide">Recurring Slot Details (Teacher Local Time)</p>
                   {Object.entries(availByDay).map(([day, slots]) => (
                     <div key={day} className="flex items-center gap-2 text-sm">
                       <span className="w-20 text-xs font-medium text-[#1E293B]">{DAY_LABELS[day] || day}</span>
@@ -317,6 +190,7 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
                 </div>
               )}
 
+              {/* Blocked Dates */}
               {teacher.blockedDates.length > 0 && (
                 <div>
                   <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Blocked Dates</p>
@@ -329,22 +203,41 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
             </div>
           )}
 
+          {/* Upcoming Classes tab */}
           {tab === "classes" && (
             <div className="space-y-2">
               {teacher.upcomingClasses.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-4">No upcoming classes in the next 4 weeks.</p>
               ) : (
                 teacher.upcomingClasses.map((c, i) => {
-                  const d = new Date(c.scheduledAt)
+                  const utc = new Date(c.scheduledAt)
+                  const utcEnd = new Date(utc.getTime() + (c.duration || 60) * 60000)
+                  const istStart = utcToLocal12h(utc, TZ_IST)
+                  const istEnd = utcToLocal12h(utcEnd, TZ_IST)
+                  const cstStart = utcToLocal12h(utc, TZ_CST)
+                  const cstEnd = utcToLocal12h(utcEnd, TZ_CST)
+                  const istDate = utcToLocalDate(utc, TZ_IST)
+                  const cstDate = utcToLocalDate(utc, TZ_CST)
+                  const il = tzAbbr(TZ_IST, utc)
+                  const cl = tzAbbr(TZ_CST, utc)
+
                   return (
-                    <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="w-10 h-10 rounded-lg bg-[#0D9488]/10 flex flex-col items-center justify-center flex-shrink-0">
-                        <span className="text-[9px] font-bold text-[#0D9488] uppercase">{d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}</span>
-                        <span className="text-sm font-bold text-[#1E293B] -mt-0.5">{d.getUTCDate()}</span>
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="w-11 h-11 rounded-lg bg-[#0D9488]/10 flex flex-col items-center justify-center flex-shrink-0">
+                        <span className="text-[9px] font-bold text-[#0D9488] uppercase">
+                          {utc.toLocaleDateString("en-US", { month: "short", timeZone: TZ_IST })}
+                        </span>
+                        <span className="text-sm font-bold text-[#1E293B] -mt-0.5">
+                          {utc.toLocaleDateString("en-US", { day: "numeric", timeZone: TZ_IST })}
+                        </span>
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-[#1E293B] truncate">{c.subject} — {c.student}</p>
-                        <p className="text-[10px] text-gray-500 mt-0.5">{d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}, {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })} · {c.duration} min</p>
+                        <p className="text-[11px] text-gray-600 mt-0.5">
+                          {istStart} – {istEnd} {il}  ·  {cstStart} – {cstEnd} {cl}
+                          {istDate !== cstDate && <span className="text-gray-400"> ({cstDate})</span>}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">{c.duration} min</p>
                       </div>
                     </div>
                   )

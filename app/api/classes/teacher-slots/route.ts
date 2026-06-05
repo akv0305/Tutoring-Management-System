@@ -21,7 +21,12 @@ export async function GET(req: NextRequest) {
       }),
       prisma.class.findMany({
         where: { teacherId, status: { in: ["SCHEDULED", "CONFIRMED"] }, scheduledAt: { gte: now, lte: fourWeeks } },
-        select: { scheduledAt: true, duration: true },
+        select: {
+          scheduledAt: true,
+          duration: true,
+          subject: { select: { name: true } },
+          student: { select: { firstName: true, lastName: true } },
+        },
       }),
       prisma.teacherBlockedDate.findMany({
         where: { teacherId, blockedDate: { gte: now } },
@@ -31,7 +36,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       availability: availability.map((a) => ({ dayOfWeek: a.dayOfWeek, startTime: a.startTime, endTime: a.endTime })),
-      bookedSlots: bookedClasses.map((c) => ({ start: c.scheduledAt.toISOString(), duration: c.duration })),
+      bookedSlots: bookedClasses.map((c) => ({
+        start: c.scheduledAt.toISOString(),
+        duration: c.duration,
+        subject: c.subject.name,
+        student: `${c.student.firstName} ${c.student.lastName}`,
+      })),
       blockedDates: blockedDates.map((b) => b.blockedDate.toISOString().split("T")[0]),
     })
   } catch (error) {
