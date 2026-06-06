@@ -268,6 +268,7 @@ model TeacherProfile {
   packages          Package[]
   classes           Class[]
   payouts           Payout[]
+  subjectRates      TeacherSubjectRate[]
   bookingOrders     BookingOrder[]
 
   @@map("teacher_profiles")
@@ -304,6 +305,8 @@ model Student {
   firstName       String
   lastName        String
   grade           String
+  gradeId         String?
+  gradeRef        Grade?          @relation(fields: [gradeId], references: [id], onDelete: SetNull)
   school          String?
   gender          Gender?
   timezone        String          @default("America/New_York")
@@ -350,6 +353,7 @@ model Subject {
   classes       Class[]
   packageTemplates PackageTemplate[]
   bookingOrders    BookingOrder[]
+  teacherSubjectRates TeacherSubjectRate[]
 
   @@map("subjects")
 }
@@ -392,6 +396,8 @@ model PackageTemplate {
   validityDays    Int
   suggestedPrice  Decimal       @db.Decimal(10, 2)
   description     String?
+  gradeBandId     String?
+  gradeBand       GradeBand?    @relation(fields: [gradeBandId], references: [id], onDelete: SetNull)
   isPopular       Boolean       @default(false)
   status          SubjectStatus @default(ACTIVE)
   createdAt       DateTime      @default(now())
@@ -463,6 +469,8 @@ model Class {
   completedAt   DateTime?
   cancelledAt   DateTime?
   cancelReason  String?
+  snapshotCompensationRate  Decimal?  @db.Decimal(10, 2)  // Rate frozen at booking time
+  snapshotStudentFacingRate Decimal?  @db.Decimal(10, 2)  // Rate frozen at booking time
   rescheduleCount Int     @default(0)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
@@ -729,6 +737,66 @@ model CouponUsage {
   @@map("coupon_usages")
 }
 
+// ─── 14c. GRADE BANDS & GRADES ──────────────────────────
+
+model GradeBand {
+  id          String   @id @default(cuid())
+  name        String   @unique                    // "ELEMENTARY", "SECONDARY", "AP", "COLLEGE"
+  displayName String                              // "Grades K–6", "Grades 7–12", "AP Subjects", "College STEM"
+  description String?                             // Admin notes
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  grades             Grade[]
+  teacherSubjectRates TeacherSubjectRate[]
+  packageTemplates   PackageTemplate[]
+
+  @@index([sortOrder])
+  @@map("grade_bands")
+}
+
+model Grade {
+  id          String    @id @default(cuid())
+  name        String    @unique                   // "Pre-K", "Kindergarten", "Grade 1", ... "Grade 12", "College"
+  shortName   String                              // "PK", "K", "1", "2", ... "12", "COL"
+  sortOrder   Int       @default(0)
+  gradeBandId String
+  gradeBand   GradeBand @relation(fields: [gradeBandId], references: [id], onDelete: Cascade)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  students    Student[]
+
+  @@index([gradeBandId])
+  @@index([sortOrder])
+  @@map("grades")
+}
+
+// ─── 14d. TEACHER SUBJECT RATES (Pricing Matrix) ────────
+
+model TeacherSubjectRate {
+  id                String         @id @default(cuid())
+  teacherId         String
+  teacher           TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId         String
+  subject           Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  gradeBandId       String
+  gradeBand         GradeBand      @relation(fields: [gradeBandId], references: [id], onDelete: Cascade)
+  compensationRate  Decimal        @db.Decimal(10, 2)  // Platform pays teacher this rate per hour
+  studentFacingRate Decimal        @db.Decimal(10, 2)  // Parent sees this rate per hour
+  isActive          Boolean        @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([teacherId, subjectId, gradeBandId])
+  @@index([teacherId])
+  @@index([subjectId, gradeBandId])
+  @@map("teacher_subject_rates")
+}
 
 // ─── 15. PLATFORM SETTINGS (Single Row) ─────────────────
 

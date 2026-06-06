@@ -24,6 +24,9 @@ export default async function StudentsPage() {
             user: { select: { firstName: true, lastName: true } },
           },
         },
+        gradeRef: {
+          include: { gradeBand: { select: { displayName: true } } },
+        },
         subjects: {
           include: { subject: { select: { name: true } } },
         },
@@ -48,7 +51,8 @@ export default async function StudentsPage() {
       : "—",
     email: s.parent?.user.email ?? "—",
     phone: s.parent?.user.phone ?? "—",
-    grade: `Grade ${s.grade}`,
+    grade: s.grade || "—",
+    gradeBand: (s as any).gradeRef?.gradeBand?.displayName || null,
     subjects: s.subjects.map((ss) => ss.subject.name),
     coordinator: s.coordinator
       ? `${s.coordinator.user.firstName} ${s.coordinator.user.lastName}`

@@ -26,6 +26,7 @@ export default async function OnboardingPage() {
         },
       },
       subjects: { include: { subject: { select: { name: true } } } },
+      gradeRef: { include: { gradeBand: { select: { displayName: true } } } },
       classes: {
         orderBy: { scheduledAt: "desc" },
         include: {
@@ -70,7 +71,9 @@ export default async function OnboardingPage() {
         : "—",
       email: s.parent?.user.email ?? "—",
       phone: s.parent?.user.phone ?? "—",
-      grade: `Grade ${s.grade}`,
+      grade: (s as any).gradeRef?.gradeBand
+        ? `${s.grade} (${(s as any).gradeRef.gradeBand.displayName})`
+        : s.grade || "—",
       school: s.school ?? null,
       gender: s.gender ?? null,
       subjects: s.subjects.map((ss) => ss.subject.name),

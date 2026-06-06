@@ -7,6 +7,12 @@ type DropdownData = {
   parents: { id: string; email: string; name: string }[]
   coordinators: { id: string; name: string }[]
   subjects: { id: string; name: string; category: string }[]
+  gradeBands: {
+    id: string
+    name: string
+    displayName: string
+    grades: { id: string; name: string; shortName: string; gradeBandId: string }[]
+  }[]
 }
 
 export function AddStudentModal({
@@ -33,6 +39,7 @@ export function AddStudentModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
+  const [grades, setGrades] = useState<{ id: string; name: string; gradeBandName: string }[]>([])
 
   useEffect(() => {
     if (isOpen && !dropdownData) {
@@ -158,20 +165,24 @@ export function AddStudentModal({
               {/* Grade + School */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Grade *</label>
-                  <select
-                    value={grade}
-                    onChange={(e) => setGrade(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
-                  >
-                    <option value="">Select grade</option>
-                    {["K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"].map((g) => (
-                      <option key={g} value={g}>
-                        {g === "K" ? "Kindergarten" : `Grade ${g}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Grade *</label>
+                <select
+                  value={grade}
+                  onChange={(e) => setGrade(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+                >
+                  <option value="">Select grade</option>
+                  {dropdownData?.gradeBands.map((band) => (
+                    <optgroup key={band.id} label={band.displayName}>
+                      {band.grades.map((g) => (
+                        <option key={g.id} value={g.name}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">School</label>
                   <input

@@ -508,6 +508,16 @@ function Step2({
   onNext: () => void
   onBack: () => void
 }) {
+  const [gradeBands, setGradeBands] = useState<
+    { id: string; displayName: string; grades: { id: string; name: string }[] }[]
+  >([])
+
+  useEffect(() => {
+    fetch("/api/grade-bands")
+      .then((r) => r.json())
+      .then((data) => setGradeBands(data.gradeBands || []))
+      .catch(() => {})
+  }, [])
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onNext()
@@ -542,8 +552,12 @@ function Step2({
         onChange={(v) => onChange({ grade: v })}
       >
         <option value="" disabled>Select Grade</option>
-        {GRADE_OPTIONS.map((g) => (
-          <option key={g} value={g}>{g}</option>
+        {gradeBands.map((band) => (
+          <optgroup key={band.id} label={band.displayName}>
+            {band.grades.map((g) => (
+              <option key={g.id} value={g.name}>{g.name}</option>
+            ))}
+          </optgroup>
         ))}
       </AuthSelect>
 
@@ -972,7 +986,7 @@ function RegisterPageInner() {
     const childLastName = childParts.slice(1).join(" ") || childParts[0] || ""
 
     // Map grade format — "Grade 8" → "8"
-    const gradeNum = step2.grade.replace("Grade ", "")
+    const gradeNum = step2.grade
 
     // Map timezone — "EST" → "America/New_York"
     const tzMap: Record<string, string> = {

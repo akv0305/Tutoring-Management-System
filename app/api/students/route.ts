@@ -71,6 +71,11 @@ export async function GET(req: NextRequest) {
             user: { select: { firstName: true, lastName: true } },
           },
         },
+        gradeRef: {
+          include: {
+            gradeBand: { select: { displayName: true } },
+          },
+        },
         subjects: {
           include: {
             subject: { select: { name: true } },
@@ -91,6 +96,8 @@ export async function GET(req: NextRequest) {
       firstName: s.firstName,
       lastName: s.lastName,
       grade: s.grade,
+      gradeId: s.gradeId,
+      gradeBand: s.gradeRef?.gradeBand?.displayName || null,
       school: s.school,
       timezone: s.timezone,
       status: s.status,
@@ -137,7 +144,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
     const {
-      firstName, lastName, grade, school,
+      firstName, lastName, grade, gradeId, school,
       parentEmail, subjects, coordinatorId, timezone,
     } = body
 
@@ -198,7 +205,8 @@ export async function POST(req: NextRequest) {
         data: {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          grade,
+          grade: grade || "",
+          gradeId: gradeId || null,
           school: school?.trim() || null,
           timezone: timezone || "America/New_York",
           parentId: parentProfileId,

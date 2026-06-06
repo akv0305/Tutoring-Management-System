@@ -36,6 +36,18 @@ export async function GET() {
       }),
     ])
 
+    const gradeBands = await prisma.gradeBand.findMany({
+      where: { isActive: true },
+      include: {
+        grades: {
+          where: { isActive: true },
+          orderBy: { sortOrder: "asc" },
+        },
+      },
+      orderBy: { sortOrder: "asc" },
+    })
+
+
     return NextResponse.json({
       parents: parents.map((p) => ({
         id: p.id,
@@ -56,6 +68,27 @@ export async function GET() {
         name: `${t.user.firstName} ${t.user.lastName}`,
         subjects: t.subjects.map((ts) => ({ id: ts.subject.id, name: ts.subject.name })),
       })),
+      gradeBands: gradeBands.map((gb) => ({
+        id: gb.id,
+        name: gb.name,
+        displayName: gb.displayName,
+        grades: gb.grades.map((g) => ({
+          id: g.id,
+          name: g.name,
+          shortName: g.shortName,
+          gradeBandId: g.gradeBandId,
+        })),
+      })),
+      // Flat list for simpler dropdowns
+      grades: gradeBands.flatMap((gb) =>
+        gb.grades.map((g) => ({
+          id: g.id,
+          name: g.name,
+          shortName: g.shortName,
+          gradeBandId: gb.id,
+          gradeBandName: gb.displayName,
+        }))
+      ),      
     })
   } catch (error) {
     console.error("GET /api/admin/dropdown-data error:", error)

@@ -24,6 +24,7 @@ type Student = Record<string, unknown> & {
   email: string
   phone: string
   grade: string
+  gradeBand: string | null
   subjects: string[]
   coordinator: string
   coordinatorId: string
@@ -115,6 +116,11 @@ function StudentDetailModal({
               <span className="text-gray-500">Grade</span>
               <span className="font-medium text-[#1E293B]">
                 {student.grade}
+                {student.gradeBand && (
+                  <span className="text-xs text-gray-400 font-normal ml-1">
+                    ({student.gradeBand})
+                  </span>
+                )}
               </span>
             </div>
             <div className="flex justify-between">
@@ -600,7 +606,12 @@ export function StudentsClient({
       label: "Grade",
       sortable: true,
       render: (row: Student) => (
-        <span className="text-sm text-gray-600">{row.grade}</span>
+        <div>
+          <span className="text-sm font-medium text-[#1E293B]">{row.grade}</span>
+          {row.gradeBand && (
+            <p className="text-[10px] text-gray-400">{row.gradeBand}</p>
+          )}
+        </div>
       ),
     },
     {

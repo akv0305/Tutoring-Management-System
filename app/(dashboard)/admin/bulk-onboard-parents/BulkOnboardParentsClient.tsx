@@ -18,6 +18,12 @@ import {
 type Subject = { id: string; name: string }
 type Coordinator = { id: string; name: string }
 
+type GradeBandOption = {
+  id: string
+  displayName: string
+  grades: { id: string; name: string }[]
+}
+
 type StudentEntry = {
   firstName: string
   lastName: string
@@ -93,6 +99,15 @@ export default function BulkOnboardParentsClient({
     skipped: number
     errors: number
   } | null>(null)
+
+  const [gradeBands, setGradeBands] = useState<GradeBandOption[]>([])
+
+  React.useEffect(() => {
+    fetch("/api/grade-bands")
+      .then((r) => r.json())
+      .then((data) => setGradeBands(data.gradeBands || []))
+      .catch(() => {})
+  }, [])
 
   // ── Parent field update ──
   function updateParent(idx: number, field: keyof ParentEntry, value: any) {
@@ -191,7 +206,7 @@ export default function BulkOnboardParentsClient({
     const headers =
       "ParentFirstName,ParentLastName,ParentEmail,ParentPhone,Timezone,CoordinatorName,StudentFirstName,StudentLastName,Grade,Subjects(semicolon-separated)"
     const sample =
-      'John,Doe,john@example.com,+1234567890,America/New_York,Jane Coordinator,Alex,Doe,Grade 5,Math;English'
+      'John,Doe,john@example.com,+1234567890,America/New_York,Jane Coordinator,Alex,Doe,Grade 5,Mathematics;English Language Arts'
     const blob = new Blob([headers + "\n" + sample], { type: "text/csv" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -677,7 +692,7 @@ export default function BulkOnboardParentsClient({
                           <label className="block text-xs font-medium text-gray-500 mb-1">
                             Grade <span className="text-red-500">*</span>
                           </label>
-                          <input
+                          <select
                             value={student.grade}
                             onChange={(e) =>
                               updateStudent(
@@ -687,9 +702,17 @@ export default function BulkOnboardParentsClient({
                                 e.target.value
                               )
                             }
-                            placeholder="e.g., Grade 5"
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                          />
+                          >
+                            <option value="">Select grade</option>
+                            {gradeBands.map((band) => (
+                              <optgroup key={band.id} label={band.displayName}>
+                                {band.grades.map((g) => (
+                                  <option key={g.id} value={g.name}>{g.name}</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
                         </div>
                       </div>
                       <div>

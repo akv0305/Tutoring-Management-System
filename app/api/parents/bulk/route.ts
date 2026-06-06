@@ -57,6 +57,15 @@ export async function POST(req: NextRequest) {
       allSubjects.map((s) => [s.name.toLowerCase().trim(), s.id])
     )
 
+    // Pre-fetch grades for name matching
+    const allGrades = await prisma.grade.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true },
+    })
+    const gradeMap = new Map(
+      allGrades.map((g) => [g.name.toLowerCase().trim(), g.id])
+    )
+
     // Pre-fetch existing emails
     const incomingEmails = parents
       .map((p) => p.email?.toLowerCase().trim())
@@ -199,11 +208,14 @@ export async function POST(req: NextRequest) {
 
           // 3. Create each Student
           for (const s of p.students) {
+            const matchedGradeId = gradeMap.get(s.grade.trim().toLowerCase()) || null
+
             const student = await tx.student.create({
               data: {
                 firstName: s.firstName.trim(),
                 lastName: s.lastName.trim(),
                 grade: s.grade.trim(),
+                gradeId: matchedGradeId,
                 parentId: parentProfile.id,
                 coordinatorId: p.coordinatorId || null,
                 status: "ACTIVE",
@@ -226,12 +238,18 @@ export async function POST(req: NextRequest) {
           }
         })
 
+        const unmatchedGrades = p.students
+          .filter((s) => !gradeMap.has(s.grade.trim().toLowerCase()))
+          .map((s) => s.grade.trim())
+
         results.push({
           row: rowNum,
           email,
           name: `${p.firstName} ${p.lastName}`,
           status: "created",
-          message: `Created with ${p.students.length} student(s).`,
+          message: unmatchedGrades.length > 0
+            ? `Created with ${p.students.length} student(s). Unrecognized grade(s): ${unmatchedGrades.join(", ")} — saved as text only.`
+            : `Created with ${p.students.length} student(s).`,
         })
 
         existingEmailSet.add(email)
