@@ -30,15 +30,14 @@ import { StatusBadge } from "@/components/ui/StatusBadge"
    Types
    ══════════════════════════════════════════════════════════ */
 
-type GradeItem = {
-  id: string
-  name: string
-  displayName: string
-  shortName: string
-  sortOrder: number
-  isActive: boolean
-  gradeBandId: string
-}
+   type GradeItem = {
+    id: string
+    name: string
+    shortName: string
+    sortOrder: number
+    isActive: boolean
+    gradeBandId: string
+  }
 
 type GradeBandItem = {
   id: string
@@ -659,7 +658,7 @@ function GradeBandsTab({
       const res = await fetch("/api/grade-bands", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_band", id: band.id, isActive: !band.isActive }),
+        body: JSON.stringify({ type: "band", id: band.id, isActive: !band.isActive }),
       })
       if (res.ok) onRefresh()
       else {
@@ -679,7 +678,7 @@ function GradeBandsTab({
       const res = await fetch("/api/grade-bands", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_grade", id: grade.id, isActive: !grade.isActive }),
+        body: JSON.stringify({ type: "grade", id: grade.id, isActive: !grade.isActive }),
       })
       if (res.ok) onRefresh()
       else {
@@ -799,7 +798,7 @@ function GradeBandsTab({
                           >
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-[#1E293B] truncate">
-                                {grade.displayName}
+                                {grade.name}
                               </p>
                               <p className="text-[10px] text-gray-400">{grade.shortName}</p>
                             </div>
@@ -862,7 +861,12 @@ function GradeBandsTab({
             const res = await fetch("/api/grade-bands", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "create_band", ...values }),
+              body: JSON.stringify({
+                type: "band",
+                name: values.name,
+                displayName: values.displayName,
+                sortOrder: values.sortOrder ? Number(values.sortOrder) : undefined,
+              }),
             })
             if (!res.ok) {
               const d = await res.json()
@@ -878,13 +882,8 @@ function GradeBandsTab({
         <FormModal
           title={`Add Grade to ${gradeBands.find((b) => b.id === showAddGradeModal)?.displayName}`}
           fields={[
-            { key: "name", label: "Grade Name (Internal)", placeholder: "e.g. 1, K, PRE_K, AP" },
-            {
-              key: "displayName",
-              label: "Display Name",
-              placeholder: "e.g. Grade 1, Kindergarten",
-            },
-            { key: "shortName", label: "Short Name", placeholder: "e.g. 1, K, PK" },
+            { key: "name", label: "Grade Name", placeholder: "e.g. Grade 1, Kindergarten, AP Calculus" },
+            { key: "shortName", label: "Short Name", placeholder: "e.g. 1, K, AP-Calc" },
             { key: "sortOrder", label: "Sort Order", type: "number", placeholder: "0" },
           ]}
           onSave={async (values) => {
@@ -892,9 +891,11 @@ function GradeBandsTab({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                action: "create_grade",
+                type: "grade",
                 gradeBandId: showAddGradeModal,
-                ...values,
+                name: values.name,
+                shortName: values.shortName,
+                sortOrder: values.sortOrder ? Number(values.sortOrder) : undefined,
               }),
             })
             if (!res.ok) {
@@ -924,9 +925,9 @@ function GradeBandsTab({
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                action: "update_band",
+                type: "band",
                 id: editBand.id,
-                ...values,
+                displayName: values.displayName,
                 sortOrder: Number(values.sortOrder),
               }),
             })
@@ -942,9 +943,9 @@ function GradeBandsTab({
 
       {editGrade && (
         <FormModal
-          title={`Edit ${editGrade.displayName}`}
+          title={`Edit ${editGrade.name}`}
           fields={[
-            { key: "displayName", label: "Display Name", defaultValue: editGrade.displayName },
+            { key: "name", label: "Grade Name", defaultValue: editGrade.name },
             { key: "shortName", label: "Short Name", defaultValue: editGrade.shortName },
             {
               key: "sortOrder",
@@ -958,9 +959,10 @@ function GradeBandsTab({
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                action: "update_grade",
+                type: "grade",
                 id: editGrade.id,
-                ...values,
+                name: values.name,
+                shortName: values.shortName,
                 sortOrder: Number(values.sortOrder),
               }),
             })
