@@ -84,6 +84,20 @@ export default async function TeachersPage() {
       })),
       weeklyHours,
       upcomingClassCount: t.classes.length,
+      // Grade-based rate info
+      hasGradeRates: gradeRateMap.has(t.id),
+      rateRange: (() => {
+        const g = gradeRateMap.get(t.id)
+        if (!g) return null
+        const studentRange = g.minStudent === g.maxStudent
+          ? `$${g.minStudent}/hr`
+          : `$${g.minStudent}–$${g.maxStudent}/hr`
+        const compRange = g.minComp === g.maxComp
+          ? `$${g.minComp}/hr`
+          : `$${g.minComp}–$${g.maxComp}/hr`
+        return `${studentRange} (comp: ${compRange})`
+      })(),
+      gradeRateCount: gradeRateMap.get(t.id)?.count ?? 0,
     }
   })
 
@@ -109,6 +123,32 @@ export default async function TeachersPage() {
     orderBy: { name: "asc" },
     select: { id: true, name: true, category: true },
   })
+
+  // ── Grade-based rate ranges per teacher ──
+  const gradeRatesRaw = await prisma.teacherSubjectRate.findMany({
+    where: { isActive: true },
+    select: {
+      teacherId: true,
+      studentFacingRate: true,
+      compensationRate: true,
+    },
+  })
+
+  const gradeRateMap = new Map<string, { minStudent: number; maxStudent: number; minComp: number; maxComp: number; count: number }>()
+  for (const r of gradeRatesRaw) {
+    const sr = Number(r.studentFacingRate)
+    const cr = Number(r.compensationRate)
+    const existing = gradeRateMap.get(r.teacherId)
+    if (existing) {
+      existing.minStudent = Math.min(existing.minStudent, sr)
+      existing.maxStudent = Math.max(existing.maxStudent, sr)
+      existing.minComp = Math.min(existing.minComp, cr)
+      existing.maxComp = Math.max(existing.maxComp, cr)
+      existing.count++
+    } else {
+      gradeRateMap.set(r.teacherId, { minStudent: sr, maxStudent: sr, minComp: cr, maxComp: cr, count: 1 })
+    }
+  }
 
   return (
     <TeachersClient teachers={teachers} kpis={kpis} subjects={subjectsRaw} />

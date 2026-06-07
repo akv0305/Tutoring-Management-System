@@ -364,6 +364,11 @@ export async function POST(req: NextRequest) {
         parent: {
           include: { user: { select: { firstName: true, email: true } } },
         },
+        gradeRef: {
+          include: {
+            gradeBand: { select: { id: true, displayName: true } },
+          },
+        },
       },
     })
     if (!student) {
@@ -489,6 +494,38 @@ export async function POST(req: NextRequest) {
       }
     }    
 
+    // ── Grade-based rate lookup ──
+    // Look up TeacherSubjectRate for this teacher + subject + student's grade band
+    let gradeBandId: string | null = null
+    let snapshotCompensationRate: number | null = null
+    let snapshotStudentFacingRate: number | null = null
+
+    if ((student as any).gradeRef?.gradeBand?.id) {
+      gradeBandId = (student as any).gradeRef.gradeBand.id
+
+      const gradeRate = await prisma.teacherSubjectRate.findFirst({
+        where: {
+          teacherId,
+          subjectId,
+          gradeBandId: gradeBandId!,
+          isActive: true,
+        },
+      })
+
+      if (gradeRate) {
+        snapshotCompensationRate = Number(gradeRate.compensationRate)
+        snapshotStudentFacingRate = Number(gradeRate.studentFacingRate)
+      }
+    }
+
+    // Fallback to teacher's default rates if no grade-based rate found
+    if (snapshotCompensationRate === null) {
+      snapshotCompensationRate = Number(teacher.compensationRate)
+    }
+    if (snapshotStudentFacingRate === null) {
+      snapshotStudentFacingRate = Number(teacher.studentFacingRate)
+    }
+
     // ─── TRIAL CLASS: skip BookingOrder/Payment, create directly as SCHEDULED ───
     if (isTrialClass) {
       const trialClasses = await prisma.$transaction(
@@ -505,6 +542,8 @@ export async function POST(req: NextRequest) {
               meetingLink: meetingLink || null,
               isTrial: true,
               status: "SCHEDULED",
+              snapshotCompensationRate,
+              snapshotStudentFacingRate,
             },
           })
         )
@@ -591,7 +630,7 @@ export async function POST(req: NextRequest) {
 
     // ─── NON-TRIAL: create BookingOrder + Payment + Classes in a transaction ───
     // If templateId provided, use package price; otherwise use hourly rate
-    const hourlyRate = Number(teacher.studentFacingRate.toString())
+    const hourlyRate = snapshotStudentFacingRate
     const perClassAmount = hourlyRate * (classDuration / 60)
     const totalAmount = template
       ? template.suggestedPrice
@@ -823,6 +862,8 @@ export async function POST(req: NextRequest) {
             meetingLink: meetingLink || null,
             isTrial: false,
             status: classStatus,
+            snapshotCompensationRate,
+            snapshotStudentFacingRate,
           },
         })
         classRecords.push(newClass)

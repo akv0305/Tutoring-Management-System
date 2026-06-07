@@ -10,10 +10,25 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
 
-  const parent = await prisma.parentProfile.findFirst({
-    where: { user: { email: session.user.email! } },
-    include: { students: { select: { id: true, firstName: true, lastName: true } } },
-  })
+    const parent = await prisma.parentProfile.findFirst({
+      where: { user: { email: session.user.email! } },
+      include: {
+        students: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            grade: true,
+            gradeId: true,
+            gradeRef: {
+              include: {
+                gradeBand: { select: { id: true, displayName: true } },
+              },
+            },
+          },
+        },
+      },
+    })
   if (!parent) redirect("/unauthorized")
 
   const parentTimezone = parent.timezone || "America/New_York"
@@ -80,6 +95,26 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     _count: { parentRating: true },
   })
 
+  // Fetch grade-based rates for this teacher
+  const teacherRates = await prisma.teacherSubjectRate.findMany({
+    where: {
+      teacherId: teacher.id,
+      isActive: true,
+    },
+    include: {
+      gradeBand: { select: { id: true, displayName: true } },
+    },
+  })
+
+  // Build a lookup: subjectId+gradeBandId → { compensationRate, studentFacingRate }
+  const ratesMap = teacherRates.map((r) => ({
+    subjectId: r.subjectId,
+    gradeBandId: r.gradeBandId,
+    gradeBandName: r.gradeBand.displayName,
+    compensationRate: Number(r.compensationRate),
+    studentFacingRate: Number(r.studentFacingRate),
+  }))
+
   const teacherData = {
     id: teacher.id,
     name: `${teacher.user.firstName} ${teacher.user.lastName}`,
@@ -110,6 +145,9 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   const studentsData = parent.students.map((s) => ({
     id: s.id,
     name: `${s.firstName} ${s.lastName}`,
+    grade: s.grade || null,
+    gradeBandId: (s as any).gradeRef?.gradeBand?.id || null,
+    gradeBandName: (s as any).gradeRef?.gradeBand?.displayName || null,
   }))
 
   const packageTemplatesData = packageTemplatesRaw.map((t) => ({
@@ -145,6 +183,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
       trialEligibility={trialEligibility}
       walletBalance={walletBalance}
       parentTimezone={parentTimezone}
+      teacherRates={ratesMap}
     />
   )
 }

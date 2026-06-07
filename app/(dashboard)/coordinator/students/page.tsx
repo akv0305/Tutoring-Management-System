@@ -31,6 +31,7 @@ export default async function CoordinatorStudentsPage() {
         },
       },
       subjects: { include: { subject: { select: { name: true } } } },
+      gradeRef: { include: { gradeBand: { select: { displayName: true } } } },
       packages: {
         where: { status: "ACTIVE" },
         select: {
@@ -98,7 +99,9 @@ export default async function CoordinatorStudentsPage() {
         : "—",
       parentEmail: s.parent?.user.email ?? "—",
       parentPhone: s.parent?.user.phone ?? "—",
-      grade: `Grade ${s.grade}`,
+      grade: (s as any).gradeRef?.gradeBand
+        ? `${s.grade} (${(s as any).gradeRef.gradeBand.displayName})`
+        : s.grade || "—",
       school: s.school ?? "—",
       timezone: s.timezone ?? "—",
       scheduleNotes: s.scheduleNotes ?? "",

@@ -3,8 +3,9 @@
 import React, { useState } from "react"
 import {
   UserPlus, Eye, DollarSign, UserX, UserCheck, X, Loader2,
-  AlertCircle, BookOpen, Check, MapPin,
+  AlertCircle, BookOpen, Check, MapPin, BarChart3, ExternalLink,
 } from "lucide-react"
+import Link from "next/link"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
@@ -39,6 +40,9 @@ type Teacher = Record<string, unknown> & {
   upcomingClasses: UpcomingClass[]
   weeklyHours: number
   upcomingClassCount: number
+  hasGradeRates: boolean
+  rateRange: string | null
+  gradeRateCount: number
 }
 
 type KPIs = { total: number; active: number; onLeave: number; avgRating: string }
@@ -148,7 +152,41 @@ function TeacherDetailModal({ teacher, onClose }: { teacher: Teacher; onClose: (
                 <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide flex items-center gap-1"><span>🔒</span> Confidential Rates</p>
                 <div className="flex justify-between"><span className="text-amber-800">Compensation Rate</span><span className="font-bold text-amber-900">{teacher.hourlyRate}</span></div>
                 <div className="flex justify-between"><span className="text-amber-800">Student-Facing Rate</span><span className="font-bold text-amber-900">{teacher.studentFacingRate}</span></div>
+                <p className="text-[10px] text-amber-600 pt-1">These are default rates. Grade-based rates (if configured) take priority during booking.</p>
               </div>
+
+              {/* Grade-Based Rate Info */}
+              {teacher.hasGradeRates ? (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide flex items-center gap-1">
+                      <BarChart3 className="w-3.5 h-3.5" /> Grade-Based Rates
+                    </p>
+                    <span className="text-[10px] text-indigo-500 font-medium">{teacher.gradeRateCount} rate{teacher.gradeRateCount !== 1 ? "s" : ""} configured</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-indigo-800">Rate Range</span>
+                    <span className="font-bold text-indigo-900">{teacher.rateRange}</span>
+                  </div>
+                  <Link
+                    href="/admin/pricing"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors pt-1"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Manage Grade Rates in Pricing Matrix
+                  </Link>
+                </div>
+              ) : (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+                  <p className="text-xs text-gray-500">No grade-based rates configured. Using default rates for all bookings.</p>
+                  <Link
+                    href="/admin/pricing"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-[#0D9488] hover:underline whitespace-nowrap ml-3"
+                  >
+                    Configure <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+              )}
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Subjects</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -530,7 +568,14 @@ export function TeachersClient({
     {
       key: "hourlyRate", label: "Comp. Rate (Confidential)",
       render: (row: Teacher) => (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold">🔒 {row.hourlyRate}</span>
+        <div className="flex flex-col gap-1">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold">🔒 {row.hourlyRate}</span>
+          {row.hasGradeRates && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-600 text-[10px] font-medium">
+              <BarChart3 className="w-3 h-3" /> Grade rates
+            </span>
+          )}
+        </div>
       ),
     },
     {

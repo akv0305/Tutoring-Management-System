@@ -16,6 +16,7 @@ type TeacherEntry = {
   rating: number
   reviews: number
   price: string
+  hasRateRange: boolean
   experience: string
   availability: string
   isExistingTeacher: boolean
@@ -51,7 +52,17 @@ function TeacherGridCard({ teacher }: { teacher: TeacherEntry }) {
         <div className="flex justify-center mb-3">
           {teacher.rating > 0 ? <RatingStars rating={teacher.rating} count={teacher.reviews} size="sm" /> : <span className="text-xs text-gray-400">No ratings yet</span>}
         </div>
-        <p className="text-center text-xl font-bold text-[#0D9488] mb-1">{teacher.price}</p>
+        <p className="text-center text-xl font-bold text-[#0D9488] mb-1">
+          {teacher.hasRateRange && (
+            <span className="text-sm font-medium text-gray-400">From </span>
+          )}
+          {teacher.price.replace(/^From /, "")}
+        </p>
+        {teacher.hasRateRange && (
+          <p className="text-center text-[10px] text-gray-400 -mt-0.5">
+            Rate varies by grade level
+          </p>
+        )}
         <p className="text-center text-xs text-gray-500 mb-0.5">{teacher.experience}</p>
         <p className="text-center text-xs text-gray-400 mb-4">{teacher.availability}</p>
         <div className="border-t border-gray-100 mb-4" />

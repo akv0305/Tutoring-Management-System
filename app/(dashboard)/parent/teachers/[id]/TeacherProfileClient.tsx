@@ -16,7 +16,13 @@ import {
 type Subject = { id: string; name: string }
 type Availability = { dayOfWeek: string; startTime: string; endTime: string }
 type BookedSlot = { start: string; duration: number }
-type Student = { id: string; name: string }
+type Student = {
+  id: string
+  name: string
+  grade: string | null
+  gradeBandId: string | null
+  gradeBandName: string | null
+}
 type TrialEligibility = { studentId: string; subjectId: string; trialTaken: boolean }
 type PackageTemplateOpt = {
   id: string; name: string; subjectId: string; subjectName: string
@@ -32,6 +38,14 @@ type TeacherData = {
 }
 
 type BookingType = "package" | "trial" | "standalone"
+
+type TeacherRate = {
+  subjectId: string
+  gradeBandId: string
+  gradeBandName: string
+  compensationRate: number
+  studentFacingRate: number
+}
 
 const DAY_JS_MAP: Record<number, string> = { 1: "MONDAY", 2: "TUESDAY", 3: "WEDNESDAY", 4: "THURSDAY", 5: "FRIDAY", 6: "SATURDAY", 0: "SUNDAY" }
 
@@ -93,6 +107,7 @@ export function TeacherProfileClient({
   trialEligibility,
   walletBalance = 0,
   parentTimezone = "America/New_York",
+  teacherRates = [],
 }: {
   teacher: TeacherData
   students: Student[]
@@ -100,6 +115,7 @@ export function TeacherProfileClient({
   trialEligibility: TrialEligibility[]
   walletBalance?: number
   parentTimezone?: string
+  teacherRates?: TeacherRate[]
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -175,6 +191,29 @@ export function TeacherProfileClient({
     return !record.trialTaken
   }, [studentId, subjectId, trialEligibility])
 
+  // Grade-based rate: look up TeacherSubjectRate for selected student's gradeBand + selected subject
+  const activeRate = useMemo(() => {
+    if (!studentId || !subjectId) return null
+    const student = students.find((s) => s.id === studentId)
+    if (!student?.gradeBandId) return null
+    return teacherRates.find(
+      (r) => r.subjectId === subjectId && r.gradeBandId === student.gradeBandId
+    ) || null
+  }, [studentId, subjectId, students, teacherRates])
+
+  // Effective rate: grade-based rate if available, otherwise teacher's default
+  const effectiveRate = activeRate?.studentFacingRate ?? teacher.rateNum
+  const effectiveRateLabel = activeRate
+    ? `$${activeRate.studentFacingRate}`
+    : teacher.rate
+  const rateContext = useMemo(() => {
+    if (!activeRate) return null
+    const student = students.find((s) => s.id === studentId)
+    return student?.gradeBandName
+      ? `Rate for ${student.grade || "student"} — ${student.gradeBandName}`
+      : null
+  }, [activeRate, studentId, students])
+
   // Required slot count based on booking type
   const requiredSlots = bookingType === "package" && selectedTemplate
     ? selectedTemplate.classesIncluded
@@ -189,21 +228,21 @@ export function TeacherProfileClient({
       return `$${selectedTemplate.suggestedPrice.toFixed(2)} (${selectedTemplate.classesIncluded} classes)`
     }
     if (bookingType === "standalone" && selectedSlots.length > 0) {
-      const total = teacher.rateNum * selectedSlots.length
-      return `$${total.toFixed(2)} (${selectedSlots.length} × ${teacher.rate}/hr)`
+      const total = effectiveRate * selectedSlots.length
+      return `$${total.toFixed(2)} (${selectedSlots.length} × ${effectiveRateLabel}/hr)`
     }
-    return `${teacher.rate}/hr per class`
-  }, [bookingType, selectedTemplate, selectedSlots.length, teacher.rateNum, teacher.rate])
+    return `${effectiveRateLabel}/hr per class`
+  }, [bookingType, selectedTemplate, selectedSlots.length, effectiveRate, effectiveRateLabel])
 
     // Compute total amount for discount calculations
     const totalAmount = useMemo(() => {
       if (bookingType === "trial") return 0
       if (bookingType === "package" && selectedTemplate) return selectedTemplate.suggestedPrice
       if (bookingType === "standalone" && selectedSlots.length > 0) {
-        return teacher.rateNum * selectedSlots.length
+        return effectiveRate * selectedSlots.length
       }
       return 0
-    }, [bookingType, selectedTemplate, selectedSlots.length, teacher.rateNum])
+    }, [bookingType, selectedTemplate, selectedSlots.length, effectiveRate])
   
     // Wallet deduction preview
     const walletDeductionPreview = discountMethod === "wallet" && totalAmount > 0
@@ -778,7 +817,12 @@ export function TeacherProfileClient({
           {bookingType === "standalone" && (
             <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
               <Calendar className="w-4 h-4 flex-shrink-0" />
-              Booking {selectedSlots.length} standalone class{selectedSlots.length > 1 ? "es" : ""} at {teacher.rate}/hr each.
+              <div>
+                Booking {selectedSlots.length} standalone class{selectedSlots.length > 1 ? "es" : ""} at {effectiveRateLabel}/hr each.
+                {rateContext && (
+                  <span className="block text-xs text-blue-500 mt-0.5">{rateContext}</span>
+                )}
+              </div>
             </div>
           )}
 
@@ -831,7 +875,7 @@ export function TeacherProfileClient({
             {teacher.bio && <p className="text-sm text-gray-600 mt-2 line-clamp-2">{teacher.bio}</p>}
             <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-600">
               <span className="flex items-center gap-1"><BookOpen className="w-4 h-4 text-[#0D9488]" />{teacher.experience} yrs exp</span>
-              <span className="flex items-center gap-1"><Clock className="w-4 h-4 text-[#0D9488]" />{teacher.rate}/hr</span>
+              <span className="flex items-center gap-1"><Clock className="w-4 h-4 text-[#0D9488]" />{effectiveRateLabel}/hr</span>
               <span className="flex items-center gap-1"><MapPin className="w-4 h-4 text-[#0D9488]" />{teacher.timezone}</span>
               <span className="flex items-center gap-1"><Star className="w-4 h-4 text-amber-500" />{teacher.totalClasses} classes taught</span>
             </div>
@@ -872,6 +916,28 @@ export function TeacherProfileClient({
             </select>
           </div>
         </div>
+
+        {/* Grade-based rate indicator */}
+        {studentId && subjectId && (
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+            activeRate
+              ? "bg-teal-50 border border-teal-200 text-teal-700"
+              : "bg-gray-50 border border-gray-100 text-gray-500"
+          }`}>
+            <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+            {activeRate ? (
+              <span>
+                <span className="font-semibold">{effectiveRateLabel}/hr</span>
+                {rateContext && <span className="text-xs ml-1">— {rateContext}</span>}
+              </span>
+            ) : (
+              <span>
+                <span className="font-semibold">{teacher.rate}/hr</span>
+                <span className="text-xs ml-1">— Default rate (no grade-specific rate configured)</span>
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Booking Type Selector */}
         {studentId && subjectId && (

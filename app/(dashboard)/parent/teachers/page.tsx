@@ -45,6 +45,28 @@ export default async function BrowseTeachersPage() {
     },
   })
 
+    // Get grade-based rates for "From $X/hr" display
+    const allRates = await prisma.teacherSubjectRate.findMany({
+      where: { isActive: true },
+      select: {
+        teacherId: true,
+        studentFacingRate: true,
+      },
+    })
+  
+    // Build a map: teacherId → { min, max } student-facing rates
+    const rateRangeMap = new Map<string, { min: number; max: number }>()
+    for (const r of allRates) {
+      const rate = Number(r.studentFacingRate)
+      const existing = rateRangeMap.get(r.teacherId)
+      if (existing) {
+        existing.min = Math.min(existing.min, rate)
+        existing.max = Math.max(existing.max, rate)
+      } else {
+        rateRangeMap.set(r.teacherId, { min: rate, max: rate })
+      }
+    }  
+
   // Get existing teacher IDs (teachers who have packages with this parent's children)
   const existingTeacherPkgs = await prisma.package.findMany({
     where: {
@@ -90,7 +112,19 @@ export default async function BrowseTeachersPage() {
       subjectColors,
       rating,
       reviews,
-      price: `$${Number(t.studentFacingRate)}/hr`,
+      price: (() => {
+        const range = rateRangeMap.get(t.id)
+        if (range) {
+          return range.min === range.max
+            ? `$${range.min}/hr`
+            : `From $${range.min}/hr`
+        }
+        return `$${Number(t.studentFacingRate)}/hr`
+      })(),
+      hasRateRange: (() => {
+        const range = rateRangeMap.get(t.id)
+        return range ? range.min !== range.max : false
+      })(),
       experience: `${t.experience} years experience`,
       availability: `Timezone: ${t.timezone}`,
       isExistingTeacher: existingTeacherIds.has(t.id),
