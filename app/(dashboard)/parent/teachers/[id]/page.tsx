@@ -10,25 +10,25 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
 
-    const parent = await prisma.parentProfile.findFirst({
-      where: { user: { email: session.user.email! } },
-      include: {
-        students: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            grade: true,
-            gradeId: true,
-            gradeRef: {
-              include: {
-                gradeBand: { select: { id: true, displayName: true } },
-              },
+  const parent = await prisma.parentProfile.findFirst({
+    where: { user: { email: session.user.email! } },
+    include: {
+      students: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          grade: true,
+          gradeId: true,
+          gradeRef: {
+            include: {
+              gradeBand: { select: { id: true, displayName: true } },
             },
           },
         },
       },
-    })
+    },
+  })
   if (!parent) redirect("/unauthorized")
 
   const parentTimezone = parent.timezone || "America/New_York"
@@ -71,7 +71,6 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   })
 
   // Fetch trial eligibility for parent's students
-  // Only for subjects this teacher offers
   const studentIds = parent.students.map((s) => s.id)
   const studentSubjects = await prisma.studentSubject.findMany({
     where: {
@@ -115,6 +114,30 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     studentFacingRate: Number(r.studentFacingRate),
   }))
 
+  // ── NEW: Fetch all active grades (for the Grade dropdown on booking) ──
+  const allGrades = await prisma.grade.findMany({
+    where: { isActive: true },
+    select: {
+      id: true,
+      name: true,
+      shortName: true,
+      sortOrder: true,
+      gradeBandId: true,
+      gradeBand: { select: { id: true, displayName: true } },
+    },
+    orderBy: { sortOrder: "asc" },
+  })
+
+  const gradesData = allGrades.map((g) => ({
+    id: g.id,
+    name: g.name,
+    shortName: g.shortName,
+    sortOrder: g.sortOrder,
+    gradeBandId: g.gradeBandId,
+    gradeBandName: g.gradeBand.displayName,
+  }))
+  // ── END NEW ──
+
   const teacherData = {
     id: teacher.id,
     name: `${teacher.user.firstName} ${teacher.user.lastName}`,
@@ -146,6 +169,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     id: s.id,
     name: `${s.firstName} ${s.lastName}`,
     grade: s.grade || null,
+    gradeId: s.gradeId || null,
     gradeBandId: (s as any).gradeRef?.gradeBand?.id || null,
     gradeBandName: (s as any).gradeRef?.gradeBand?.displayName || null,
   }))
@@ -167,7 +191,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
     where: { parentProfileId: parent.id },
     select: { balance: true },
   })
-  const walletBalance = wallet ? Number(wallet.balance) : 0  
+  const walletBalance = wallet ? Number(wallet.balance) : 0
 
   const trialEligibility = studentSubjects.map((ss) => ({
     studentId: ss.studentId,
@@ -184,6 +208,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
       walletBalance={walletBalance}
       parentTimezone={parentTimezone}
       teacherRates={ratesMap}
+      allGrades={gradesData}
     />
   )
 }

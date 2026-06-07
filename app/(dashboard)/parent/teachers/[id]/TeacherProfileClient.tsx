@@ -20,6 +20,7 @@ type Student = {
   id: string
   name: string
   grade: string | null
+  gradeId: string | null
   gradeBandId: string | null
   gradeBandName: string | null
 }
@@ -45,6 +46,16 @@ type TeacherRate = {
   gradeBandName: string
   compensationRate: number
   studentFacingRate: number
+}
+
+// NEW: Grade type for the dropdown
+type GradeOption = {
+  id: string
+  name: string
+  shortName: string
+  sortOrder: number
+  gradeBandId: string
+  gradeBandName: string
 }
 
 const DAY_JS_MAP: Record<number, string> = { 1: "MONDAY", 2: "TUESDAY", 3: "WEDNESDAY", 4: "THURSDAY", 5: "FRIDAY", 6: "SATURDAY", 0: "SUNDAY" }
@@ -108,6 +119,7 @@ export function TeacherProfileClient({
   walletBalance = 0,
   parentTimezone = "America/New_York",
   teacherRates = [],
+  allGrades = [],
 }: {
   teacher: TeacherData
   students: Student[]
@@ -116,17 +128,21 @@ export function TeacherProfileClient({
   walletBalance?: number
   parentTimezone?: string
   teacherRates?: TeacherRate[]
+  allGrades?: GradeOption[]
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedSlots, setSelectedSlots] = useState<SelectedSlot[]>([])
   const [step, setStep] = useState<"browse" | "confirm">("browse")
 
-  // Selection state — now on browse step
+  // Selection state
   const [studentId, setStudentId] = useState(students.length === 1 ? students[0].id : "")
   const [subjectId, setSubjectId] = useState(teacher.subjects.length === 1 ? teacher.subjects[0].id : "")
   const [bookingType, setBookingType] = useState<BookingType>("standalone")
   const [templateId, setTemplateId] = useState("")
+
+  // NEW: Grade selection state — independent of student profile
+  const [selectedGradeId, setSelectedGradeId] = useState("")
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -145,10 +161,7 @@ export function TeacherProfileClient({
 
   const weekDates = useMemo(() => getWeekDatesInTZ(weekOffset, parentTimezone), [weekOffset, parentTimezone])
 
-    // OLD availMap — REMOVE
-  // OLD bookedSet — REMOVE
-
-  // NEW — timezone-aware availability + booked slots
+  // Timezone-aware availability + booked slots
   const { availSlots, slotToUTC } = useMemo(
     () => convertAvailabilitySlots(teacher.availability, weekDates, teacher.timezone, parentTimezone),
     [teacher.availability, weekDates, teacher.timezone, parentTimezone]
@@ -165,9 +178,6 @@ export function TeacherProfileClient({
   }, [teacher.bookedSlots, parentTimezone])
 
   const blockedSet = useMemo(() => {
-    // blockedDates from server are in YYYY-MM-DD format (teacher's local dates)
-    // Convert them: for each blocked date, the teacher is blocked all day in their TZ
-    // For simplicity, keep the set as-is — we'll check against the teacher's date for each slot via slotToUTC
     return new Set(teacher.blockedDates)
   }, [teacher.blockedDates])
 
@@ -191,15 +201,21 @@ export function TeacherProfileClient({
     return !record.trialTaken
   }, [studentId, subjectId, trialEligibility])
 
-  // Grade-based rate: look up TeacherSubjectRate for selected student's gradeBand + selected subject
+  // NEW: Derive gradeBandId from the selected grade (not the student profile)
+  const selectedGrade = useMemo(() => {
+    if (!selectedGradeId) return null
+    return allGrades.find((g) => g.id === selectedGradeId) || null
+  }, [selectedGradeId, allGrades])
+
+  const selectedGradeBandId = selectedGrade?.gradeBandId || null
+
+  // CHANGED: Rate lookup now uses the booking-time grade selection, NOT the student's profile
   const activeRate = useMemo(() => {
-    if (!studentId || !subjectId) return null
-    const student = students.find((s) => s.id === studentId)
-    if (!student?.gradeBandId) return null
+    if (!subjectId || !selectedGradeBandId) return null
     return teacherRates.find(
-      (r) => r.subjectId === subjectId && r.gradeBandId === student.gradeBandId
+      (r) => r.subjectId === subjectId && r.gradeBandId === selectedGradeBandId
     ) || null
-  }, [studentId, subjectId, students, teacherRates])
+  }, [subjectId, selectedGradeBandId, teacherRates])
 
   // Effective rate: grade-based rate if available, otherwise teacher's default
   const effectiveRate = activeRate?.studentFacingRate ?? teacher.rateNum
@@ -207,12 +223,9 @@ export function TeacherProfileClient({
     ? `$${activeRate.studentFacingRate}`
     : teacher.rate
   const rateContext = useMemo(() => {
-    if (!activeRate) return null
-    const student = students.find((s) => s.id === studentId)
-    return student?.gradeBandName
-      ? `Rate for ${student.grade || "student"} — ${student.gradeBandName}`
-      : null
-  }, [activeRate, studentId, students])
+    if (!activeRate || !selectedGrade) return null
+    return `Rate for ${selectedGrade.name} (${activeRate.gradeBandName})`
+  }, [activeRate, selectedGrade])
 
   // Required slot count based on booking type
   const requiredSlots = bookingType === "package" && selectedTemplate
@@ -234,78 +247,77 @@ export function TeacherProfileClient({
     return `${effectiveRateLabel}/hr per class`
   }, [bookingType, selectedTemplate, selectedSlots.length, effectiveRate, effectiveRateLabel])
 
-    // Compute total amount for discount calculations
-    const totalAmount = useMemo(() => {
-      if (bookingType === "trial") return 0
-      if (bookingType === "package" && selectedTemplate) return selectedTemplate.suggestedPrice
-      if (bookingType === "standalone" && selectedSlots.length > 0) {
-        return effectiveRate * selectedSlots.length
-      }
-      return 0
-    }, [bookingType, selectedTemplate, selectedSlots.length, effectiveRate])
-  
-    // Wallet deduction preview
-    const walletDeductionPreview = discountMethod === "wallet" && totalAmount > 0
-      ? Math.min(walletBalance, totalAmount)
-      : 0
-  
-    // Coupon discount preview
-    const couponDeductionPreview = discountMethod === "coupon" && couponValid
-      ? couponDiscountAmount
-      : 0
-  
-    const amountAfterDiscount = totalAmount - (discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview)
+  // Compute total amount for discount calculations
+  const totalAmount = useMemo(() => {
+    if (bookingType === "trial") return 0
+    if (bookingType === "package" && selectedTemplate) return selectedTemplate.suggestedPrice
+    if (bookingType === "standalone" && selectedSlots.length > 0) {
+      return effectiveRate * selectedSlots.length
+    }
+    return 0
+  }, [bookingType, selectedTemplate, selectedSlots.length, effectiveRate])
 
-    const tzAbbr = useMemo(() => getTzAbbr(parentTimezone), [parentTimezone])
-    const teacherTzAbbr = useMemo(() => getTzAbbr(teacher.timezone), [teacher.timezone])  
-  
-    async function validateCoupon() {
-      if (!couponCode.trim()) return
-      setCouponValidating(true)
-      setCouponValid(null)
-      setCouponMessage("")
-      setCouponDiscountAmount(0)
-      setCouponName("")
-  
-      try {
-        const res = await fetch("/api/coupons/validate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ couponCode: couponCode.trim(), totalAmount }),
-        })
-        const data = await res.json()
-  
-        if (data.valid) {
-          setCouponValid(true)
-          setCouponMessage(data.message)
-          setCouponDiscountAmount(data.discountAmount)
-          setCouponName(data.couponName || data.couponCode)
-        } else {
-          setCouponValid(false)
-          setCouponMessage(data.error || "Invalid coupon code.")
-          setCouponDiscountAmount(0)
-        }
-      } catch {
+  // Wallet deduction preview
+  const walletDeductionPreview = discountMethod === "wallet" && totalAmount > 0
+    ? Math.min(walletBalance, totalAmount)
+    : 0
+
+  // Coupon discount preview
+  const couponDeductionPreview = discountMethod === "coupon" && couponValid
+    ? couponDiscountAmount
+    : 0
+
+  const amountAfterDiscount = totalAmount - (discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview)
+
+  const tzAbbr = useMemo(() => getTzAbbr(parentTimezone), [parentTimezone])
+  const teacherTzAbbr = useMemo(() => getTzAbbr(teacher.timezone), [teacher.timezone])
+
+  async function validateCoupon() {
+    if (!couponCode.trim()) return
+    setCouponValidating(true)
+    setCouponValid(null)
+    setCouponMessage("")
+    setCouponDiscountAmount(0)
+    setCouponName("")
+
+    try {
+      const res = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ couponCode: couponCode.trim(), totalAmount }),
+      })
+      const data = await res.json()
+
+      if (data.valid) {
+        setCouponValid(true)
+        setCouponMessage(data.message)
+        setCouponDiscountAmount(data.discountAmount)
+        setCouponName(data.couponName || data.couponCode)
+      } else {
         setCouponValid(false)
-        setCouponMessage("Failed to validate coupon. Try again.")
+        setCouponMessage(data.error || "Invalid coupon code.")
+        setCouponDiscountAmount(0)
       }
-  
-      setCouponValidating(false)
+    } catch {
+      setCouponValid(false)
+      setCouponMessage("Failed to validate coupon. Try again.")
     }
-  
-    function resetCoupon() {
-      setCouponCode("")
-      setCouponValid(null)
-      setCouponMessage("")
-      setCouponDiscountAmount(0)
-      setCouponName("")
-    }
-  
-    function handleDiscountMethodChange(method: "none" | "coupon" | "wallet") {
-      setDiscountMethod(method)
-      if (method !== "coupon") resetCoupon()
-    }
-  
+
+    setCouponValidating(false)
+  }
+
+  function resetCoupon() {
+    setCouponCode("")
+    setCouponValid(null)
+    setCouponMessage("")
+    setCouponDiscountAmount(0)
+    setCouponName("")
+  }
+
+  function handleDiscountMethodChange(method: "none" | "coupon" | "wallet") {
+    setDiscountMethod(method)
+    if (method !== "coupon") resetCoupon()
+  }
 
   function handleBookingTypeChange(type: BookingType) {
     setBookingType(type)
@@ -320,7 +332,6 @@ export function TeacherProfileClient({
     setSubjectId(newSubjectId)
     setTemplateId("")
     setSelectedSlots([])
-    // Reset booking type if trial no longer eligible or templates change
     if (bookingType === "trial") {
       const eligible = trialEligibility.find(
         (te) => te.studentId === studentId && te.subjectId === newSubjectId
@@ -331,9 +342,17 @@ export function TeacherProfileClient({
     }
   }
 
+  // CHANGED: When student changes, pre-fill grade from their profile (but still changeable)
   function handleStudentChange(newStudentId: string) {
     setStudentId(newStudentId)
     setSelectedSlots([])
+    // Pre-fill grade from student profile if available
+    const student = students.find((s) => s.id === newStudentId)
+    if (student?.gradeId) {
+      setSelectedGradeId(student.gradeId)
+    } else {
+      setSelectedGradeId("")
+    }
     if (bookingType === "trial") {
       const eligible = trialEligibility.find(
         (te) => te.studentId === newStudentId && te.subjectId === subjectId
@@ -342,6 +361,14 @@ export function TeacherProfileClient({
         setBookingType("standalone")
       }
     }
+  }
+
+  // NEW: When grade changes, reset slots (price may change)
+  function handleGradeChange(newGradeId: string) {
+    setSelectedGradeId(newGradeId)
+    setSelectedSlots([])
+    setDiscountMethod("none")
+    resetCoupon()
   }
 
   function toggleSlot(viewerDateStr: string, viewerTimeStr: string) {
@@ -363,6 +390,7 @@ export function TeacherProfileClient({
   function canContinueToConfirm(): { ok: boolean; message: string } {
     if (!studentId) return { ok: false, message: "Please select a student." }
     if (!subjectId) return { ok: false, message: "Please select a subject." }
+    if (!selectedGradeId) return { ok: false, message: "Please select a grade." }
     if (selectedSlots.length === 0) return { ok: false, message: "Please select at least one time slot." }
     if (bookingType === "package") {
       if (!templateId) return { ok: false, message: "Please select a package." }
@@ -396,12 +424,13 @@ export function TeacherProfileClient({
         duration: 60,
         isTrial: bookingType === "trial",
         discountMethod: bookingType === "trial" ? "none" : discountMethod,
+        // NEW: Send the selected gradeBandId so the API can look up the correct rate
+        gradeBandId: selectedGradeBandId || undefined,
       }
 
       if (bookingType === "package" && templateId) {
         payload.templateId = templateId
       }
-      // Attach coupon code if using coupon discount
       if (discountMethod === "coupon" && couponValid && couponCode.trim()) {
         payload.couponCode = couponCode.trim()
       }
@@ -571,7 +600,7 @@ export function TeacherProfileClient({
         <p className="text-gray-500">
           {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} scheduled with {teacher.name}.
         </p>
-    
+
         {/* Next Steps */}
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3 text-left">
           <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2">
@@ -590,19 +619,20 @@ export function TeacherProfileClient({
             </div>
           </div>
         </div>
-    
+
         <div className="flex justify-center gap-3 pt-2">
           <button onClick={() => router.push("/parent/classes")} className="px-5 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors">View My Classes</button>
           <button onClick={() => router.push("/parent/teachers")} className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">Back to Teachers</button>
         </div>
       </div>
-    )    
+    )
   }
 
   // ── CONFIRMATION STEP ──
   if (step === "confirm") {
     const studentName = students.find((s) => s.id === studentId)?.name || ""
     const subjectName = teacher.subjects.find((s) => s.id === subjectId)?.name || ""
+    const gradeName = selectedGrade?.name || "—"
 
     return (
       <div className="max-w-2xl mx-auto space-y-6">
@@ -627,6 +657,10 @@ export function TeacherProfileClient({
               <div>
                 <p className="text-gray-500">Subject</p>
                 <p className="font-bold text-[#1E293B]">{subjectName}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Grade</p>
+                <p className="font-bold text-[#1E293B]">{gradeName}</p>
               </div>
               <div>
                 <p className="text-gray-500">Booking Type</p>
@@ -676,7 +710,6 @@ export function TeacherProfileClient({
             <div className="space-y-3">
               <p className="text-sm font-medium text-gray-700">Apply Discount (optional)</p>
 
-              {/* Radio options */}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -891,11 +924,11 @@ export function TeacherProfileClient({
         </div>
       </div>
 
-      {/* Booking Options Card — Student, Subject, Booking Type, Package */}
+      {/* Booking Options Card — Student, Subject, Grade, Booking Type, Package */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-5">
         <h2 className="text-lg font-bold text-[#1E293B]">Booking Options</h2>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {/* Student */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Student *</label>
@@ -915,10 +948,32 @@ export function TeacherProfileClient({
               {teacher.subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
+
+          {/* NEW: Grade dropdown — individual grades, not grade bands */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Grade *</label>
+            <select value={selectedGradeId} onChange={(e) => handleGradeChange(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
+              <option value="">Select grade</option>
+              {allGrades.map((g) => (
+                <option key={g.id} value={g.id}>{g.name} ({g.gradeBandName})</option>
+              ))}
+            </select>
+            {studentId && (() => {
+              const student = students.find((s) => s.id === studentId)
+              if (student?.gradeId && student.gradeId === selectedGradeId) {
+                return <p className="text-xs text-gray-400 mt-1">Pre-filled from student profile</p>
+              }
+              if (student?.gradeId && student.gradeId !== selectedGradeId && selectedGradeId) {
+                return <p className="text-xs text-amber-500 mt-1">Different from student&apos;s profile grade</p>
+              }
+              return null
+            })()}
+          </div>
         </div>
 
         {/* Grade-based rate indicator */}
-        {studentId && subjectId && (
+        {subjectId && selectedGradeId && (
           <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
             activeRate
               ? "bg-teal-50 border border-teal-200 text-teal-700"
@@ -933,14 +988,14 @@ export function TeacherProfileClient({
             ) : (
               <span>
                 <span className="font-semibold">{teacher.rate}/hr</span>
-                <span className="text-xs ml-1">— Default rate (no grade-specific rate configured)</span>
+                <span className="text-xs ml-1">— Default rate (no specific rate for this grade band)</span>
               </span>
             )}
           </div>
         )}
 
         {/* Booking Type Selector */}
-        {studentId && subjectId && (
+        {studentId && subjectId && selectedGradeId && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Booking Type *</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -987,7 +1042,7 @@ export function TeacherProfileClient({
               >
                 <Calendar className={`w-5 h-5 mb-2 ${bookingType === "standalone" ? "text-[#1E3A5F]" : "text-gray-400"}`} />
                 <p className={`text-sm font-semibold ${bookingType === "standalone" ? "text-[#1E3A5F]" : "text-[#1E293B]"}`}>Standalone</p>
-                <p className="text-xs text-gray-500 mt-0.5">{teacher.rate}/hr per class</p>
+                <p className="text-xs text-gray-500 mt-0.5">{effectiveRateLabel}/hr per class</p>
               </button>
             </div>
           </div>
@@ -1046,7 +1101,7 @@ export function TeacherProfileClient({
         )}
 
         {/* Price display */}
-        {studentId && subjectId && (bookingType !== "package" || templateId) && (
+        {studentId && subjectId && selectedGradeId && (bookingType !== "package" || templateId) && (
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <span className="text-sm text-gray-600">Estimated Total</span>
             <span className="text-lg font-bold text-[#0D9488]">{priceDisplay}</span>
@@ -1055,7 +1110,7 @@ export function TeacherProfileClient({
       </div>
 
       {/* Availability Calendar — show only when ready to select slots */}
-      {studentId && subjectId && (bookingType !== "package" || templateId) && (
+      {studentId && subjectId && selectedGradeId && (bookingType !== "package" || templateId) && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 className="text-lg font-bold text-[#1E293B]">Select Time Slots</h2>
@@ -1099,7 +1154,6 @@ export function TeacherProfileClient({
               </div>
 
               {(() => {
-                // Collect all unique viewer time slots from the converted availability
                 const allViewerTimeSlots = new Set<string>()
                 for (const [, times] of availSlots) {
                   times.forEach((t) => allViewerTimeSlots.add(t))
@@ -1122,14 +1176,11 @@ export function TeacherProfileClient({
                         const slotKey = `${dateStr}_${timeSlot}`
                         const utcISO = slotToUTC.get(slotKey)
 
-                        // Check if this slot exists in converted availability
                         const isAvailable = availSlots.get(dateStr)?.includes(timeSlot) ?? false
 
-                        // 24-hour minimum booking window check
                         const isPast = dateStr < todayLocal.dateStr
                         const isPastToday = dateStr === todayLocal.dateStr && parseInt(timeSlot.split(":")[0]) <= todayLocal.hour
 
-                        // Enforce 24-hour advance booking rule
                         let isTooSoon = false
                         if (!isPast && !isPastToday && utcISO) {
                           const slotUTC = new Date(utcISO)
@@ -1137,7 +1188,6 @@ export function TeacherProfileClient({
                           isTooSoon = hoursUntilSlot < 24
                         }
 
-                        // Blocked check — need to check the teacher's date for this slot
                         let isBlocked = false
                         if (utcISO) {
                           const utcDate = new Date(utcISO)
@@ -1164,7 +1214,7 @@ export function TeacherProfileClient({
                               {isBooked ? "Booked" : (isTooSoon && isAvailable) ? "Unavailable" : isAvailable ? "Past" : ""}
                             </div>
                           )
-                        }                        
+                        }
 
                         if (atMax && !selected) {
                           return (
