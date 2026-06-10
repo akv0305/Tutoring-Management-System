@@ -320,6 +320,7 @@ export async function POST(req: NextRequest) {
       isTrial,
       couponCode,
       discountMethod, // "coupon" | "wallet" | "none"
+      gradeBandId: requestedGradeBandId,
     } = body
 
     // Parents can only book for their own children
@@ -495,19 +496,23 @@ export async function POST(req: NextRequest) {
     }    
 
     // ── Grade-based rate lookup ──
-    // Look up TeacherSubjectRate for this teacher + subject + student's grade band
-    let gradeBandId: string | null = null
+    // Prefer the gradeBandId sent from the booking form (the parent explicitly
+    // selected a grade at booking time). Fall back to the student profile's
+    // grade band only if no gradeBandId was provided in the request.
+    let gradeBandId: string | null = requestedGradeBandId || null
     let snapshotCompensationRate: number | null = null
     let snapshotStudentFacingRate: number | null = null
 
-    if ((student as any).gradeRef?.gradeBand?.id) {
+    if (!gradeBandId && (student as any).gradeRef?.gradeBand?.id) {
       gradeBandId = (student as any).gradeRef.gradeBand.id
+    }
 
+    if (gradeBandId) {
       const gradeRate = await prisma.teacherSubjectRate.findFirst({
         where: {
           teacherId,
           subjectId,
-          gradeBandId: gradeBandId!,
+          gradeBandId,
           isActive: true,
         },
       })
