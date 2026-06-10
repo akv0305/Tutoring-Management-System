@@ -185,7 +185,7 @@ export function localToUTC(dateStr: string, timeStr: string, timezone: string): 
   const dayDiffMin = (desiredDaySerial - actualDaySerial) * 1440
 
   const diffMin = dayDiffMin + (desiredMin - actualMin)
-  return new Date(guessUTC.getTime() - diffMin * 60000)
+  return new Date(guessUTC.getTime() + diffMin * 60000)
 }
 
 /**
