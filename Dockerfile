@@ -18,7 +18,11 @@ COPY . .
 RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 
 # Build Next.js
-RUN npm run build
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" \
+    NEXTAUTH_URL="http://localhost:3000" \
+    NEXTAUTH_SECRET="dummy-secret-for-build-only" \
+    RESEND_API_KEY="re_dummy_build_key" \
+    npm run build
 
 # ── Stage 3: Production runtime ──
 FROM node:20-alpine AS runner
