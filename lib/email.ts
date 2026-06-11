@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-const EMAIL_FROM = "Expert Guru <noreply@expertguru.net>"
+const EMAIL_FROM = process.env.EMAIL_FROM || "Expert Guru <noreply@expertguru.net>"
 
 type SendEmailParams = {
   to: string | string[]
