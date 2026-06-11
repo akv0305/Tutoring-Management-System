@@ -35,6 +35,9 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
+# Install Prisma CLI at the exact version
+RUN npm install -g prisma@6.19.2
+
 # Copy standalone output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
