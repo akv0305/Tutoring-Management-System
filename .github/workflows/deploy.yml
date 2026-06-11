@@ -70,5 +70,5 @@ jobs:
       - name: Trigger Coolify webhook
         run: |
           curl -f -X GET "${{ secrets.COOLIFY_WEBHOOK }}" \
-            -H "Accept: application/json" \
-            --max-time 10
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+            --max-time 30
