@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
+const BASE_URL = process.env.NEXTAUTH_URL || "http://localhost:3000"
+
 export async function GET(req: NextRequest) {
   try {
     const token = req.nextUrl.searchParams.get("token")
 
     if (!token) {
-      return NextResponse.redirect(new URL("/login?error=invalid-token", req.url))
+      return NextResponse.redirect(new URL("/login?error=invalid-token", BASE_URL))
     }
 
     const user = await prisma.user.findFirst({
@@ -14,11 +16,11 @@ export async function GET(req: NextRequest) {
     })
 
     if (!user) {
-      return NextResponse.redirect(new URL("/login?error=invalid-token", req.url))
+      return NextResponse.redirect(new URL("/login?error=invalid-token", BASE_URL))
     }
 
     if (user.emailVerified) {
-      return NextResponse.redirect(new URL("/login?verified=already", req.url))
+      return NextResponse.redirect(new URL("/login?verified=already", BASE_URL))
     }
 
     await prisma.user.update({
@@ -30,9 +32,9 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    return NextResponse.redirect(new URL("/login?verified=true", req.url))
+    return NextResponse.redirect(new URL("/login?verified=true", BASE_URL))
   } catch (error) {
     console.error("Email verification error:", error)
-    return NextResponse.redirect(new URL("/login?error=verification-failed", req.url))
+    return NextResponse.redirect(new URL("/login?error=verification-failed", BASE_URL))
   }
 }
