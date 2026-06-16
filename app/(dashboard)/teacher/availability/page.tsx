@@ -3,14 +3,14 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { X, Plus, Info, Loader2, AlertTriangle, CheckCircle } from "lucide-react"
 
-/* ─── Time slot options (6 AM – 10 PM, 30-min increments) ─── */
+/* ─── Time slot options (12 AM – 11:30 PM, 30-min increments) ─── */
 function buildTimeOptions(): string[] {
   const times: string[] = []
-  for (let h = 6; h <= 22; h++) {
+  for (let h = 0; h < 24; h++) {
     const ampm = h < 12 ? "AM" : "PM"
-    const hour = h <= 12 ? h : h - 12
+    const hour = h === 0 ? 12 : h <= 12 ? h : h - 12
     times.push(`${hour}:00 ${ampm}`)
-    if (h < 22) times.push(`${hour}:30 ${ampm}`)
+    times.push(`${hour}:30 ${ampm}`)
   }
   return times
 }

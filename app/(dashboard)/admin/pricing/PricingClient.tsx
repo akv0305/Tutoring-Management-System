@@ -1022,7 +1022,7 @@ function RateMatrixTab({
       const res = await fetch("/api/pricing", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: rate.id, action: "toggle" }),
+        body: JSON.stringify({ id: rate.id, isActive: !rate.isActive }),
       })
       if (res.ok) onRefresh()
       else {

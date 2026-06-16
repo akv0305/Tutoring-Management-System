@@ -63,7 +63,7 @@ export function Sidebar({ role, navItems, userName, userEmail }: SidebarProps) {
             <span className="text-white font-black text-sm">EG</span>
           </div>
           {/* <span className="text-white font-bold text-lg tracking-tight">Expert Guru</span> */}
-          <img src="/images/eglogo_white.png" alt="Expert Guru" className="h-8 w-auto" />
+          <img src="/images/eglogo_white.png" alt="Expert Guru" className="h-12 w-auto" />
         </div>
         <span
           className={cn(

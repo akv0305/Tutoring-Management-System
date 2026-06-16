@@ -21,6 +21,7 @@ type TeacherEntry = {
   availability: string
   isExistingTeacher: boolean
   isVerified: boolean
+  gradeBands: string[]
 }
 
 function TeacherGridCard({ teacher }: { teacher: TeacherEntry }) {
@@ -49,6 +50,16 @@ function TeacherGridCard({ teacher }: { teacher: TeacherEntry }) {
             </span>
           ))}
         </div>
+        {teacher.gradeBands.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-1 mb-2">
+            <span className="text-[10px] text-gray-400 mr-0.5">Grades:</span>
+            {teacher.gradeBands.map((band) => (
+              <span key={band} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                {band}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex justify-center mb-3">
           {teacher.rating > 0 ? <RatingStars rating={teacher.rating} count={teacher.reviews} size="sm" /> : <span className="text-xs text-gray-400">No ratings yet</span>}
         </div>

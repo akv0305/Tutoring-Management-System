@@ -51,8 +51,17 @@ export default async function BrowseTeachersPage() {
       select: {
         teacherId: true,
         studentFacingRate: true,
+        gradeBandId: true,
+        gradeBand: { select: { displayName: true } },
       },
     })
+
+    // Build a map: teacherId → unique grade band names
+    const gradeBandsMap = new Map<string, Set<string>>()
+    for (const r of allRates) {
+      if (!gradeBandsMap.has(r.teacherId)) gradeBandsMap.set(r.teacherId, new Set())
+      gradeBandsMap.get(r.teacherId)!.add(r.gradeBand.displayName)
+    }
   
     // Build a map: teacherId → { min, max } student-facing rates
     const rateRangeMap = new Map<string, { min: number; max: number }>()
@@ -129,6 +138,7 @@ export default async function BrowseTeachersPage() {
       availability: `Timezone: ${t.timezone}`,
       isExistingTeacher: existingTeacherIds.has(t.id),
       isVerified: true,
+      gradeBands: [...(gradeBandsMap.get(t.id) || [])],
     }
   })
 

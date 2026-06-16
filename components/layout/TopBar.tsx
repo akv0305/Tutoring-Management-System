@@ -62,7 +62,7 @@ export function TopBar({ title, subtitle, userName, notificationsHref }: TopBarP
         {/* Notification Bell — fetches its own data */}
         <NotificationDropdown viewAllHref={notificationsHref} />
 
-        {/* User Avatar */}
+        {/* User Avatar 
         <button className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors group">
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
@@ -74,7 +74,12 @@ export function TopBar({ title, subtitle, userName, notificationsHref }: TopBarP
             {userName}
           </span>
           <ChevronDown className="w-3.5 h-3.5 text-gray-400 group-hover:text-gray-600 transition-colors" />
-        </button>
+        </button> */}
+
+        {/* Old Brand Logo — temporary for existing customer recognition */}
+        <div className="flex items-center pl-2 pr-1">
+          <img src="/images/TPPLogo.webp" alt="Old Brand" className="h-12 w-auto" />
+        </div>
       </div>
     </header>
   )

@@ -209,6 +209,41 @@ export function TeacherProfileClient({
 
   const selectedGradeBandId = selectedGrade?.gradeBandId || null
 
+  // NEW: Determine which grade bands this teacher covers for the selected subject
+  const eligibleGradeBandIds = useMemo(() => {
+    if (!subjectId) return new Set<string>()
+    return new Set(
+      teacherRates
+        .filter((r) => r.subjectId === subjectId)
+        .map((r) => r.gradeBandId)
+    )
+  }, [subjectId, teacherRates])
+
+  // Filter grades: only show grades whose gradeBand has an active rate
+  // for this teacher + selected subject
+  const eligibleGrades = useMemo(() => {
+    if (!subjectId) return []  // no subject selected → show nothing
+    const eligibleBandIds = new Set(
+      teacherRates
+        .filter((r) => r.subjectId === subjectId)
+        .map((r) => r.gradeBandId)
+    )
+    if (eligibleBandIds.size === 0) return []  // no active rates → show nothing
+    return allGrades.filter((g) => eligibleBandIds.has(g.gradeBandId))
+  }, [subjectId, teacherRates, allGrades])
+
+  // Does this teacher have ANY active rate for the selected subject?
+  const hasRatesForSubject = useMemo(() => {
+    if (!subjectId) return true
+    return teacherRates.some((r) => r.subjectId === subjectId)
+  }, [subjectId, teacherRates])
+
+  // NEW: Check if selected grade is eligible for this teacher+subject
+  const isGradeEligible = useMemo(() => {
+    if (!selectedGradeBandId || eligibleGradeBandIds.size === 0) return true
+    return eligibleGradeBandIds.has(selectedGradeBandId)
+  }, [selectedGradeBandId, eligibleGradeBandIds])
+
   // CHANGED: Rate lookup now uses the booking-time grade selection, NOT the student's profile
   const activeRate = useMemo(() => {
     if (!subjectId || !selectedGradeBandId) return null
@@ -330,8 +365,11 @@ export function TeacherProfileClient({
 
   function handleSubjectChange(newSubjectId: string) {
     setSubjectId(newSubjectId)
+    setSelectedGradeId("")      // reset grade when subject changes
     setTemplateId("")
     setSelectedSlots([])
+    setDiscountMethod("none")   // reset discount since price may change
+    resetCoupon()
     if (bookingType === "trial") {
       const eligible = trialEligibility.find(
         (te) => te.studentId === studentId && te.subjectId === newSubjectId
@@ -391,6 +429,7 @@ export function TeacherProfileClient({
     if (!studentId) return { ok: false, message: "Please select a student." }
     if (!subjectId) return { ok: false, message: "Please select a subject." }
     if (!selectedGradeId) return { ok: false, message: "Please select a grade." }
+    if (!isGradeEligible) return { ok: false, message: "This teacher does not teach the selected subject for this grade level." }
     if (selectedSlots.length === 0) return { ok: false, message: "Please select at least one time slot." }
     if (bookingType === "package") {
       if (!templateId) return { ok: false, message: "Please select a package." }
@@ -917,6 +956,16 @@ export function TeacherProfileClient({
                 <span key={s.id} className="px-2.5 py-1 rounded-full bg-teal-50 text-teal-700 text-xs font-medium border border-teal-200">{s.name}</span>
               ))}
             </div>
+            {teacherRates.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <span className="text-xs text-gray-400">Teaches grades:</span>
+                {[...new Set(teacherRates.map(r => r.gradeBandName))].map(band => (
+                  <span key={band} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                    {band}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="mt-2">
               {teacher.rating > 0 ? <RatingStars rating={teacher.rating} count={teacher.reviews} size="sm" /> : <span className="text-xs text-gray-400">No ratings yet</span>}
             </div>
@@ -948,18 +997,38 @@ export function TeacherProfileClient({
               {teacher.subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
-
-          {/* NEW: Grade dropdown — individual grades, not grade bands */}
+          {/* Grade dropdown — filtered by subject-specific active pricing */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Grade *</label>
-            <select value={selectedGradeId} onChange={(e) => handleGradeChange(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none">
-              <option value="">Select grade</option>
-              {allGrades.map((g) => (
-                <option key={g.id} value={g.id}>{g.name} ({g.gradeBandName})</option>
+            <select
+              value={selectedGradeId}
+              onChange={(e) => handleGradeChange(e.target.value)}
+              className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none ${
+                subjectId && !hasRatesForSubject
+                  ? "border-red-300 bg-red-50"
+                  : "border-gray-200"
+              }`}
+              disabled={!subjectId}
+            >
+              <option value="">
+                {!subjectId
+                  ? "Select a subject first"
+                  : eligibleGrades.length === 0
+                    ? "No grades available for this subject"
+                    : "Select grade"}
+              </option>
+              {eligibleGrades.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.gradeBandName})
+                </option>
               ))}
             </select>
-            {studentId && (() => {
+            {subjectId && !hasRatesForSubject && (
+              <p className="text-xs text-red-500 mt-1">
+                Tutor is not actively teaching for this subject/grade. Contact admin.
+              </p>
+            )}
+            {subjectId && hasRatesForSubject && studentId && (() => {
               const student = students.find((s) => s.id === studentId)
               if (student?.gradeId && student.gradeId === selectedGradeId) {
                 return <p className="text-xs text-gray-400 mt-1">Pre-filled from student profile</p>
@@ -973,24 +1042,34 @@ export function TeacherProfileClient({
         </div>
 
         {/* Grade-based rate indicator */}
-        {subjectId && selectedGradeId && (
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
-            activeRate
-              ? "bg-teal-50 border border-teal-200 text-teal-700"
-              : "bg-gray-50 border border-gray-100 text-gray-500"
-          }`}>
+        {subjectId && selectedGradeId && isGradeEligible && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-teal-50 border border-teal-200 text-teal-700">
             <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-            {activeRate ? (
-              <span>
-                <span className="font-semibold">{effectiveRateLabel}/hr</span>
-                {rateContext && <span className="text-xs ml-1">— {rateContext}</span>}
-              </span>
-            ) : (
-              <span>
-                <span className="font-semibold">{teacher.rate}/hr</span>
-                <span className="text-xs ml-1">— Default rate (no specific rate for this grade band)</span>
-              </span>
-            )}
+            <span>
+              <span className="font-semibold">{effectiveRateLabel}/hr</span>
+              {rateContext && <span className="text-xs ml-1">— {rateContext}</span>}
+            </span>
+          </div>
+        )}
+
+        {/* Grade NOT eligible warning */}
+        {subjectId && selectedGradeId && !isGradeEligible && (
+          <div className="flex items-start gap-2 px-4 py-3 rounded-lg text-sm bg-red-50 border border-red-200 text-red-700">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">This teacher does not teach {teacher.subjects.find(s => s.id === subjectId)?.name} for the selected grade.</p>
+              <p className="text-xs mt-1">
+                Available grade levels:{" "}
+                <strong>
+                  {teacherRates
+                    .filter(r => r.subjectId === subjectId)
+                    .map(r => r.gradeBandName)
+                    .filter((v, i, a) => a.indexOf(v) === i)
+                    .join(", ") || "None configured"}
+                </strong>.
+                Please select a different grade or choose another teacher.
+              </p>
+            </div>
           </div>
         )}
 
