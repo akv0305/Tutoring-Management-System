@@ -193,6 +193,25 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
   })
   const walletBalance = wallet ? Number(wallet.balance) : 0
 
+  // ── Check if parent is in the existing-parents list (block trials) ──
+  const parentEmail = session.user.email?.toLowerCase() || ""
+  const parentUser = await prisma.user.findUnique({
+    where: { email: session.user.email! },
+    select: { phone: true },
+  })
+  const parentPhone = parentUser?.phone?.trim() || null
+
+  const existingParentMatch = await prisma.existingParent.findFirst({
+    where: {
+      OR: [
+        ...(parentEmail ? [{ email: parentEmail }] : []),
+        ...(parentPhone ? [{ phone: parentPhone }] : []),
+      ],
+    },
+  })
+  const isExistingParent = !!existingParentMatch
+  // ── END existing parent check ──
+
   const trialEligibility = studentSubjects.map((ss) => ({
     studentId: ss.studentId,
     subjectId: ss.subjectId,
@@ -209,6 +228,7 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
       parentTimezone={parentTimezone}
       teacherRates={ratesMap}
       allGrades={gradesData}
+      isExistingParent={isExistingParent}
     />
   )
 }

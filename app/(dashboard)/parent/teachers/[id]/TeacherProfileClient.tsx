@@ -120,6 +120,7 @@ export function TeacherProfileClient({
   parentTimezone = "America/New_York",
   teacherRates = [],
   allGrades = [],
+  isExistingParent = false,
 }: {
   teacher: TeacherData
   students: Student[]
@@ -129,6 +130,7 @@ export function TeacherProfileClient({
   parentTimezone?: string
   teacherRates?: TeacherRate[]
   allGrades?: GradeOption[]
+  isExistingParent?: boolean
 }) {
   const router = useRouter()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -193,13 +195,14 @@ export function TeacherProfileClient({
 
   // Trial eligibility
   const isTrialEligible = useMemo(() => {
+    if (isExistingParent) return false
     if (!studentId || !subjectId) return false
     const record = trialEligibility.find(
       (te) => te.studentId === studentId && te.subjectId === subjectId
     )
     if (!record) return true
     return !record.trialTaken
-  }, [studentId, subjectId, trialEligibility])
+  }, [isExistingParent, studentId, subjectId, trialEligibility])
 
   // NEW: Derive gradeBandId from the selected grade (not the student profile)
   const selectedGrade = useMemo(() => {

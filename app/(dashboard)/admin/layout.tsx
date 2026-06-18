@@ -17,7 +17,7 @@ import {
   Settings,
   Bell,
   Ticket,
-  CalendarDays,  DollarSign,
+  CalendarDays,  DollarSign, UserCheck
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -77,6 +77,7 @@ export default function AdminLayout({
     },
     { label: "Reports", icon: BarChart3, href: "/admin/reports" },
     { label: "Notifications", icon: Bell, href: "/admin/notifications" },
+    { label: "Existing Parents", icon: UserCheck, href: "/admin/existing-parents" },
     { label: "Settings", icon: Settings, href: "/admin/settings" },
   ]
 

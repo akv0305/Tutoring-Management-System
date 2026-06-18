@@ -850,3 +850,17 @@ model EmailLog {
   @@index([to, createdAt])
   @@map("email_logs")
 }
+
+// ─── EXISTING PARENTS (Trial Blocking) ──────────────────
+
+model ExistingParent {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String?
+  phone     String?
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([phone])
+  @@map("existing_parents")
+}
