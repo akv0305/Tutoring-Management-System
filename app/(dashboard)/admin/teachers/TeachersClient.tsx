@@ -3,7 +3,7 @@
 import React, { useState } from "react"
 import {
   UserPlus, Eye, DollarSign, UserX, UserCheck, X, Loader2,
-  AlertCircle, BookOpen, Check, MapPin, BarChart3, ExternalLink,
+  AlertCircle, BookOpen, Check, MapPin, BarChart3, ExternalLink, Pencil,
 } from "lucide-react"
 import Link from "next/link"
 import { DataTable } from "@/components/tables/DataTable"
@@ -352,6 +352,140 @@ function SetRateModal({ teacher, onClose, onSuccess }: { teacher: Teacher; onClo
   )
 }
 
+/* ──────────────────── Edit Profile Modal ──────────────────── */
+
+function EditProfileModal({ teacher, onClose, onSuccess }: { teacher: Teacher; onClose: () => void; onSuccess: () => void }) {
+  const [qualification, setQualification] = useState(teacher.qualification || "")
+  const [bio, setBio] = useState(teacher.bio || "")
+  const [experience, setExperience] = useState(String(teacher.experience))
+  const [timezone, setTimezone] = useState(teacher.timezone)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  const commonTimezones = [
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Phoenix",
+    "Asia/Kolkata",
+    "Asia/Dubai",
+    "Europe/London",
+    "Europe/Paris",
+    "Australia/Sydney",
+    "Pacific/Auckland",
+  ]
+
+  const handleSave = async () => {
+    setError("")
+    const numExp = Number(experience)
+    if (isNaN(numExp) || numExp < 0) { setError("Please enter a valid experience (years)."); return }
+    if (!qualification.trim()) { setError("Qualification is required."); return }
+
+    setLoading(true)
+    try {
+      const res = await fetch("/api/teachers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: teacher.id,
+          qualification: qualification.trim(),
+          bio: bio.trim() || null,
+          experience: numExp,
+          timezone,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || "Update failed"); return }
+      onSuccess()
+    } catch { setError("Network error") } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-[#1E293B]">Edit Profile</h3>
+            <p className="text-xs text-gray-500">{teacher.teacherName}</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100"><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+          {/* Qualification */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Qualification <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              value={qualification}
+              onChange={(e) => setQualification(e.target.value)}
+              placeholder="e.g. M.Sc Mathematics, B.Ed"
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+            />
+          </div>
+
+          {/* Experience */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Experience (years)</label>
+            <input
+              type="number"
+              min="0"
+              value={experience}
+              onChange={(e) => setExperience(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+            />
+          </div>
+
+          {/* Timezone */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Timezone</label>
+            <select
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+            >
+              {commonTimezones.map((tz) => (
+                <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
+              ))}
+              {/* If current timezone not in the list, show it too */}
+              {!commonTimezones.includes(timezone) && (
+                <option value={timezone}>{timezone.replace(/_/g, " ")}</option>
+              )}
+            </select>
+          </div>
+
+          {/* Bio */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Bio</label>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              rows={5}
+              placeholder="Write a short bio about the teacher's background, teaching style, achievements..."
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] resize-none"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">{bio.length} characters · This is visible to parents on the teacher&apos;s profile.</p>
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-2.5 text-sm text-red-700">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-100 px-5 py-4 shrink-0 flex gap-2">
+          <button onClick={onClose} disabled={loading} className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">Cancel</button>
+          <button onClick={handleSave} disabled={loading} className="flex-1 py-2.5 bg-[#0D9488] text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors">
+            {loading ? (<><Loader2 className="w-4 h-4 animate-spin" />Saving…</>) : (<><Pencil className="w-4 h-4" />Save Changes</>)}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ──────────────────── Toggle Status Modal ──────────────────── */
 
 function ToggleStatusModal({ teacher, onClose, onSuccess }: { teacher: Teacher; onClose: () => void; onSuccess: () => void }) {
@@ -540,11 +674,13 @@ export function TeachersClient({
   const [rateTeacher, setRateTeacher] = useState<Teacher | null>(null)
   const [toggleTeacher, setToggleTeacher] = useState<Teacher | null>(null)
   const [subjectsTeacher, setSubjectsTeacher] = useState<Teacher | null>(null)
+  const [editTeacher, setEditTeacher] = useState<Teacher | null>(null)
 
   const handleTeacherAdded = () => { window.location.reload() }
   const handleRateUpdated = () => { setRateTeacher(null); window.location.reload() }
   const handleStatusToggled = () => { setToggleTeacher(null); window.location.reload() }
   const handleSubjectsUpdated = () => { setSubjectsTeacher(null); window.location.reload() }
+  const handleProfileUpdated = () => { setEditTeacher(null); window.location.reload() }
 
   const columns = [
     {
@@ -595,6 +731,7 @@ export function TeachersClient({
       render: (row: Teacher) => (
         <div className="flex items-center gap-1">
           <button title="View" onClick={() => setViewTeacher(row)} className="p-1.5 rounded-md text-[#0D9488] hover:bg-teal-50 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
+          <button title="Edit Profile" onClick={() => setEditTeacher(row)} className="p-1.5 rounded-md text-[#F59E0B] hover:bg-amber-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
           <button title="Manage Subjects" onClick={() => setSubjectsTeacher(row)} className="p-1.5 rounded-md text-indigo-600 hover:bg-indigo-50 transition-colors"><BookOpen className="w-3.5 h-3.5" /></button>
           <button title="Set Rate" onClick={() => setRateTeacher(row)} className="p-1.5 rounded-md text-[#1E3A5F] hover:bg-blue-50 transition-colors"><DollarSign className="w-3.5 h-3.5" /></button>
           <button title={row.status === "active" ? "Deactivate" : "Activate"} onClick={() => setToggleTeacher(row)} className={`p-1.5 rounded-md transition-colors ${row.status === "active" ? "text-[#EF4444] hover:bg-red-50" : "text-[#22C55E] hover:bg-green-50"}`}>
@@ -633,6 +770,7 @@ export function TeachersClient({
       {rateTeacher && <SetRateModal teacher={rateTeacher} onClose={() => setRateTeacher(null)} onSuccess={handleRateUpdated} />}
       {toggleTeacher && <ToggleStatusModal teacher={toggleTeacher} onClose={() => setToggleTeacher(null)} onSuccess={handleStatusToggled} />}
       {subjectsTeacher && <ManageSubjectsModal teacher={subjectsTeacher} allSubjects={subjects} onClose={() => setSubjectsTeacher(null)} onSuccess={handleSubjectsUpdated} />}
+      {editTeacher && <EditProfileModal teacher={editTeacher} onClose={() => setEditTeacher(null)} onSuccess={handleProfileUpdated} />}
     </div>
   )
 }
