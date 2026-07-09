@@ -8,7 +8,7 @@ import {
   Eye,
   Loader2,
   X,
-  MessageSquareText,
+  MessageSquareText, FileDown,
 } from "lucide-react"
 import { DataTable } from "@/components/tables/DataTable"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -62,6 +62,198 @@ function MiniKPI({
     </div>
   )
 }
+
+function downloadInvoice(payment: Payment) {
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Invoice ${payment.paymentId}</title>
+<style>
+  @page { size: A4; margin: 20mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; font-size: 13px; line-height: 1.5; }
+
+  .invoice-container { max-width: 760px; margin: 0 auto; padding: 40px; }
+
+  /* Header */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 3px solid #4F46E5; }
+  .company-block { display: flex; align-items: flex-start; gap: 16px; }
+  .company-logo { width: 60px; height: 60px; object-fit: contain; }
+  .company-name { font-size: 22px; font-weight: 700; color: #4F46E5; margin-bottom: 2px; }
+  .company-details { font-size: 11.5px; color: #555; line-height: 1.6; }
+  .invoice-title-block { text-align: right; }
+  .invoice-title { font-size: 28px; font-weight: 800; color: #4F46E5; letter-spacing: 1px; }
+  .invoice-meta { margin-top: 6px; font-size: 12px; color: #666; }
+  .invoice-meta span { display: block; }
+
+  /* Status badge */
+  .status-badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .status-confirmed { background: #DEF7EC; color: #03543F; }
+  .status-pending { background: #FEF3C7; color: #92400E; }
+  .status-rejected, .status-failed { background: #FDE8E8; color: #9B1C1C; }
+  .status-refunded { background: #E0E7FF; color: #3730A3; }
+
+  /* Bill-to */
+  .bill-to { margin-bottom: 28px; padding: 16px 20px; background: #F8FAFC; border-radius: 8px; border-left: 4px solid #4F46E5; }
+  .bill-to-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #4F46E5; margin-bottom: 4px; }
+  .bill-to-name { font-size: 15px; font-weight: 600; color: #1a1a1a; }
+  .bill-to-detail { font-size: 12px; color: #555; }
+
+  /* Table */
+  .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  .inv-table thead th { background: #4F46E5; color: #fff; padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .inv-table thead th:first-child { border-radius: 6px 0 0 0; }
+  .inv-table thead th:last-child { border-radius: 0 6px 0 0; text-align: right; }
+  .inv-table tbody td { padding: 12px 14px; border-bottom: 1px solid #E5E7EB; font-size: 13px; }
+  .inv-table tbody td:last-child { text-align: right; font-weight: 600; }
+  .inv-table tbody tr:last-child td { border-bottom: none; }
+
+  /* Totals */
+  .totals { display: flex; justify-content: flex-end; margin-bottom: 32px; }
+  .totals-box { width: 280px; }
+  .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .total-row.grand { border-top: 2px solid #4F46E5; margin-top: 8px; padding-top: 10px; font-size: 16px; font-weight: 700; color: #4F46E5; }
+
+  /* Footer */
+  .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #E5E7EB; }
+  .footer-grid { display: flex; justify-content: space-between; gap: 24px; }
+  .footer-col h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #4F46E5; margin-bottom: 6px; }
+  .footer-col p { font-size: 11.5px; color: #555; line-height: 1.6; }
+  .footer-note { text-align: center; margin-top: 24px; font-size: 11px; color: #999; }
+
+  /* Print */
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="invoice-container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="company-block">
+      <img src="/images/eglogo.png" class="company-logo" alt="DG Tutor"/>
+      <div>
+        <div class="company-name">DG Tutor</div>
+        <div class="company-details">
+          H.No-3, Phase 2, Kowkoor, Secunderabad<br/>
+          Hyderabad, Telangana, 500010<br/>
+          Ph: 7993924180 &nbsp;|&nbsp; info@dgtutor.net<br/>
+          <strong>GSTIN:</strong> 36BGRPM0936M1ZS
+        </div>
+      </div>
+    </div>
+    <div class="invoice-title-block">
+      <div class="invoice-title">INVOICE</div>
+      <div class="invoice-meta">
+        <span><strong>Invoice No:</strong> ${payment.paymentId}</span>
+        <span><strong>Date:</strong> ${payment.date}</span>
+        <span style="margin-top:4px"><strong>Status:</strong> <span class="status-badge status-${payment.status.toLowerCase()}">${payment.status}</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bill To -->
+  <div class="bill-to">
+    <div class="bill-to-label">Billed To</div>
+    <div class="bill-to-name">${payment.student}</div>
+    <div class="bill-to-detail">Package: ${payment.packageName || "N/A"}</div>
+  </div>
+
+  <!-- Items Table -->
+  <table class="inv-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Description</th>
+        <th>Method</th>
+        <th>Amount (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td>
+          <strong>${payment.packageName || "Tutoring Package"}</strong><br/>
+          <span style="color:#666;font-size:12px">Student: ${payment.student}</span>
+        </td>
+        <td>${payment.method || "—"}</td>
+        <td>₹${payment.amountNum.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Totals -->
+  <div class="totals">
+    <div class="totals-box">
+      <div class="total-row">
+        <span>Subtotal</span>
+        <span>₹${payment.amountNum.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+      </div>
+      ${payment.refundedAmount > 0 ? `
+      <div class="total-row" style="color:#DC2626;">
+        <span>Refunded</span>
+        <span>-₹${payment.refundedAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+      </div>` : ""}
+      <div class="total-row grand">
+        <span>Total</span>
+        <span>₹${(payment.amountNum - (payment.refundedAmount || 0)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+      </div>
+    </div>
+  </div>
+
+  ${payment.bankReference ? `
+  <div style="margin-bottom:24px;padding:12px 16px;background:#F0FDF4;border-radius:6px;border-left:4px solid #16A34A;">
+    <strong style="font-size:11px;color:#16A34A;text-transform:uppercase;letter-spacing:0.5px;">Bank Reference</strong><br/>
+    <span style="font-size:13px;color:#1a1a1a;">${payment.bankReference}</span>
+  </div>` : ""}
+
+  ${payment.adminNotes ? `
+  <div style="margin-bottom:24px;padding:12px 16px;background:#FEF3C7;border-radius:6px;border-left:4px solid #F59E0B;">
+    <strong style="font-size:11px;color:#92400E;text-transform:uppercase;letter-spacing:0.5px;">Notes</strong><br/>
+    <span style="font-size:13px;color:#1a1a1a;">${payment.adminNotes}</span>
+  </div>` : ""}
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-grid">
+      <div class="footer-col">
+        <h4>Payment Information</h4>
+        <p>All payments are processed in Indian Rupees (INR).<br/>
+        For queries, contact info@dgtutor.net</p>
+      </div>
+      <div class="footer-col">
+        <h4>DG Tutor</h4>
+        <p>H.No-3, Phase 2, Kowkoor, Secunderabad<br/>
+        Hyderabad, Telangana, 500010<br/>
+        GSTIN: 36BGRPM0936M1ZS</p>
+      </div>
+    </div>
+    <div class="footer-note">
+      This is a computer-generated invoice and does not require a physical signature.
+    </div>
+  </div>
+
+</div>
+
+<!-- Print trigger -->
+<script>
+  window.onload = function() { window.print(); };
+</script>
+</body>
+</html>`;
+
+  const printWindow = window.open("", "_blank");
+  if (printWindow) {
+    printWindow.document.write(html);
+    printWindow.document.close();
+  }
+}
+
 
 export function PaymentsClient({
   payments: initialPayments,
@@ -249,6 +441,13 @@ export function PaymentsClient({
           >
             <Eye className="w-3.5 h-3.5" />
           </button>
+          <button
+            onClick={() => downloadInvoice(r)}
+            className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition"
+            title="Download Invoice"
+          >
+            <FileDown className="w-4 h-4" />
+          </button>
           {r.status === "pending" && (
             <>
               <button
@@ -274,6 +473,7 @@ export function PaymentsClient({
         </div>
       ),
     },
+
   ]
 
   const isConfirm = actionModal?.action === "confirm"
