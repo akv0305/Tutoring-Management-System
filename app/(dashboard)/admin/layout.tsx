@@ -30,6 +30,7 @@ export default function AdminLayout({
   const { data: session } = useSession()
   const [pendingPayments, setPendingPayments] = useState(0)
   const [pendingRefunds, setPendingRefunds] = useState(0)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Fetch live badge counts
   useEffect(() => {
@@ -93,18 +94,20 @@ export default function AdminLayout({
         navItems={navItems}
         userName={userName}
         userEmail={userEmail}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <div
-        className="flex flex-col flex-1 overflow-hidden"
-        style={{ marginLeft: 260 }}
-      >
+
+      <div className="flex flex-col flex-1 overflow-hidden lg:ml-[260px]">
         <TopBar
           title="Admin Dashboard"
           userName={userName}
           notificationsHref="/admin/notifications"
+          onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   )
