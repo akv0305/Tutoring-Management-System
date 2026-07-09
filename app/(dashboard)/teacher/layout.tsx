@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
@@ -35,6 +35,8 @@ export default function TeacherLayout({
     ? `${session.user.firstName} ${session.user.lastName}`
     : "Teacher"
   const userEmail = session?.user?.email || ""
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
 
   return (
     <div className="flex min-h-screen" style={{ background: "#F8FAFC" }}>
@@ -43,18 +45,18 @@ export default function TeacherLayout({
         navItems={navItems}
         userName={userName}
         userEmail={userEmail}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <div
-        className="flex flex-col flex-1 overflow-hidden"
-        style={{ marginLeft: 260 }}
-      >
+      <div className="flex flex-col flex-1 overflow-hidden lg:ml-[260px]">
         <TopBar
           title="Teacher Dashboard"
           userName={userName}
           notificationsHref="/teacher/notifications"
+          onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   )

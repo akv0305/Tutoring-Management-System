@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
@@ -32,6 +32,7 @@ export default function ParentLayout({
   children: React.ReactNode
 }) {
   const { data: session } = useSession()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const userName = session?.user
     ? `${session.user.firstName} ${session.user.lastName}`
@@ -45,18 +46,18 @@ export default function ParentLayout({
         navItems={navItems}
         userName={userName}
         userEmail={userEmail}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <div
-        className="flex flex-col flex-1 overflow-hidden"
-        style={{ marginLeft: 260 }}
-      >
+      <div className="flex flex-col flex-1 overflow-hidden lg:ml-[260px]">
         <TopBar
           title="Parent Dashboard"
           subtitle="My Children"
           userName={userName}
+          onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   )

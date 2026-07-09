@@ -24,6 +24,7 @@ export default function CoordinatorLayout({
   const [totalStudents, setTotalStudents] = useState(0)
   const [pendingOnboarding, setPendingOnboarding] = useState(0)
   const [pendingPayments, setPendingPayments] = useState(0)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Fetch live badge counts on mount and every 60 seconds
   useEffect(() => {
@@ -67,18 +68,18 @@ export default function CoordinatorLayout({
         navItems={navItems}
         userName={userName}
         userEmail={userEmail}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <div
-        className="flex flex-col flex-1 overflow-hidden"
-        style={{ marginLeft: 260 }}
-      >
+      <div className="flex flex-col flex-1 overflow-hidden lg:ml-[260px]">
         <TopBar
           title="Coordinator Dashboard"
           userName={userName}
           notificationsHref="/coordinator/notifications"
+          onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   )
