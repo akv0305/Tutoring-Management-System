@@ -321,8 +321,11 @@ function SidebarDemoWrapper() {
         role="admin"
         navItems={ADMIN_NAV_ITEMS}
         userName="Sarah Mitchell"
-        userEmail="sarah.m@expertguru.com"
+        userEmail="sarah@expertguru.net"
+        isOpen={false}
+        onClose={() => {}}
       />
+
       {/* Content area placeholder */}
       <div
         className="absolute inset-0 bg-[#F8FAFC]"
@@ -347,9 +350,10 @@ function TopBarDemoWrapper() {
   return (
     <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm">
       <TopBar
-        title="Students Management"
-        subtitle="Manage student profiles, packages, and progress"
+        title="Admin Dashboard"
         userName="Sarah Mitchell"
+        notificationsHref="/admin/notifications"
+        onMenuClick={() => {}}
       />
     </div>
   )
