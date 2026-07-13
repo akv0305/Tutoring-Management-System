@@ -112,6 +112,7 @@ export default async function TeacherPage() {
         ["SCHEDULED", "CONFIRMED"].includes(c.status)
     )
     .map((c) => ({
+      id: c.id,
       date: c.scheduledAt.toLocaleDateString("en-US", {
         weekday: "short",
         month: "short",
@@ -126,7 +127,14 @@ export default async function TeacherPage() {
       }),
       student: `${c.student.firstName} ${c.student.lastName}`,
       subject: c.subject.name,
+      status: c.status.toLowerCase(),
+      meetingLink: c.meetingLink,
+      subjectName: c.subject.name,
+      studentName: `${c.student.firstName} ${c.student.lastName}`,
+      scheduledAtISO: c.scheduledAt.toISOString(),
+      duration: c.duration ?? 60,
     }))
+
 
   // This week class count
   const thisWeekCount = allClasses.filter(

@@ -298,15 +298,21 @@ function ClassBlock({
   block,
   isSelected,
   onClick,
+  onJoinClick,
+  onAddLinkClick,
 }: {
   block: Block
   isSelected: boolean
   onClick: () => void
+  onJoinClick: (e: React.MouseEvent) => void
+  onAddLinkClick: (e: React.MouseEvent) => void
 }) {
+  const isActionable = ["scheduled", "confirmed"].includes(block.status)
+
   return (
     <div
       onClick={onClick}
-      className={`absolute left-0.5 right-0.5 rounded-md border-l-2 px-2 py-1 shadow-sm cursor-pointer transition-all ${block.colorClass} ${
+      className={`absolute left-0.5 right-0.5 rounded-md border-l-2 px-1.5 py-1 shadow-sm cursor-pointer transition-all ${block.colorClass} ${
         isSelected ? "ring-2 ring-[#1E3A5F] ring-offset-1 scale-[1.02] z-10" : "hover:opacity-90"
       }`}
       style={{
@@ -314,16 +320,62 @@ function ClassBlock({
         height: `${block.duration * SLOT_H - 4}px`,
       }}
     >
-      <p className="text-[10px] font-bold leading-tight truncate">{block.label}</p>
+      {/* Row 1: Name + Status badge */}
+      <div className="flex items-center justify-between gap-0.5">
+        <p className="text-[10px] font-bold leading-tight truncate">{block.label}</p>
+        <span className={`flex-shrink-0 px-1 py-0.5 rounded text-[7px] font-bold uppercase leading-none ${
+          block.status === "completed" ? "bg-green-200/80 text-green-900" :
+          block.status === "confirmed" ? "bg-white/40 text-white" :
+          block.status === "scheduled" ? "bg-amber-200/80 text-amber-900" :
+          "bg-white/30 text-white/80"
+        }`}>
+          {block.status === "scheduled" ? "Upcoming" : block.status}
+        </span>
+      </div>
+
+      {/* Row 2: Subject + Trial badge */}
       <div className="flex items-center gap-1 mt-0.5">
         <p className="text-[9px] opacity-80 truncate">{block.sublabel}</p>
         {block.isTrial && (
           <span className="flex-shrink-0 px-1 py-0.5 rounded bg-white/30 text-[8px] font-bold uppercase">TRIAL</span>
         )}
       </div>
+
+      {/* Row 3: Join / Add Link button (only for actionable classes) */}
+      {isActionable && (
+        <div className="mt-0.5">
+          {block.meetingLink ? (
+            <button
+              onClick={onJoinClick}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white/90 text-[8px] font-bold text-teal-700 hover:bg-white transition-colors"
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+              Join
+            </button>
+          ) : (
+            <button
+              onClick={onAddLinkClick}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white/90 text-[8px] font-bold text-blue-700 hover:bg-white transition-colors"
+            >
+              <Video className="w-2.5 h-2.5" />
+              Add Link
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Completed: show a subtle checkmark instead of buttons */}
+      {block.status === "completed" && (
+        <div className="mt-0.5">
+          <span className="inline-flex items-center gap-0.5 text-[8px] font-medium opacity-70">
+            <CheckCircle className="w-2.5 h-2.5" /> Done
+          </span>
+        </div>
+      )}
     </div>
   )
 }
+
 
 /* ────── Selected Class Detail Panel ────── */
 
@@ -660,8 +712,11 @@ export function TeacherScheduleClient({
                           block={block}
                           isSelected={block.id === selectedBlockId}
                           onClick={() => handleBlockClick(block)}
+                          onJoinClick={(e) => { e.stopPropagation(); handleJoin(block) }}
+                          onAddLinkClick={(e) => { e.stopPropagation(); setMeetingLinkBlock(blocks.find(b => b.id === block.id) || block) }}
                         />
                       ))}
+
                     </div>
                   )
                 })}
@@ -716,8 +771,11 @@ export function TeacherScheduleClient({
                   block={block}
                   isSelected={block.id === selectedBlockId}
                   onClick={() => handleBlockClick(block)}
+                  onJoinClick={(e) => { e.stopPropagation(); handleJoin(block) }}
+                  onAddLinkClick={(e) => { e.stopPropagation(); setMeetingLinkBlock(blocks.find(b => b.id === block.id) || block) }}
                 />
               ))}
+
               {dayBlocks.length === 0 && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <p className="text-sm text-gray-300">No classes on this day.</p>

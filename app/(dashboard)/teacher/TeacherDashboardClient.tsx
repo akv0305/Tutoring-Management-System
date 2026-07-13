@@ -47,10 +47,13 @@ type TodayClass = {
 }
 
 type UpcomingRow = {
+  id: string
   date: string
   time: string
   student: string
   subject: string
+  status: string
+  meetingLink: string | null
 }
 
 type FeedbackItem = {
@@ -717,6 +720,8 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
     data.todayClasses
   )
 
+  const [upcomingWeek, setUpcomingWeek] = useState<UpcomingRow[]>(data.upcomingWeek)
+
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -744,6 +749,9 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
 
   function handleLinkSaved(classId: string, link: string) {
     setTodayClasses((prev) =>
+      prev.map((c) => (c.id === classId ? { ...c, meetingLink: link } : c))
+    )
+    setUpcomingWeek((prev) =>
       prev.map((c) => (c.id === classId ? { ...c, meetingLink: link } : c))
     )
   }
@@ -810,7 +818,7 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
         <KPICard
           title="This Week"
           value={String(data.thisWeekCount)}
-          subtitle={`${data.upcomingWeek.length} remaining after today`}
+          subtitle={`${upcomingWeek.length} remaining after today`}
           change=""
           changeType="neutral"
           icon={BookOpen}
@@ -991,21 +999,21 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
             </div>
           </div>
 
-          {/* Upcoming This Week */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                    {/* Upcoming This Week */}
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">
               Rest of the Week
             </h2>
             <div className="flex flex-col gap-2">
-              {data.upcomingWeek.length === 0 ? (
+              {upcomingWeek.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-4">
                   No more classes this week.
                 </p>
               ) : (
-                data.upcomingWeek.map((row, i) => (
+                upcomingWeek.map((row) => (
                   <div
-                    key={i}
-                    className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/50 rounded-lg px-2 transition-colors"
+                    key={row.id}
+                    className="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0 hover:bg-gray-50/50 rounded-lg px-2 transition-colors"
                   >
                     <span className="w-24 flex-shrink-0 text-xs text-gray-400 font-medium">
                       {row.date}
@@ -1019,11 +1027,44 @@ export function TeacherDashboardClient({ data }: { data: DashboardData }) {
                     <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-medium">
                       {row.subject}
                     </span>
+                    {row.meetingLink ? (
+                      <button
+                        onClick={() => window.open(row.meetingLink!, "_blank", "noopener,noreferrer")}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[#0D9488] text-white text-[11px] font-semibold hover:bg-teal-700 transition-colors flex-shrink-0"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Join
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setMeetingLinkClass({
+                          id: row.id,
+                          time: `${row.date} ${row.time}`,
+                          studentName: row.student,
+                          subject: row.subject,
+                          subjectName: row.subject,
+                          initials: row.student.split(" ").map((n) => n[0]).join(""),
+                          topic: "—",
+                          sessionNotes: "",
+                          status: row.status,
+                          isTrial: false,
+                          meetingLink: null,
+                          scheduledAtISO: "",
+                          duration: 60,
+                          studentNotes: "",
+                        })}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-[#1E3A5F] text-white text-[11px] font-semibold hover:bg-[#162d4a] transition-colors flex-shrink-0"
+                      >
+                        <Video className="w-3 h-3" />
+                        Add Link
+                      </button>
+                    )}
                   </div>
                 ))
               )}
             </div>
           </div>
+
         </div>
 
         {/* RIGHT */}

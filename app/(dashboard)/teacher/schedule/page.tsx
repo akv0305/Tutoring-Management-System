@@ -52,6 +52,7 @@ export default async function TeacherSchedulePage({
     where: {
       teacherId: teacher.id,
       scheduledAt: { gte: queryStart, lt: queryEnd },
+      status: { in: ["SCHEDULED", "CONFIRMED", "COMPLETED"] },
     },
     include: {
       student: { select: { firstName: true, lastName: true, grade: true } },

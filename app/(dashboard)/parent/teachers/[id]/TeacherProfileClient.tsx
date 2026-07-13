@@ -573,13 +573,19 @@ export function TeacherProfileClient({
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <p className="font-semibold text-[#1E293B]">Pay Online</p>
+                  <p className="font-semibold text-[#1E293B]">Pay Online (Debit/Credit Cards)</p>
                   <span className="px-2 py-0.5 bg-[#0D9488] text-white text-[10px] font-bold rounded-full uppercase">Recommended</span>
                 </div>
-                <p className="text-sm text-gray-500 mt-0.5">Credit Card, Debit Card, Net Banking, UPI, Wallets</p>
+                <p className="text-sm text-gray-500 mt-0.5">Debit & Credit Cards through CC Avenue</p>
               </div>
               {loading ? <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin flex-shrink-0" /> : <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0D9488] flex-shrink-0" />}
             </button>
+            <div className="flex items-start gap-2.5 p-3.5 bg-green-50 border border-green-200 rounded-lg">
+              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-green-700 leading-relaxed">
+                <span className="font-semibold">Note:</span> Your classes will be scheduled immediately once the online payment is successful. No further approval is needed.
+              </p>
+            </div>
 
             <button
               onClick={() => router.push("/parent/payments")}
@@ -591,11 +597,18 @@ export function TeacherProfileClient({
                 </svg>
               </div>
               <div className="flex-1">
-                <p className="font-semibold text-[#1E293B]">Bank Transfer</p>
-                <p className="text-sm text-gray-500 mt-0.5">Transfer to our bank account &middot; Admin confirms manually</p>
+                <p className="font-semibold text-[#1E293B]">Offline / Outside App Transfer</p>
+                <p className="text-sm text-gray-500 mt-0.5">ACH transfer, Wire Transfer, or any payment made outside this app</p>
               </div>
               <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 flex-shrink-0" />
             </button>
+
+            <div className="flex items-start gap-2.5 p-3.5 bg-amber-50 border border-amber-200 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-700 leading-relaxed">
+                <span className="font-semibold">Note:</span> If you have transferred the amount outside this app (via ACH transfer, Wire Transfer, etc.), your payment will remain in <span className="font-semibold">Pending</span> status until the admin verifies and confirms that the amount has been credited. Classes will be activated only after payment approval.
+              </p>
+            </div>
           </div>
 
           {/* Next Steps for Student */}
