@@ -10,6 +10,28 @@ import ClassCancelled from "@/emails/class-cancelled"
 import ClassRescheduled from "@/emails/class-rescheduled"
 import MeetingLinkShared from "@/emails/meeting-link-shared"
 import ClassCompleted from "@/emails/class-completed"
+import { formatDateTime, getTzAbbr } from "@/lib/timezone"
+
+// ── Timezone-aware date formatter (used throughout for emails & notifications) ──
+function fmtDateTz(date: Date, timezone: string): string {
+  const abbr = getTzAbbr(timezone, date)
+  return `${formatDateTime(date, timezone)} ${abbr}`
+}
+
+function fmtShortDateTz(date: Date, timezone: string): string {
+  const abbr = getTzAbbr(timezone, date)
+  const short = date.toLocaleDateString("en-US", {
+    timeZone: timezone,
+    month: "short",
+    day: "numeric",
+  })
+  const time = date.toLocaleTimeString("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  })
+  return `${short} at ${time} ${abbr}`
+}
 
 // ── Referral conversion & wallet deduction helper ──
 async function handleReferralConversion(
@@ -18,7 +40,6 @@ async function handleReferralConversion(
   parentProfileId: string
 ) {
   try {
-    // Check if this parent was referred
     const parentUser = await tx.user.findUnique({
       where: { id: parentUserId },
       select: { referredByCode: true },
@@ -26,7 +47,6 @@ async function handleReferralConversion(
 
     if (!parentUser?.referredByCode) return
 
-    // Check if there's a PENDING referral for this parent
     const pendingReferral = await tx.referral.findFirst({
       where: {
         referredToId: parentUserId,
@@ -46,7 +66,6 @@ async function handleReferralConversion(
 
     if (!pendingReferral || !pendingReferral.referredBy?.parentProfile) return
 
-    // Get reward amount from settings
     const settings = await tx.platformSettings.findFirst({
       where: { id: "default" },
       select: { referralEnabled: true, referralRewardAmount: true },
@@ -59,7 +78,6 @@ async function handleReferralConversion(
 
     const referrerParentProfileId = pendingReferral.referredBy.parentProfile.id
 
-    // Find or create referrer's wallet
     let referrerWallet = await tx.wallet.findUnique({
       where: { parentProfileId: referrerParentProfileId },
     })
@@ -73,7 +91,6 @@ async function handleReferralConversion(
       })
     }
 
-    // Credit the referrer's wallet
     const walletTx = await tx.walletTransaction.create({
       data: {
         walletId: referrerWallet.id,
@@ -89,7 +106,6 @@ async function handleReferralConversion(
       data: { balance: { increment: rewardAmount } },
     })
 
-    // Mark referral as SUCCESSFUL
     await tx.referral.update({
       where: { id: pendingReferral.id },
       data: {
@@ -100,7 +116,6 @@ async function handleReferralConversion(
       },
     })
 
-    // Notify the referrer
     await tx.notification.create({
       data: {
         userId: pendingReferral.referredById,
@@ -110,7 +125,6 @@ async function handleReferralConversion(
       },
     })
   } catch (err) {
-    // Don't fail the booking if referral processing fails
     console.error("[Referral conversion] Error:", err)
   }
 }
@@ -134,7 +148,6 @@ async function applyWalletDiscount(
     const amountDue = totalAmount - walletDeduction
 
     if (walletDeduction > 0) {
-      // Debit the wallet
       await tx.walletTransaction.create({
         data: {
           walletId: wallet.id,
@@ -157,7 +170,6 @@ async function applyWalletDiscount(
   }
 }
 
-// Generate a unique order reference like "ORD-20260402-A1B2C3"
 function generateOrderRef(): string {
   const date = new Date()
   const dateStr = date.toISOString().slice(0, 10).replace(/-/g, "")
@@ -184,7 +196,6 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get("from")
     const to = searchParams.get("to")
 
-    // Build where clause based on role
     const where: any = {}
 
     if (session.user.role === "TEACHER") {
@@ -219,7 +230,6 @@ export async function GET(req: NextRequest) {
       where.studentId = { in: coordProfile.students.map((s) => s.id) }
     }
 
-    // Optional filters
     if (status) {
       where.status = status.toUpperCase()
     }
@@ -238,9 +248,20 @@ export async function GET(req: NextRequest) {
     const classes = await prisma.class.findMany({
       where,
       include: {
-        student: { select: { firstName: true, lastName: true, grade: true } },
+        student: {
+          select: {
+            firstName: true,
+            lastName: true,
+            grade: true,
+            parent: {
+              select: { timezone: true },
+            },
+          },
+        },
         teacher: {
-          include: { user: { select: { firstName: true, lastName: true } } },
+          include: {
+            user: { select: { firstName: true, lastName: true } },
+          },
         },
         subject: { select: { name: true } },
         package: { select: { name: true } },
@@ -248,31 +269,64 @@ export async function GET(req: NextRequest) {
       orderBy: { scheduledAt: "desc" },
     })
 
-    const mapped = classes.map((c) => ({
-      id: c.id,
-      studentName: `${c.student.firstName} ${c.student.lastName}`,
-      studentGrade: c.student.grade,
-      teacherName: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
-      teacherInitials: `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`,
-      subject: c.subject.name,
-      packageName: c.package?.name ?? "—",
-      scheduledAt: c.scheduledAt.toISOString(),
-      day: c.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }),
-      time: `${c.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${new Date(c.scheduledAt.getTime() + c.duration * 60000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
-      duration: c.duration,
-      status: c.status,
-      meetingLink: c.meetingLink,
-      topicCovered: c.topicCovered,
-      sessionNotes: c.sessionNotes,
-      parentRating: c.parentRating,
-      parentFeedback: c.parentFeedback,
-      isTrial: c.isTrial,
-      cancelReason: c.cancelReason,
-      completedAt: c.completedAt?.toISOString() ?? null,
-      createdAt: c.createdAt.toISOString(),
-    }))
+    // Determine the viewer's timezone for formatting
+    let viewerTz = "America/New_York"
+    if (session.user.role === "TEACHER") {
+      const tp = await prisma.teacherProfile.findUnique({
+        where: { userId: session.user.id },
+        select: { timezone: true },
+      })
+      viewerTz = tp?.timezone || "Asia/Kolkata"
+    } else if (session.user.role === "PARENT") {
+      const pp = await prisma.parentProfile.findUnique({
+        where: { userId: session.user.id },
+        select: { timezone: true },
+      })
+      viewerTz = pp?.timezone || "America/New_York"
+    }
+    // ADMIN / COORDINATOR default to America/New_York
 
-    // Summary
+    const mapped = classes.map((c) => {
+      const tz = viewerTz
+      const tzAbbr = getTzAbbr(tz, c.scheduledAt)
+      return {
+        id: c.id,
+        studentName: `${c.student.firstName} ${c.student.lastName}`,
+        studentGrade: c.student.grade,
+        teacherName: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+        teacherInitials: `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`,
+        subject: c.subject.name,
+        packageName: c.package?.name ?? "—",
+        scheduledAt: c.scheduledAt.toISOString(),
+        day: c.scheduledAt.toLocaleDateString("en-US", {
+          timeZone: tz,
+          weekday: "long",
+          month: "short",
+          day: "numeric",
+        }),
+        time: `${c.scheduledAt.toLocaleTimeString("en-US", {
+          timeZone: tz,
+          hour: "numeric",
+          minute: "2-digit",
+        })} – ${new Date(c.scheduledAt.getTime() + c.duration * 60000).toLocaleTimeString("en-US", {
+          timeZone: tz,
+          hour: "numeric",
+          minute: "2-digit",
+        })} ${tzAbbr}`,
+        duration: c.duration,
+        status: c.status,
+        meetingLink: c.meetingLink,
+        topicCovered: c.topicCovered,
+        sessionNotes: c.sessionNotes,
+        parentRating: c.parentRating,
+        parentFeedback: c.parentFeedback,
+        isTrial: c.isTrial,
+        cancelReason: c.cancelReason,
+        completedAt: c.completedAt?.toISOString() ?? null,
+        createdAt: c.createdAt.toISOString(),
+      }
+    })
+
     const summary = {
       total: mapped.length,
       pendingPayment: mapped.filter((c) => c.status === "PENDING_PAYMENT").length,
@@ -291,9 +345,6 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/classes — book one or more classes
-// Accepts either { scheduledAt: "..." } for a single slot
-// or { slots: ["...", "..."] } for multiple slots in one booking
-// Optional: templateId for package-based booking
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -319,11 +370,10 @@ export async function POST(req: NextRequest) {
       meetingLink,
       isTrial,
       couponCode,
-      discountMethod, // "coupon" | "wallet" | "none"
+      discountMethod,
       gradeBandId: requestedGradeBandId,
     } = body
 
-    // Parents can only book for their own children
     if (session.user.role === "PARENT") {
       const parent = await prisma.parentProfile.findUnique({
         where: { userId: session.user.id },
@@ -344,7 +394,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Normalize slots: support both single scheduledAt and slots array
     const slotList: string[] = slots && Array.isArray(slots) && slots.length > 0
       ? slots
       : scheduledAt
@@ -358,12 +407,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Verify student exists
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
         parent: {
-          include: { user: { select: { firstName: true, email: true } } },
+          include: {
+            user: { select: { firstName: true, email: true } },
+          },
         },
         gradeRef: {
           include: {
@@ -376,7 +426,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 })
     }
 
-    // Verify teacher exists (need rate for amount calculation)
     const teacher = await prisma.teacherProfile.findUnique({
       where: { id: teacherId },
       include: { user: { select: { firstName: true, lastName: true, email: true } } },
@@ -385,14 +434,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Teacher not found" }, { status: 404 })
     }
 
-    // Fetch subject name for emails
     const subject = await prisma.subject.findUnique({
       where: { id: subjectId },
       select: { name: true },
     })
     if (!subject) {
       return NextResponse.json({ error: "Subject not found" }, { status: 404 })
-    }    
+    }
+
+    // Fetch timezones for email formatting
+    const parentProfile = await prisma.parentProfile.findUnique({
+      where: { id: student.parentId! },
+      select: { id: true, timezone: true },
+    })
+    const parentTZ = parentProfile?.timezone || "America/New_York"
+    const teacherTZ = teacher.timezone || "Asia/Kolkata"
 
     const classDuration = duration || 60
     const isTrialClass = isTrial || false
@@ -436,7 +492,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Package expiry & balance check (for existing packageId — legacy support) ──
+    // ── Package expiry & balance check ──
     if (packageId && !templateId) {
       const pkg = await prisma.package.findUnique({
         where: { id: packageId },
@@ -467,7 +523,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check for scheduling conflicts for ALL slots before creating anything
+    // Check for scheduling conflicts
     for (const slot of slotList) {
       const slotDate = new Date(slot)
       const slotEnd = new Date(slotDate.getTime() + classDuration * 60000)
@@ -488,17 +544,14 @@ export async function POST(req: NextRequest) {
       if (conflict) {
         return NextResponse.json(
           {
-            error: `Teacher has a scheduling conflict at ${slotDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${slotDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+            error: `Teacher has a scheduling conflict at ${fmtShortDateTz(slotDate, teacherTZ)}`,
           },
           { status: 409 }
         )
       }
-    }    
+    }
 
     // ── Grade-based rate lookup ──
-    // Prefer the gradeBandId sent from the booking form (the parent explicitly
-    // selected a grade at booking time). Fall back to the student profile's
-    // grade band only if no gradeBandId was provided in the request.
     let gradeBandId: string | null = requestedGradeBandId || null
     let snapshotCompensationRate: number | null = null
     let snapshotStudentFacingRate: number | null = null
@@ -523,7 +576,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Fallback to teacher's default rates if no grade-based rate found
     if (snapshotCompensationRate === null) {
       snapshotCompensationRate = Number(teacher.compensationRate)
     }
@@ -531,7 +583,7 @@ export async function POST(req: NextRequest) {
       snapshotStudentFacingRate = Number(teacher.studentFacingRate)
     }
 
-    // ─── TRIAL CLASS: skip BookingOrder/Payment, create directly as SCHEDULED ───
+    // ─── TRIAL CLASS ───
     if (isTrialClass) {
       const trialClasses = await prisma.$transaction(
         slotList.map((slot) =>
@@ -554,7 +606,6 @@ export async function POST(req: NextRequest) {
         )
       )
 
-      // Mark trial as taken for this student+subject
       try {
         const existingLink = await prisma.studentSubject.findFirst({
           where: { studentId, subjectId },
@@ -565,7 +616,6 @@ export async function POST(req: NextRequest) {
             data: { trialTaken: true },
           })
         } else {
-          // No StudentSubject record exists — create one
           await prisma.studentSubject.create({
             data: {
               studentId,
@@ -582,10 +632,13 @@ export async function POST(req: NextRequest) {
       const appUrl = process.env.NEXTAUTH_URL || ""
       const teacherFullName = `${teacher.user.firstName} ${teacher.user.lastName}`
       const studentFullName = `${student.firstName} ${student.lastName}`
-      const formattedSlots = slotList.map((slot) => {
-        const d = new Date(slot)
-        return `${d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-      })
+
+      const parentFormattedSlots = slotList.map((slot) =>
+        fmtDateTz(new Date(slot), parentTZ)
+      )
+      const teacherFormattedSlots = slotList.map((slot) =>
+        fmtDateTz(new Date(slot), teacherTZ)
+      )
 
       if (student.parent?.user?.email) {
         sendEmail({
@@ -597,7 +650,7 @@ export async function POST(req: NextRequest) {
             teacherName: teacherFullName,
             teacherEmail: teacher.user.email,
             subject: subject.name,
-            scheduledSlots: formattedSlots,
+            scheduledSlots: parentFormattedSlots,
             duration: classDuration,
             totalClasses: trialClasses.length,
             isTrial: true,
@@ -614,13 +667,13 @@ export async function POST(req: NextRequest) {
           studentName: studentFullName,
           studentGrade: student.grade,
           subject: subject.name,
-          scheduledSlots: formattedSlots,
+          scheduledSlots: teacherFormattedSlots,
           duration: classDuration,
           totalClasses: trialClasses.length,
           isTrial: true,
           dashboardUrl: `${appUrl}/teacher`,
         }),
-      }).catch((err) => console.error("[Booking] Teacher email failed:", err))      
+      }).catch((err) => console.error("[Booking] Teacher email failed:", err))
 
       return NextResponse.json(
         {
@@ -633,8 +686,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ─── NON-TRIAL: create BookingOrder + Payment + Classes in a transaction ───
-    // If templateId provided, use package price; otherwise use hourly rate
+    // ─── NON-TRIAL ───
     const hourlyRate = snapshotStudentFacingRate
     const perClassAmount = hourlyRate * (classDuration / 60)
     const totalAmount = template
@@ -663,12 +715,11 @@ export async function POST(req: NextRequest) {
 
         if (conflict) {
           throw new Error(
-            `Teacher has a scheduling conflict at ${slotDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${slotDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+            `Teacher has a scheduling conflict at ${fmtShortDateTz(slotDate, teacherTZ)}`
           )
         }
       }
 
-      // If template provided, create a Package record first
       let createdPackageId: string | null = packageId || null
 
       if (template) {
@@ -697,8 +748,7 @@ export async function POST(req: NextRequest) {
       }
 
       // 1. Create the Payment record (PENDING)
-      // ── Apply discount: coupon OR wallet (never both) ──
-      const parentProfile = await tx.parentProfile.findUnique({
+      const txParentProfile = await tx.parentProfile.findUnique({
         where: { userId: session.user.id },
         select: { id: true },
       })
@@ -712,8 +762,7 @@ export async function POST(req: NextRequest) {
       const chosenMethod = discountMethod || "none"
 
       // ── COUPON PATH ──
-      if (chosenMethod === "coupon" && couponCode && parentProfile) {
-        // Validate the coupon inside the transaction
+      if (chosenMethod === "coupon" && couponCode && txParentProfile) {
         const coupon = await tx.coupon.findFirst({
           where: {
             code: { equals: couponCode.trim().toUpperCase(), mode: "insensitive" },
@@ -730,20 +779,17 @@ export async function POST(req: NextRequest) {
           const isUnderGlobalCap = coupon.maxUsesTotal === null || coupon.usedCount < coupon.maxUsesTotal
           const meetsMinOrder = !coupon.minOrderAmount || totalAmount >= Number(coupon.minOrderAmount)
 
-          // Scope check
           let scopeValid = coupon.scope === "ALL_USERS"
           if (!scopeValid && (coupon.scope === "SINGLE_USER" || coupon.scope === "MULTI_USER")) {
-            scopeValid = coupon.assignments.some((a) => a.parentProfileId === parentProfile.id)
+            scopeValid = coupon.assignments.some((a) => a.parentProfileId === txParentProfile.id)
           }
 
-          // Per-user usage check
           const userUsageCount = await tx.couponUsage.count({
-            where: { couponId: coupon.id, parentProfileId: parentProfile.id },
+            where: { couponId: coupon.id, parentProfileId: txParentProfile.id },
           })
           const isUnderUserCap = userUsageCount < coupon.maxUsesPerUser
 
           if (isWithinDates && isUnderGlobalCap && meetsMinOrder && scopeValid && isUnderUserCap) {
-            // Calculate discount
             if (coupon.discountType === "PERCENTAGE") {
               couponDiscount = (totalAmount * Number(coupon.discountValue)) / 100
               if (coupon.maxDiscountAmount && couponDiscount > Number(coupon.maxDiscountAmount)) {
@@ -753,7 +799,6 @@ export async function POST(req: NextRequest) {
               couponDiscount = Number(coupon.discountValue)
             }
 
-            // Cannot exceed order total
             if (couponDiscount > totalAmount) {
               couponDiscount = totalAmount
             }
@@ -762,17 +807,15 @@ export async function POST(req: NextRequest) {
             amountDue = Math.round((totalAmount - couponDiscount) * 100) / 100
             appliedCouponId = coupon.id
 
-            // Record coupon usage
             await tx.couponUsage.create({
               data: {
                 couponId: coupon.id,
-                parentProfileId: parentProfile.id,
-                bookingOrderId: null, // will be updated after bookingOrder is created
+                parentProfileId: txParentProfile.id,
+                bookingOrderId: null,
                 discountApplied: couponDiscount,
               },
             })
 
-            // Increment coupon used count
             await tx.coupon.update({
               where: { id: coupon.id },
               data: { usedCount: { increment: 1 } },
@@ -783,13 +826,12 @@ export async function POST(req: NextRequest) {
               : `$${Number(coupon.discountValue).toFixed(2)} off`
             discountNotes = `Coupon ${coupon.code} applied (${discountLabel}): -$${couponDiscount.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
           }
-          // If validation fails silently, no discount is applied — booking continues at full price
         }
       }
 
       // ── WALLET PATH ──
-      if (chosenMethod === "wallet" && parentProfile && couponDiscount === 0) {
-        const walletResult = await applyWalletDiscount(tx, parentProfile.id, totalAmount)
+      if (chosenMethod === "wallet" && txParentProfile && couponDiscount === 0) {
+        const walletResult = await applyWalletDiscount(tx, txParentProfile.id, totalAmount)
         walletDeduction = walletResult.walletDeduction
         amountDue = walletResult.amountDue
         if (walletDeduction > 0) {
@@ -797,14 +839,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Determine payment method and status
       const finalAmountDue = amountDue
       const paymentMethod = finalAmountDue === 0
         ? (couponDiscount > 0 ? "OTHER" : "WALLET")
         : "BANK_TRANSFER"
       const paymentStatus = finalAmountDue === 0 ? "CONFIRMED" : "PENDING"
 
-      // Create payment record
       const payment = await tx.payment.create({
         data: {
           studentId,
@@ -819,7 +859,6 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // 2. Create the BookingOrder
       const bookingOrder = await tx.bookingOrder.create({
         data: {
           orderRef,
@@ -837,20 +876,17 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // Update coupon usage with bookingOrderId now that we have it
-      if (appliedCouponId && parentProfile) {
+      if (appliedCouponId && txParentProfile) {
         await tx.couponUsage.updateMany({
           where: {
             couponId: appliedCouponId,
-            parentProfileId: parentProfile.id,
+            parentProfileId: txParentProfile.id,
             bookingOrderId: null,
           },
           data: { bookingOrderId: bookingOrder.id },
         })
-      }      
+      }
 
-      // 3. Create all Class records linked to the BookingOrder
-      // If fully paid (wallet/coupon covered entire amount), set status to SCHEDULED
       const classStatus = finalAmountDue === 0 ? "SCHEDULED" : "PENDING_PAYMENT"
       const classRecords = []
       for (const slot of slotList) {
@@ -877,14 +913,9 @@ export async function POST(req: NextRequest) {
       return { payment, bookingOrder, classRecords, createdPackageId }
     })
 
-    // ── Referral conversion trigger (non-blocking, outside main transaction) ──
+    // ── Referral conversion trigger ──
     if (!isTrialClass && session.user.role === "PARENT") {
-      const parentProfile = await prisma.parentProfile.findUnique({
-        where: { userId: session.user.id },
-        select: { id: true },
-      })
       if (parentProfile) {
-        // Run in a separate transaction so it doesn't break the main flow
         prisma.$transaction(async (tx) => {
           await handleReferralConversion(tx, session.user.id, parentProfile.id)
         }).catch((err) => {
@@ -893,7 +924,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Send notifications to admin(s) and coordinator (outside transaction, non-blocking)
+    // Send notifications to admin(s) and coordinator
     try {
       const admins = await prisma.user.findMany({
         where: { role: "ADMIN", status: "ACTIVE" },
@@ -937,15 +968,18 @@ export async function POST(req: NextRequest) {
     } catch (notifyError) {
       console.error("Failed to send booking notifications:", notifyError)
     }
-    
+
     // ─── Send booking emails (non-blocking) ───
     const appUrl = process.env.NEXTAUTH_URL || ""
     const teacherFullName = `${teacher.user.firstName} ${teacher.user.lastName}`
     const studentFullName = `${student.firstName} ${student.lastName}`
-    const formattedSlots = slotList.map((slot) => {
-      const d = new Date(slot)
-      return `${d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-    })
+
+    const parentFormattedSlots = slotList.map((slot) =>
+      fmtDateTz(new Date(slot), parentTZ)
+    )
+    const teacherFormattedSlots = slotList.map((slot) =>
+      fmtDateTz(new Date(slot), teacherTZ)
+    )
 
     if (student.parent?.user?.email) {
       sendEmail({
@@ -957,7 +991,7 @@ export async function POST(req: NextRequest) {
           teacherName: teacherFullName,
           teacherEmail: teacher.user.email,
           subject: subject.name,
-          scheduledSlots: formattedSlots,
+          scheduledSlots: parentFormattedSlots,
           duration: classDuration,
           totalClasses: slotList.length,
           isTrial: false,
@@ -976,13 +1010,13 @@ export async function POST(req: NextRequest) {
         studentName: studentFullName,
         studentGrade: student.grade,
         subject: subject.name,
-        scheduledSlots: formattedSlots,
+        scheduledSlots: teacherFormattedSlots,
         duration: classDuration,
         totalClasses: slotList.length,
         isTrial: false,
         dashboardUrl: `${appUrl}/teacher`,
       }),
-    }).catch((err) => console.error("[Booking] Teacher email failed:", err))    
+    }).catch((err) => console.error("[Booking] Teacher email failed:", err))
 
     const hasCoupon = Number(result.bookingOrder.couponDiscount) > 0
     const hasWallet = Number(result.bookingOrder.walletDeduction) > 0
@@ -1014,7 +1048,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/classes — update a class (confirm, complete, cancel, reschedule, rate, meeting link, notes, etc.)
+// PATCH /api/classes
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -1033,14 +1067,18 @@ export async function PATCH(req: NextRequest) {
       )
     }
 
-    // Fetch the class with relations
     const classRecord = await prisma.class.findUnique({
       where: { id: classId },
       include: {
         student: {
           select: {
             id: true, firstName: true, lastName: true, parentId: true,
-            parent: { select: { user: { select: { firstName: true, email: true } } } },
+            parent: {
+              select: {
+                timezone: true,
+                user: { select: { firstName: true, email: true } },
+              },
+            },
           },
         },
         teacher: {
@@ -1057,6 +1095,10 @@ export async function PATCH(req: NextRequest) {
 
     const userRole = session.user.role
     const userId = session.user.id
+
+    // Resolve timezones for the recipient of each email/notification
+    const parentTZ = classRecord.student.parent?.timezone || "America/New_York"
+    const teacherTZ = classRecord.teacher.timezone || "Asia/Kolkata"
 
     // ──────────────────────────────────────────────
     // ACTION: confirm
@@ -1092,26 +1134,17 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: "Only scheduled or confirmed classes can be completed" }, { status: 400 })
       }
 
-      // ── NEW: Prevent completing future classes ──
       const now = new Date()
       const scheduledTime = new Date(classRecord.scheduledAt)
-      const bufferMs = 30 * 60 * 1000 // 30 minutes grace period
+      const bufferMs = 30 * 60 * 1000
       if (scheduledTime.getTime() > now.getTime() + bufferMs) {
-        const scheduledFormatted = `${scheduledTime.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        })} at ${scheduledTime.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        })}`
         return NextResponse.json(
           {
-            error: `Cannot mark a future class as completed. This class is scheduled for ${scheduledFormatted}. You can mark it complete during or after the scheduled time.`,
+            error: `Cannot mark a future class as completed. This class is scheduled for ${fmtShortDateTz(scheduledTime, teacherTZ)}. You can mark it complete during or after the scheduled time.`,
           },
           { status: 400 }
         )
       }
-      // ── END NEW ──
 
       const { topicCovered, sessionNotes } = body
 
@@ -1127,7 +1160,6 @@ export async function PATCH(req: NextRequest) {
         data: updateData,
       })
 
-      // Update package usage if linked to a package
       if (classRecord.packageId && classRecord.package) {
         await prisma.package.update({
           where: { id: classRecord.packageId },
@@ -1156,7 +1188,6 @@ export async function PATCH(req: NextRequest) {
       // Send class completed email to parent
       if (classRecord.student.parent?.user?.email) {
         const appUrl = process.env.NEXTAUTH_URL || ""
-        const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
 
         sendEmail({
           to: classRecord.student.parent.user.email,
@@ -1166,7 +1197,7 @@ export async function PATCH(req: NextRequest) {
             studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
             teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
             subject: classRecord.subject.name,
-            scheduledAt: scheduledFormatted,
+            scheduledAt: fmtDateTz(classRecord.scheduledAt, parentTZ),
             duration: classRecord.duration,
             topicCovered: topicCovered || classRecord.topicCovered || undefined,
             sessionNotes: sessionNotes || classRecord.sessionNotes || undefined,
@@ -1174,7 +1205,7 @@ export async function PATCH(req: NextRequest) {
             dashboardUrl: `${appUrl}/parent`,
           }),
         }).catch((err) => console.error("[Complete] Parent email failed:", err))
-      }      
+      }
 
       return NextResponse.json({
         message: "Class marked as completed",
@@ -1197,7 +1228,6 @@ export async function PATCH(req: NextRequest) {
 
       const { reason } = body
 
-      // Evaluate cancellation policy for non-pending classes
       if (["SCHEDULED", "CONFIRMED"].includes(classRecord.status)) {
         const settings = await prisma.platformSettings.findFirst()
         if (settings) {
@@ -1226,7 +1256,6 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-      // If this was a trial class, reset trialTaken so student can rebook
       if (classRecord.isTrial) {
         try {
           const studentSubjectLink = await prisma.studentSubject.findFirst({
@@ -1243,19 +1272,18 @@ export async function PATCH(req: NextRequest) {
         }
       }
 
-      // Notify teacher
+      // Notify teacher (use teacher's timezone)
       await prisma.notification.create({
         data: {
           userId: classRecord.teacher.user.id,
           type: "CLASS",
           title: "Class Cancelled",
-          message: `${classRecord.student.firstName} ${classRecord.student.lastName}'s ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} has been cancelled by the student.`,
+          message: `${classRecord.student.firstName} ${classRecord.student.lastName}'s ${classRecord.subject.name} class on ${fmtShortDateTz(classRecord.scheduledAt, teacherTZ)} has been cancelled by the student.`,
         },
       })
 
-      // Send cancellation email to teacher
+      // Send cancellation email to teacher (use teacher's timezone)
       const appUrl = process.env.NEXTAUTH_URL || ""
-      const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
 
       sendEmail({
         to: classRecord.teacher.user.email,
@@ -1265,7 +1293,7 @@ export async function PATCH(req: NextRequest) {
           studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
           teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
           subject: classRecord.subject.name,
-          scheduledAt: scheduledFormatted,
+          scheduledAt: fmtDateTz(classRecord.scheduledAt, teacherTZ),
           duration: classRecord.duration,
           cancelledBy: "student",
           cancelReason: reason || undefined,
@@ -1279,7 +1307,6 @@ export async function PATCH(req: NextRequest) {
         status: updated.status,
       })
     }
-
 
     // ──────────────────────────────────────────────
     // ACTION: cancel_teacher
@@ -1303,7 +1330,6 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-      // If this was a trial class, reset trialTaken so student can rebook
       if (classRecord.isTrial) {
         try {
           const studentSubjectLink = await prisma.studentSubject.findFirst({
@@ -1318,9 +1344,9 @@ export async function PATCH(req: NextRequest) {
         } catch (trialErr) {
           console.error("[Cancel] Failed to reset trialTaken:", trialErr)
         }
-      }      
+      }
 
-      // Notify parent
+      // Notify parent (use parent's timezone)
       if (classRecord.student.parentId) {
         const parent = await prisma.parentProfile.findUnique({
           where: { id: classRecord.student.parentId },
@@ -1332,16 +1358,15 @@ export async function PATCH(req: NextRequest) {
               userId: parent.userId,
               type: "CLASS",
               title: "Class Cancelled by Teacher",
-              message: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName} has cancelled the ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}.`,
+              message: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName} has cancelled the ${classRecord.subject.name} class on ${fmtShortDateTz(classRecord.scheduledAt, parentTZ)}.`,
             },
           })
         }
       }
 
-      // Send cancellation email to parent
+      // Send cancellation email to parent (use parent's timezone)
       if (classRecord.student.parent?.user?.email) {
         const appUrl = process.env.NEXTAUTH_URL || ""
-        const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
 
         sendEmail({
           to: classRecord.student.parent.user.email,
@@ -1351,7 +1376,7 @@ export async function PATCH(req: NextRequest) {
             studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
             teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
             subject: classRecord.subject.name,
-            scheduledAt: scheduledFormatted,
+            scheduledAt: fmtDateTz(classRecord.scheduledAt, parentTZ),
             duration: classRecord.duration,
             cancelledBy: "teacher",
             cancelReason: reason || undefined,
@@ -1437,7 +1462,6 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-      // Update teacher's average rating
       const allRatings = await prisma.class.findMany({
         where: {
           teacherId: classRecord.teacherId,
@@ -1452,7 +1476,6 @@ export async function PATCH(req: NextRequest) {
         data: { rating: Math.round(avgRating * 10) / 10 },
       })
 
-      // Notify teacher
       await prisma.notification.create({
         data: {
           userId: classRecord.teacher.user.id,
@@ -1469,57 +1492,56 @@ export async function PATCH(req: NextRequest) {
       })
     }
 
-// ──────────────────────────────────────────────
-// ACTION: update_student_notes
-// ──────────────────────────────────────────────
-if (action === "update_student_notes") {
-  if (!["ADMIN", "COORDINATOR", "PARENT"].includes(userRole)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+    // ──────────────────────────────────────────────
+    // ACTION: update_student_notes
+    // ──────────────────────────────────────────────
+    if (action === "update_student_notes") {
+      if (!["ADMIN", "COORDINATOR", "PARENT"].includes(userRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
 
-  // Parents can only update notes for their own children's classes
-  if (userRole === "PARENT") {
-    const parent = await prisma.parentProfile.findUnique({
-      where: { userId: session.user.id },
-      include: { students: { select: { id: true } } },
-    })
-    if (!parent || !parent.students.some((s) => s.id === classRecord.studentId)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      if (userRole === "PARENT") {
+        const parent = await prisma.parentProfile.findUnique({
+          where: { userId: session.user.id },
+          include: { students: { select: { id: true } } },
+        })
+        if (!parent || !parent.students.some((s) => s.id === classRecord.studentId)) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+        }
+      }
+
+      if (!["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED", "COMPLETED"].includes(classRecord.status)) {
+        return NextResponse.json({ error: "Cannot update notes for this class" }, { status: 400 })
+      }
+
+      const { studentNotes } = body
+      if (studentNotes === undefined) {
+        return NextResponse.json({ error: "studentNotes is required" }, { status: 400 })
+      }
+
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: { studentNotes: studentNotes.trim() || null },
+      })
+
+      // Notify the teacher (use teacher's timezone for the date reference)
+      if (studentNotes && studentNotes.trim()) {
+        await prisma.notification.create({
+          data: {
+            userId: classRecord.teacher.user.id,
+            type: "CLASS",
+            title: "Student Notes Added",
+            message: `${classRecord.student.firstName} ${classRecord.student.lastName} added notes for the ${classRecord.subject.name} class on ${fmtShortDateTz(classRecord.scheduledAt, teacherTZ)}: "${studentNotes.trim().substring(0, 100)}${studentNotes.trim().length > 100 ? "..." : ""}"`,
+          },
+        })
+      }
+
+      return NextResponse.json({
+        message: "Student notes updated",
+        classId: updated.id,
+        studentNotes: updated.studentNotes,
+      })
     }
-  }
-
-  if (!["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED", "COMPLETED"].includes(classRecord.status)) {
-    return NextResponse.json({ error: "Cannot update notes for this class" }, { status: 400 })
-  }
-
-  const { studentNotes } = body
-  if (studentNotes === undefined) {
-    return NextResponse.json({ error: "studentNotes is required" }, { status: 400 })
-  }
-
-  const updated = await prisma.class.update({
-    where: { id: classId },
-    data: { studentNotes: studentNotes.trim() || null },
-  })
-
-  // Notify the teacher that the student added notes
-  if (studentNotes && studentNotes.trim()) {
-    await prisma.notification.create({
-      data: {
-        userId: classRecord.teacher.user.id,
-        type: "CLASS",
-        title: "Student Notes Added",
-        message: `${classRecord.student.firstName} ${classRecord.student.lastName} added notes for the ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}: "${studentNotes.trim().substring(0, 100)}${studentNotes.trim().length > 100 ? "..." : ""}"`,
-      },
-    })
-  }
-
-  return NextResponse.json({
-    message: "Student notes updated",
-    classId: updated.id,
-    studentNotes: updated.studentNotes,
-  })
-}
 
     // ──────────────────────────────────────────────
     // ACTION: reschedule
@@ -1538,7 +1560,6 @@ if (action === "update_student_notes") {
         return NextResponse.json({ error: "newScheduledAt is required" }, { status: 400 })
       }
 
-      // Evaluate reschedule policy
       const settings = await prisma.platformSettings.findFirst()
       if (settings) {
         const rescheduleCount = classRecord.rescheduleCount ?? 0
@@ -1557,7 +1578,6 @@ if (action === "update_student_notes") {
         }
       }
 
-      // Check for conflicts at new time
       const newDate = new Date(newScheduledAt)
       const classDuration = classRecord.duration || 60
       const newEnd = new Date(newDate.getTime() + classDuration * 60000)
@@ -1593,22 +1613,20 @@ if (action === "update_student_notes") {
         },
       })
 
-      // Notify the other party
       const initiator = ["PARENT"].includes(userRole) ? "student" : "teacher"
       if (initiator === "student") {
+        // Notify teacher (use teacher's timezone)
         await prisma.notification.create({
           data: {
             userId: classRecord.teacher.user.id,
             type: "CLASS",
             title: "Class Rescheduled",
-            message: `${classRecord.student.firstName}'s ${classRecord.subject.name} class has been rescheduled to ${newDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`,
+            message: `${classRecord.student.firstName}'s ${classRecord.subject.name} class has been rescheduled to ${fmtShortDateTz(newDate, teacherTZ)}.`,
           },
         })
-        // Send reschedule email to teacher
-        const appUrl = process.env.NEXTAUTH_URL || ""
-        const previousFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-        const newFormatted = `${newDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
 
+        // Send reschedule email to teacher (use teacher's timezone)
+        const appUrl = process.env.NEXTAUTH_URL || ""
         sendEmail({
           to: classRecord.teacher.user.email,
           subject: `Class rescheduled — ${classRecord.student.firstName} ${classRecord.student.lastName} — Expert Guru`,
@@ -1617,16 +1635,17 @@ if (action === "update_student_notes") {
             studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
             teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
             subject: classRecord.subject.name,
-            previousSchedule: previousFormatted,
-            newSchedule: newFormatted,
+            previousSchedule: fmtDateTz(classRecord.scheduledAt, teacherTZ),
+            newSchedule: fmtDateTz(newDate, teacherTZ),
             duration: classRecord.duration,
             rescheduledBy: "student",
             reason: reason || undefined,
             dashboardUrl: `${appUrl}/teacher`,
           }),
         }).catch((err) => console.error("[Reschedule] Teacher email failed:", err))
-        
+
       } else if (classRecord.student.parentId) {
+        // Notify parent (use parent's timezone)
         const parent = await prisma.parentProfile.findUnique({
           where: { id: classRecord.student.parentId },
           select: { userId: true },
@@ -1637,17 +1656,14 @@ if (action === "update_student_notes") {
               userId: parent.userId,
               type: "CLASS",
               title: "Class Rescheduled by Teacher",
-              message: `${classRecord.teacher.user.firstName} has rescheduled the ${classRecord.subject.name} class to ${newDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`,
+              message: `${classRecord.teacher.user.firstName} has rescheduled the ${classRecord.subject.name} class to ${fmtShortDateTz(newDate, parentTZ)}.`,
             },
           })
         }
 
-        // Send reschedule email to parent
+        // Send reschedule email to parent (use parent's timezone)
         if (classRecord.student.parent?.user?.email) {
           const appUrl = process.env.NEXTAUTH_URL || ""
-          const previousFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-          const newFormatted = `${newDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${newDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-
           sendEmail({
             to: classRecord.student.parent.user.email,
             subject: `Class rescheduled by teacher — ${classRecord.subject.name} — Expert Guru`,
@@ -1656,8 +1672,8 @@ if (action === "update_student_notes") {
               studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
               teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
               subject: classRecord.subject.name,
-              previousSchedule: previousFormatted,
-              newSchedule: newFormatted,
+              previousSchedule: fmtDateTz(classRecord.scheduledAt, parentTZ),
+              newSchedule: fmtDateTz(newDate, parentTZ),
               duration: classRecord.duration,
               rescheduledBy: "teacher",
               reason: reason || undefined,
@@ -1665,7 +1681,6 @@ if (action === "update_student_notes") {
             }),
           }).catch((err) => console.error("[Reschedule] Parent email failed:", err))
         }
-        
       }
 
       return NextResponse.json({
@@ -1676,12 +1691,10 @@ if (action === "update_student_notes") {
       })
     }
 
-
     // ──────────────────────────────────────────────
     // ACTION: update_meeting_link
     // ──────────────────────────────────────────────
     if (action === "update_meeting_link") {
-      // Only the assigned teacher, admin, or coordinator can update the meeting link
       if (userRole === "TEACHER") {
         const teacherProfile = await prisma.teacherProfile.findUnique({
           where: { userId },
@@ -1702,7 +1715,6 @@ if (action === "update_student_notes") {
       let finalLink: string
 
       if (generateJitsi) {
-        // Auto-generate a Jitsi Meet room URL
         const shortId = classId.slice(-8)
         const roomName = `ExpertGuru-${shortId}`
         finalLink = `https://meet.jit.si/${roomName}`
@@ -1720,7 +1732,7 @@ if (action === "update_student_notes") {
         data: { meetingLink: finalLink },
       })
 
-      // Notify parent that meeting link is available
+      // Notify parent (use parent's timezone)
       if (classRecord.student.parentId) {
         const parent = await prisma.parentProfile.findUnique({
           where: { id: classRecord.student.parentId },
@@ -1732,16 +1744,15 @@ if (action === "update_student_notes") {
               userId: parent.userId,
               type: "CLASS",
               title: "Meeting Link Added",
-              message: `A meeting link has been added for ${classRecord.student.firstName}'s ${classRecord.subject.name} class on ${classRecord.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. You can join from your dashboard.`,
+              message: `A meeting link has been added for ${classRecord.student.firstName}'s ${classRecord.subject.name} class on ${fmtShortDateTz(classRecord.scheduledAt, parentTZ)}. You can join from your dashboard.`,
             },
           })
         }
       }
 
-      // Send meeting link email to parent
+      // Send meeting link email to parent (use parent's timezone)
       if (classRecord.student.parent?.user?.email) {
         const appUrl = process.env.NEXTAUTH_URL || ""
-        const scheduledFormatted = `${classRecord.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${classRecord.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
 
         sendEmail({
           to: classRecord.student.parent.user.email,
@@ -1751,13 +1762,13 @@ if (action === "update_student_notes") {
             studentName: `${classRecord.student.firstName} ${classRecord.student.lastName}`,
             teacherName: `${classRecord.teacher.user.firstName} ${classRecord.teacher.user.lastName}`,
             subject: classRecord.subject.name,
-            scheduledAt: scheduledFormatted,
+            scheduledAt: fmtDateTz(classRecord.scheduledAt, parentTZ),
             duration: classRecord.duration,
             meetingLink: finalLink,
             dashboardUrl: `${appUrl}/parent`,
           }),
         }).catch((err) => console.error("[MeetingLink] Parent email failed:", err))
-      }      
+      }
 
       return NextResponse.json({
         message: "Meeting link updated",
@@ -1770,7 +1781,6 @@ if (action === "update_student_notes") {
     // ACTION: update_notes
     // ──────────────────────────────────────────────
     if (action === "update_notes") {
-      // Only the assigned teacher, admin, or coordinator can update notes
       if (userRole === "TEACHER") {
         const teacherProfile = await prisma.teacherProfile.findUnique({
           where: { userId },

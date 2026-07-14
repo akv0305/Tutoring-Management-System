@@ -328,7 +328,27 @@ export function ParentPaymentsClient({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 whitespace-nowrap">
-                      {p.status === "completed" && (
+                        {/* Pay Now for pending payments */}
+                        {p.status === "pending" && (
+                          <form
+                            action="/api/payments/ccavenue/redirect"
+                            method="POST"
+                          >
+                            <input
+                              type="hidden"
+                              name="paymentId"
+                              value={p.id}
+                            />
+                            <button
+                              type="submit"
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-semibold hover:bg-[#0B7C72] transition-colors"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              Pay Now
+                            </button>
+                          </form>
+                        )}
+                        {p.status === "completed" && (
                           <button
                             type="button"
                             onClick={() => window.open(`/api/payments/${p.id}/invoice`, "_blank")}
