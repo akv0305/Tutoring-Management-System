@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherHistoryClient } from "./TeacherHistoryClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -14,6 +15,10 @@ export default async function ClassHistoryPage() {
     where: { user: { email: session.user.email! } },
   })
   if (!teacher) redirect("/unauthorized")
+
+  // ── Timezone setup ──
+  const teacherTZ = teacher.timezone || "Asia/Kolkata"
+  const tzAbbr = getTzAbbr(teacherTZ)
 
   const classesRaw = await prisma.class.findMany({
     where: {
@@ -42,21 +47,26 @@ export default async function ClassHistoryPage() {
     return {
       id: c.id,
       date: c.scheduledAt.toLocaleDateString("en-US", {
+        timeZone: teacherTZ,
         month: "short",
         day: "numeric",
       }),
       time:
         c.scheduledAt.toLocaleTimeString("en-US", {
+          timeZone: teacherTZ,
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
         }) +
         "–" +
         endTime.toLocaleTimeString("en-US", {
+          timeZone: teacherTZ,
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
-        }),
+        }) +
+        " " +
+        tzAbbr,
       student: `${c.student.firstName} ${c.student.lastName}`,
       subject: c.subject.name,
       topic: c.topicCovered ?? "—",

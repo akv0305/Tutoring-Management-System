@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ProgressClient } from "./ProgressClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -29,6 +30,8 @@ export default async function ProgressPage() {
     },
   })
   if (!parent) redirect("/unauthorized")
+
+  const parentTZ = parent.timezone || "America/New_York"
 
   const now = new Date()
 
@@ -98,6 +101,7 @@ export default async function ProgressPage() {
         const completedDate = cls.completedAt ?? cls.scheduledAt
         if (!entry.lastSessionDate || completedDate > new Date(entry.lastSessionDate)) {
           entry.lastSessionDate = completedDate.toLocaleDateString("en-US", {
+            timeZone: parentTZ,
             month: "short",
             day: "numeric",
             year: "numeric",
@@ -110,6 +114,7 @@ export default async function ProgressPage() {
           const tName = `${cls.teacher.user.firstName} ${cls.teacher.user.lastName}`
           entry.recentFeedback.push({
             date: (cls.completedAt ?? cls.scheduledAt).toLocaleDateString("en-US", {
+              timeZone: parentTZ,
               month: "short",
               day: "numeric",
               year: "numeric",
@@ -160,7 +165,7 @@ export default async function ProgressPage() {
     const avgRatingGiven =
       ratingsGiven.length > 0
         ? (ratingsGiven.reduce((sum, c) => sum + (c.parentRating ?? 0), 0) / ratingsGiven.length).toFixed(1)
-        : "—"
+        : ""
 
     // Active subjects count
     const activeSubjects = Object.keys(subjectMap).length

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { CoordinatorStudentsClient } from "./CoordinatorStudentsClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -91,6 +92,10 @@ export default async function CoordinatorStudentsPage() {
     else if (packageStatus === "pending_payment") actionType = "payment"
     else if (packageStatus === "trial_completed") actionType = "package"
 
+    // Timezone for next class display
+    const nextClassTZ = nextClass?.timezone || "America/New_York"
+    const nextClassTzAbbr = nextClass ? getTzAbbr(nextClassTZ, nextClass.scheduledAt) : ""
+
     return {
       id: s.id,
       studentName: `${s.firstName} ${s.lastName}`,
@@ -111,15 +116,18 @@ export default async function CoordinatorStudentsPage() {
       classesRemaining: String(remaining),
       nextClass: nextClass
         ? nextClass.scheduledAt.toLocaleDateString("en-US", {
+            timeZone: nextClassTZ,
             month: "short",
             day: "numeric",
           }) +
           ", " +
           nextClass.scheduledAt.toLocaleTimeString("en-US", {
+            timeZone: nextClassTZ,
             hour: "numeric",
             minute: "2-digit",
             hour12: true,
-          })
+          }) +
+          " " + nextClassTzAbbr
         : "—",
       teacher: mainTeacher
         ? `${mainTeacher.firstName} ${mainTeacher.lastName}`
@@ -133,31 +141,40 @@ export default async function CoordinatorStudentsPage() {
         classesUsed: p.classesUsed,
         classesIncluded: p.classesIncluded,
         expiryDate: p.expiryDate.toLocaleDateString("en-US", {
+          timeZone: "America/New_York",
           month: "short",
           day: "numeric",
           year: "numeric",
         }),
       })),
-      upcomingClasses: s.classes.map((c) => ({
-        subject: c.subject.name,
-        teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
-        scheduledAt: c.scheduledAt.toLocaleDateString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        }) +
-          " at " +
-          c.scheduledAt.toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-          }),
-        status: c.status,
-        isTrial: c.isTrial,
-      })),
+      upcomingClasses: s.classes.map((c) => {
+        const classTZ = c.timezone || "America/New_York"
+        const tzAbbr = getTzAbbr(classTZ, c.scheduledAt)
+        return {
+          subject: c.subject.name,
+          teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+          scheduledAt: c.scheduledAt.toLocaleDateString("en-US", {
+            timeZone: classTZ,
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }) +
+            " at " +
+            c.scheduledAt.toLocaleTimeString("en-US", {
+              timeZone: classTZ,
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            }) +
+            " " + tzAbbr,
+          status: c.status,
+          isTrial: c.isTrial,
+        }
+      }),
       pendingPaymentCount: s.payments.length,
       pendingPaymentTotal: s.payments.reduce((sum, p) => sum + Number(p.amount), 0),
       registeredAt: s.createdAt.toLocaleDateString("en-US", {
+        timeZone: "America/New_York",
         month: "short",
         day: "numeric",
         year: "numeric",

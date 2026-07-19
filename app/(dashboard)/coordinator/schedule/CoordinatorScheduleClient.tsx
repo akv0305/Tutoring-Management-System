@@ -13,6 +13,7 @@ type ClassBlock = {
   id: string; student: string; teacher: string; subject: string
   subjectColor: string; startHour: number; duration: number
   dayIndex: number; isTrial: boolean; status: string
+  studentTime?: string
 }
 type LegendItem = { label: string; cls: string }
 type Student = { id: string; name: string; parentId?: string }
@@ -51,6 +52,9 @@ function Block({ block }: { block: ClassBlock }) {
       </div>
       <div className="truncate text-[9px] mt-0.5 opacity-80">{block.student}</div>
       <div className="truncate text-[9px] opacity-70">{block.teacher}</div>
+      {block.studentTime && (
+        <div className="truncate text-[8px] mt-0.5 opacity-60 italic">{block.studentTime}</div>
+      )}
     </div>
   )
 }
@@ -769,10 +773,11 @@ function AdvancedBookingPanel({ open, onClose, onSuccess }: { open: boolean; onC
 
 /* ─── Main Component ─── */
 export function CoordinatorScheduleClient({
-  classBlocks, dates, monthYear, legend, hasTrial, weekStartISO,
+  classBlocks, dates, monthYear, legend, hasTrial, weekStartISO, tzAbbr,
 }: {
   classBlocks: ClassBlock[]; dates: string[]; monthYear: string
   legend: LegendItem[]; hasTrial: boolean; weekStartISO: string
+  tzAbbr?: string
 }) {
   const [view, setView] = useState<"day" | "week" | "month">("week")
   const [showBookPanel, setShowBookPanel] = useState(false)
@@ -822,7 +827,7 @@ export function CoordinatorScheduleClient({
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <div className="flex items-center gap-3">
               <button onClick={() => navigateWeek(-1)} className="p-1.5 rounded-md hover:bg-gray-100 transition-colors"><ChevronLeft className="w-4 h-4 text-gray-600" /></button>
-              <h2 className="text-base font-semibold text-[#1E293B]">Week of Mon, {monthYear.split(" ")[0]} {dates[0]} – {dates[6]}</h2>
+              <h2 className="text-base font-semibold text-[#1E293B]">Week of Mon, {monthYear.split(" ")[0]} {dates[0]} – {dates[6]}{tzAbbr ? ` (${tzAbbr})` : ""}</h2>
               <button onClick={() => navigateWeek(1)} className="p-1.5 rounded-md hover:bg-gray-100 transition-colors"><ChevronRight className="w-4 h-4 text-gray-600" /></button>
             </div>
             <button onClick={goToday} disabled={isCurrentWeek} className={`text-sm font-medium hover:underline transition-colors ${isCurrentWeek ? "text-gray-300 cursor-default" : "text-[#0D9488]"}`}>Today</button>

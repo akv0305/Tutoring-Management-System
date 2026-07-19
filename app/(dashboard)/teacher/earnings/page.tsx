@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherEarningsClient } from "./TeacherEarningsClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -15,6 +16,9 @@ export default async function EarningsPage() {
     where: { user: { email: session.user.email! } },
   })
   if (!teacher) redirect("/unauthorized")
+
+  // ── Timezone setup ──
+  const teacherTZ = teacher.timezone || "Asia/Kolkata"
 
   // Fetch all payouts
   const payoutsRaw = await prisma.payout.findMany({
@@ -40,6 +44,7 @@ export default async function EarningsPage() {
     status: p.status.toLowerCase(),
     paidDate: p.paidAt
       ? p.paidAt.toLocaleDateString("en-US", {
+          timeZone: teacherTZ,
           month: "short",
           day: "numeric",
           year: "numeric",

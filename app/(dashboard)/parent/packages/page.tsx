@@ -1,9 +1,9 @@
-
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentPackagesClient } from "./ParentPackagesClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -16,6 +16,8 @@ export default async function PackagesPage() {
     include: { students: { select: { id: true, firstName: true } } },
   })
   if (!parent) redirect("/unauthorized")
+
+  const parentTZ = parent.timezone || "America/New_York"
 
   const studentIds = parent.students.map((s) => s.id)
   const childName = parent.students[0]?.firstName ?? "your child"
@@ -50,7 +52,12 @@ export default async function PackagesPage() {
         total: p.classesIncluded,
         used: p.classesUsed,
         remaining,
-        expiry: p.expiryDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        expiry: p.expiryDate.toLocaleDateString("en-US", {
+          timeZone: parentTZ,
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
         expiresInDays,
         pct,
         barColor: expiresInDays <= 20 ? "bg-[#F59E0B]" : "bg-[#0D9488]",
@@ -63,7 +70,12 @@ export default async function PackagesPage() {
     .map((p) => ({
       id: p.id,
       name: p.name,
-      purchaseDate: p.startDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      purchaseDate: p.startDate.toLocaleDateString("en-US", {
+        timeZone: parentTZ,
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
       classCount: p.classesIncluded,
       totalPaid: `$${Number(p.totalPrice)}`,
       status: p.status === "EXHAUSTED" ? "completed" : p.status.toLowerCase(),

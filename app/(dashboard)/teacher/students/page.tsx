@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { TeacherStudentsClient } from "./TeacherStudentsClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -14,6 +15,10 @@ export default async function TeacherStudentsPage() {
     where: { user: { email: session.user.email! } },
   })
   if (!teacher) redirect("/unauthorized")
+
+  // ── Timezone setup ──
+  const teacherTZ = teacher.timezone || "Asia/Kolkata"
+  const tzAbbr = getTzAbbr(teacherTZ)
 
   // Get all packages for this teacher (to find assigned students)
   const packages = await prisma.package.findMany({
@@ -109,9 +114,20 @@ export default async function TeacherStudentsPage() {
     if (!nextClassMap.has(nc.studentId)) {
       nextClassMap.set(
         nc.studentId,
-        nc.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+        nc.scheduledAt.toLocaleDateString("en-US", {
+          timeZone: teacherTZ,
+          month: "short",
+          day: "numeric",
+        }) +
           ", " +
-          nc.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+          nc.scheduledAt.toLocaleTimeString("en-US", {
+            timeZone: teacherTZ,
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }) +
+          " " +
+          tzAbbr
       )
     }
   }
@@ -141,7 +157,7 @@ export default async function TeacherStudentsPage() {
 
   const students = [...studentMap.values()].map((s) => ({
     ...s,
-    nextClass: nextClassMap.get(s.id) ?? "—",
+    nextClass: nextClassMap.get(s.id) ?? "",
     ratingGiven: ratingMap.get(s.id) ?? null,
   }))
 

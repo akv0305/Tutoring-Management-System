@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentPaymentsClient } from "./ParentPaymentsClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 // Prevent Next.js from caching this page — always fetch fresh data
 export const dynamic = "force-dynamic"
@@ -16,6 +17,8 @@ export default async function PaymentsPage() {
     include: { students: { select: { id: true, firstName: true } } },
   })
   if (!parent) redirect("/unauthorized")
+
+  const parentTZ = parent.timezone || "America/New_York"
 
   const studentIds = parent.students.map((s) => s.id)
   const childName = parent.students[0]?.firstName ?? "your child"
@@ -62,6 +65,7 @@ export default async function PaymentsPage() {
       amount: `$${Number(p.amount)}`,
       amountNum: Number(p.amount),
       date: p.createdAt.toLocaleDateString("en-US", {
+        timeZone: parentTZ,
         month: "short",
         day: "numeric",
         year: "numeric",

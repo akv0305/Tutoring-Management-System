@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { OnboardingClient } from "./OnboardingClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -62,6 +63,7 @@ export default async function OnboardingPage() {
     else if (s.onboardingStage === "DROPPED") status = "dropped"
 
     const trialClass = s.classes.find((c) => c.isTrial)
+    const trialTZ = trialClass?.timezone || "America/New_York"
 
     return {
       id: s.id,
@@ -82,17 +84,20 @@ export default async function OnboardingPage() {
       scheduleNotes: s.scheduleNotes ?? null,
       status,
       registered: s.createdAt.toLocaleDateString("en-US", {
+        timeZone: "America/New_York",
         month: "short",
         day: "numeric",
         year: "numeric",
       }),
       updatedAt: s.updatedAt.toLocaleDateString("en-US", {
+        timeZone: "America/New_York",
         month: "short",
         day: "numeric",
         year: "numeric",
       }),
       trialDate: trialClass
         ? trialClass.scheduledAt.toLocaleDateString("en-US", {
+            timeZone: trialTZ,
             month: "short",
             day: "numeric",
           })
@@ -102,26 +107,32 @@ export default async function OnboardingPage() {
         : null,
       trialRating: trialClass?.parentRating ?? null,
       trialFeedback: trialClass?.parentFeedback ?? null,
-      classes: s.classes.map((c) => ({
-        id: c.id,
-        date: c.scheduledAt.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        }),
-        time: c.scheduledAt.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        }),
-        subject: c.subject.name,
-        teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
-        status: c.status.toLowerCase().replace(/_/g, " "),
-        isTrial: c.isTrial,
-        topic: c.topicCovered ?? null,
-        rating: c.parentRating ?? null,
-        feedback: c.parentFeedback ?? null,
-      })),
+      classes: s.classes.map((c) => {
+        const classTZ = c.timezone || "America/New_York"
+        const tzAbbr = getTzAbbr(classTZ, c.scheduledAt)
+        return {
+          id: c.id,
+          date: c.scheduledAt.toLocaleDateString("en-US", {
+            timeZone: classTZ,
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
+          time: c.scheduledAt.toLocaleTimeString("en-US", {
+            timeZone: classTZ,
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }) + " " + tzAbbr,
+          subject: c.subject.name,
+          teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+          status: c.status.toLowerCase().replace(/_/g, " "),
+          isTrial: c.isTrial,
+          topic: c.topicCovered ?? null,
+          rating: c.parentRating ?? null,
+          feedback: c.parentFeedback ?? null,
+        }
+      }),
       packages: s.packages.map((p) => ({
         id: p.id,
         name: p.name,
@@ -132,6 +143,7 @@ export default async function OnboardingPage() {
         remaining: p.classesIncluded - p.classesUsed,
         status: p.status.toLowerCase(),
         expiryDate: p.expiryDate.toLocaleDateString("en-US", {
+          timeZone: "America/New_York",
           month: "short",
           day: "numeric",
           year: "numeric",
@@ -143,6 +155,7 @@ export default async function OnboardingPage() {
         status: o.status.toLowerCase().replace(/_/g, " "),
         totalAmount: Number(o.totalAmount),
         createdAt: o.createdAt.toLocaleDateString("en-US", {
+          timeZone: "America/New_York",
           month: "short",
           day: "numeric",
           year: "numeric",

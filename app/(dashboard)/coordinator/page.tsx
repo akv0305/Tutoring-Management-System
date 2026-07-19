@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { CoordinatorDashboardClient } from "./CoordinatorDashboardClient"
+import { getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
 
@@ -46,14 +47,23 @@ export default async function CoordinatorPage() {
   const todayClasses = students.flatMap((s) =>
     s.classes
       .filter((c) => c.scheduledAt >= todayStart && c.scheduledAt <= todayEnd)
-      .map((c) => ({
-        id: c.id,
-        student: `${s.firstName} ${s.lastName}`,
-        teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
-        subject: c.subject.name,
-        time: c.scheduledAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
-        status: c.status.toLowerCase(),
-      }))
+      .map((c) => {
+        const classTZ = c.timezone || "America/New_York"
+        const tzAbbr = getTzAbbr(classTZ, c.scheduledAt)
+        return {
+          id: c.id,
+          student: `${s.firstName} ${s.lastName}`,
+          teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+          subject: c.subject.name,
+          time: c.scheduledAt.toLocaleTimeString("en-US", {
+            timeZone: classTZ,
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }) + " " + tzAbbr,
+          status: c.status.toLowerCase(),
+        }
+      })
   )
 
   // Upcoming classes (next 7 days, excluding today)
@@ -78,19 +88,28 @@ export default async function CoordinatorPage() {
       name: `${s.firstName} ${s.lastName}`,
       grade: `Grade ${s.grade}`,
       subjects: s.subjects.map((ss) => ss.subject.name).join(", ") || "—",
-      note: `Registered: ${s.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+      note: `Registered: ${s.createdAt.toLocaleDateString("en-US", {
+        timeZone: "America/New_York",
+        month: "short",
+        day: "numeric",
+      })}`,
     }))
 
   const trialScheduled = students
     .filter((s) => s.onboardingStage === "TRIAL_SCHEDULED")
     .map((s) => {
       const trial = s.classes.find((c) => c.isTrial && ["SCHEDULED", "CONFIRMED"].includes(c.status))
+      const trialTZ = trial?.timezone || "America/New_York"
       return {
         name: `${s.firstName} ${s.lastName}`,
         grade: `Grade ${s.grade}`,
         subjects: s.subjects.map((ss) => ss.subject.name).join(", ") || "—",
         note: trial
-          ? `Trial: ${trial.scheduledAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+          ? `Trial: ${trial.scheduledAt.toLocaleDateString("en-US", {
+              timeZone: trialTZ,
+              month: "short",
+              day: "numeric",
+            })}`
           : "Trial TBD",
       }
     })
@@ -119,7 +138,11 @@ export default async function CoordinatorPage() {
           pkg: pkg ? pkg.name : "Direct Payment",
           amount: `$${Number(p.amount)}`,
           method: p.method.replace("_", " "),
-          date: p.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          date: p.createdAt.toLocaleDateString("en-US", {
+            timeZone: "America/New_York",
+            month: "short",
+            day: "numeric",
+          }),
         }
       })
   )

@@ -3,8 +3,12 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { CoordinatorScheduleClient } from "./CoordinatorScheduleClient"
+import { utcToLocal, getTzAbbr } from "@/lib/timezone"
 
 export const dynamic = "force-dynamic"
+
+// Coordinators are based in India — grid positions use IST
+const COORDINATOR_TZ = "Asia/Kolkata"
 
 const SUBJECT_COLORS: Record<string, string> = {
   Mathematics: "bg-teal-100 border-teal-400 text-teal-800",
@@ -77,11 +81,26 @@ export default async function SchedulePage({
   })
 
   const classBlocks = classes.map((c) => {
-    const dt = new Date(c.scheduledAt)
-    const jsDay = dt.getDay()
-    const dayIndex = jsDay === 0 ? 6 : jsDay - 1
-    const hour = dt.getHours()
+    // Convert UTC scheduledAt to coordinator's local time (IST)
+    const local = utcToLocal(c.scheduledAt, COORDINATOR_TZ)
+
+    // dayOfWeek from utcToLocal: 0=Sun, 1=Mon, ..., 6=Sat
+    // Grid needs: 0=Mon, 1=Tue, ..., 6=Sun
+    const dayIndex = local.dayOfWeek === 0 ? 6 : local.dayOfWeek - 1
+
+    // hour in coordinator's timezone
+    const hour = local.hour
     const startHour = hour - 8
+
+    // Student's / class timezone time (for dual display)
+    const classTZ = c.timezone || "America/New_York"
+    const classTzAbbr = getTzAbbr(classTZ, c.scheduledAt)
+    const studentTime = c.scheduledAt.toLocaleTimeString("en-US", {
+      timeZone: classTZ,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }) + " " + classTzAbbr
 
     return {
       id: c.id,
@@ -94,6 +113,7 @@ export default async function SchedulePage({
       dayIndex,
       isTrial: c.isTrial,
       status: c.status.toLowerCase(),
+      studentTime,
     }
   })
 
@@ -103,6 +123,7 @@ export default async function SchedulePage({
   })
 
   const monthYear = new Date(wy, wm - 1, wd).toLocaleDateString("en-US", {
+    timeZone: COORDINATOR_TZ,
     month: "long",
     year: "numeric",
   })
@@ -113,6 +134,8 @@ export default async function SchedulePage({
     cls: (SUBJECT_COLORS[name] ?? DEFAULT_COLOR).replace(/text-\S+/, "").trim(),
   }))
 
+  const tzAbbr = getTzAbbr(COORDINATOR_TZ)
+
   return (
     <CoordinatorScheduleClient
       classBlocks={classBlocks}
@@ -121,6 +144,7 @@ export default async function SchedulePage({
       legend={legend}
       hasTrial={classBlocks.some((b) => b.isTrial)}
       weekStartISO={mondayISO}
+      tzAbbr={tzAbbr}
     />
   )
 }
