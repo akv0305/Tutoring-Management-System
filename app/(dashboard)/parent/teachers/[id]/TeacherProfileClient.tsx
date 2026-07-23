@@ -1217,7 +1217,7 @@ export function TeacherProfileClient({
               <span className="text-sm font-medium text-gray-700">
                 {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
               </span>
-              <button onClick={() => setWeekOffset((w) => Math.min(3, w + 1))} disabled={weekOffset >= 3}
+              <button onClick={() => setWeekOffset((w) => Math.min(12, w + 1))} disabled={weekOffset >= 12}
                 className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 transition-colors">
                 <ChevronRight className="w-4 h-4" />
               </button>

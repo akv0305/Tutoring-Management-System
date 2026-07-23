@@ -46,12 +46,13 @@ export default async function TeacherProfilePage({ params }: { params: { id: str
 
   // Get existing classes for this teacher in the next 4 weeks (to grey out booked slots)
   const now = new Date()
-  const fourWeeksLater = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
+  //const fourWeeksLater = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
+  const threeMonthsLater = new Date(now.getTime() + 91 * 24 * 60 * 60 * 1000)
   const bookedClasses = await prisma.class.findMany({
     where: {
       teacherId: teacher.id,
       status: { in: ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"] },
-      scheduledAt: { gte: now, lte: fourWeeksLater },
+      scheduledAt: { gte: now, lte: threeMonthsLater },
     },
     select: { scheduledAt: true, duration: true },
   })
