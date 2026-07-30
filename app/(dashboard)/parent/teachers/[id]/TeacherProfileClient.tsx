@@ -4,7 +4,7 @@ import React, { useState, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft, Star, Clock, BookOpen, MapPin, Calendar, ChevronLeft,
-  ChevronRight, CheckCircle, Loader2, AlertTriangle, X, Package, Ticket, Wallet,
+  ChevronRight, CheckCircle, Loader2, AlertTriangle, X, Package, Ticket, Wallet, CreditCard, DollarSign,
 } from "lucide-react"
 import { RatingStars } from "@/components/ui/RatingStars"
 import {
@@ -151,6 +151,13 @@ export function TeacherProfileClient({
   const [success, setSuccess] = useState(false)
   const [pendingPayment, setPendingPayment] = useState(false)
   const [bookingOrderRef, setBookingOrderRef] = useState("")
+
+  // Payment gateway state
+  const [availableGateways, setAvailableGateways] = useState<string[]>([])
+  const [defaultGateway, setDefaultGateway] = useState("")
+  const [gatewaysLoaded, setGatewaysLoaded] = useState(false)
+  const [gatewayProcessing, setGatewayProcessing] = useState<string | null>(null)
+  const [pendingPaymentId, setPendingPaymentId] = useState("")
 
   // Discount state
   const [discountMethod, setDiscountMethod] = useState<"none" | "coupon" | "wallet">("none")
@@ -506,8 +513,115 @@ export function TeacherProfileClient({
   // ── SUCCESS SCREEN ──
   if (success) {
     if (pendingPayment) {
+      /* ── Gateway metadata (extensible — add new gateways here) ── */
+      const GATEWAY_META: Record<string, {
+        label: string; description: string; note: string; noteType: "success" | "warning"
+        icon: React.ReactNode; color: string; borderColor: string; bgHover: string; iconBg: string; iconBgHover: string
+      }> = {
+        PAYPAL: {
+          label: "Pay with PayPal",
+          description: "PayPal account, credit card, or debit card via PayPal",
+          note: "Your classes will be scheduled immediately once the PayPal payment is successful. No further approval is needed.",
+          noteType: "success",
+          icon: <DollarSign className="w-6 h-6 text-[#003087]" />,
+          color: "text-[#003087]", borderColor: "border-[#003087]", bgHover: "hover:bg-blue-50",
+          iconBg: "bg-[#003087]/10", iconBgHover: "group-hover:bg-[#003087]/20",
+        },
+        CCAVENUE: {
+          label: "Pay with Credit / Debit Card",
+          description: "Credit card, debit card, net banking & UPI via CCAvenue",
+          note: "Your classes will be scheduled immediately once the online payment is successful. No further approval is needed.",
+          noteType: "success",
+          icon: <CreditCard className="w-6 h-6 text-[#0D9488]" />,
+          color: "text-[#0D9488]", borderColor: "border-[#0D9488]", bgHover: "hover:bg-teal-50",
+          iconBg: "bg-[#0D9488]/10", iconBgHover: "group-hover:bg-[#0D9488]/20",
+        },
+      }
+
+      /* ── Fetch paymentId from pending payments ── */
+      async function resolvePendingPaymentId(): Promise<string> {
+        if (pendingPaymentId) return pendingPaymentId
+        const res = await fetch("/api/payments?status=PENDING")
+        const data = await res.json()
+        if (data.payments?.length > 0) {
+          const match = data.payments.find(
+            (p: { studentId: string }) => p.studentId === studentId
+          ) || data.payments[0]
+          setPendingPaymentId(match.id)
+          return match.id
+        }
+        return ""
+      }
+
+      /* ── Load gateways on first render ── */
+      if (!gatewaysLoaded) {
+        setGatewaysLoaded(true)
+        fetch("/api/payments/gateways")
+          .then((r) => r.json())
+          .then((data) => {
+            setAvailableGateways(data.gateways || [])
+            setDefaultGateway(data.default || "CCAVENUE")
+          })
+          .catch(() => {
+            setAvailableGateways(["CCAVENUE"])
+            setDefaultGateway("CCAVENUE")
+          })
+      }
+
+      /* ── Handle gateway click ── */
+      async function handleGatewayClick(gateway: string) {
+        setError("")
+        setGatewayProcessing(gateway)
+
+        try {
+          const paymentId = await resolvePendingPaymentId()
+          if (!paymentId) {
+            setError("Could not find the pending payment. Please try from your Payments page.")
+            setGatewayProcessing(null)
+            return
+          }
+
+          if (gateway === "CCAVENUE") {
+            const form = document.createElement("form")
+            form.method = "POST"
+            form.action = "/api/payments/ccavenue/redirect"
+            const input = document.createElement("input")
+            input.type = "hidden"
+            input.name = "paymentId"
+            input.value = paymentId
+            form.appendChild(input)
+            document.body.appendChild(form)
+            form.submit()
+          } else if (gateway === "PAYPAL") {
+            const res = await fetch("/api/payments/paypal/create-order", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ paymentId }),
+            })
+            const data = await res.json()
+            if (data.approvalUrl) {
+              window.location.href = data.approvalUrl
+            } else {
+              setError(data.error || "Failed to initiate PayPal payment")
+              setGatewayProcessing(null)
+            }
+          }
+        } catch {
+          setError("Network error. Please try again.")
+          setGatewayProcessing(null)
+        }
+      }
+
+      /* ── Sort gateways: default first ── */
+      const sortedGateways = [...availableGateways].sort((a, b) => {
+        if (a === defaultGateway) return -1
+        if (b === defaultGateway) return 1
+        return 0
+      })
+
       return (
         <div className="max-w-lg mx-auto mt-16 space-y-6">
+          {/* Header */}
           <div className="text-center space-y-3">
             <CheckCircle className="w-16 h-16 text-[#0D9488] mx-auto" />
             <h2 className="text-2xl font-bold text-[#1E293B]">Classes Reserved!</h2>
@@ -518,7 +632,7 @@ export function TeacherProfileClient({
             )}
             <p className="text-gray-500">
               {selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""} reserved with {teacher.name}.
-              Choose how you&apos;d like to pay to confirm your booking.
+              <br />Choose a payment method to confirm your booking.
             </p>
           </div>
 
@@ -529,67 +643,72 @@ export function TeacherProfileClient({
           )}
 
           <div className="space-y-3">
-            <button
-              onClick={async () => {
-                setError("")
-                setLoading(true)
-                try {
-                  const paymentsRes = await fetch("/api/payments?status=PENDING")
-                  const paymentsData = await paymentsRes.json()
-                  let paymentIdToUse = ""
-                  if (paymentsData.payments && paymentsData.payments.length > 0) {
-                    const matchingPayment = paymentsData.payments.find(
-                      (p: { studentId: string }) => p.studentId === studentId
-                    ) || paymentsData.payments[0]
-                    paymentIdToUse = matchingPayment.id
-                  }
-                  if (!paymentIdToUse) {
-                    setError("Could not find the pending payment. Please try from your Payments page.")
-                    setLoading(false)
-                    return
-                  }
-                  const form = document.createElement("form")
-                  form.method = "POST"
-                  form.action = "/api/payments/ccavenue/redirect"
-                  const input = document.createElement("input")
-                  input.type = "hidden"
-                  input.name = "paymentId"
-                  input.value = paymentIdToUse
-                  form.appendChild(input)
-                  document.body.appendChild(form)
-                  form.submit()
-                } catch {
-                  setError("Network error. Please try again.")
-                  setLoading(false)
-                }
-              }}
-              disabled={loading}
-              className="w-full flex items-center gap-4 p-5 bg-white border-2 border-[#0D9488] rounded-xl hover:bg-teal-50 transition-all text-left group"
-            >
-              <div className="w-12 h-12 bg-[#0D9488]/10 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-[#0D9488]/20 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-[#0D9488]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="font-semibold text-[#1E293B]">Pay Online (Debit/Credit Cards)</p>
-                  <span className="px-2 py-0.5 bg-[#0D9488] text-white text-[10px] font-bold rounded-full uppercase">Recommended</span>
-                </div>
-                <p className="text-sm text-gray-500 mt-0.5">Debit & Credit Cards through CC Avenue</p>
-              </div>
-              {loading ? <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin flex-shrink-0" /> : <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-[#0D9488] flex-shrink-0" />}
-            </button>
-            <div className="flex items-start gap-2.5 p-3.5 bg-green-50 border border-green-200 rounded-lg">
-              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-green-700 leading-relaxed">
-                <span className="font-semibold">Note:</span> Your classes will be scheduled immediately once the online payment is successful. No further approval is needed.
-              </p>
-            </div>
+            {/* ── Online Gateways (dynamic, from API) ── */}
+            {sortedGateways.map((gw) => {
+              const meta = GATEWAY_META[gw] || {
+                label: `Pay with ${gw}`,
+                description: "",
+                note: "Your classes will be scheduled once payment is confirmed.",
+                noteType: "success" as const,
+                icon: <CreditCard className="w-6 h-6 text-gray-600" />,
+                color: "text-gray-700", borderColor: "border-gray-300", bgHover: "hover:bg-gray-50",
+                iconBg: "bg-gray-100", iconBgHover: "group-hover:bg-gray-200",
+              }
+              const isProcessing = gatewayProcessing === gw
+              const isDefault = gw === defaultGateway
 
+              return (
+                <React.Fragment key={gw}>
+                  <button
+                    onClick={() => handleGatewayClick(gw)}
+                    disabled={!!gatewayProcessing}
+                    className={`w-full flex items-center gap-4 p-5 bg-white border-2 ${meta.borderColor} rounded-xl ${meta.bgHover} transition-all text-left group
+                      ${gatewayProcessing && !isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    <div className={`w-12 h-12 ${meta.iconBg} rounded-xl flex items-center justify-center flex-shrink-0 ${meta.iconBgHover} transition-colors`}>
+                      {meta.icon}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-[#1E293B]">{meta.label}</p>
+                        {isDefault && (
+                          <span className="px-2 py-0.5 bg-[#0D9488] text-white text-[10px] font-bold rounded-full uppercase">
+                            Recommended
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500 mt-0.5">{meta.description}</p>
+                    </div>
+                    {isProcessing
+                      ? <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin flex-shrink-0" />
+                      : <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 flex-shrink-0" />}
+                  </button>
+
+                  {/* Note for this gateway */}
+                  <div className={`flex items-start gap-2.5 p-3.5 rounded-lg ${
+                    meta.noteType === "success"
+                      ? "bg-green-50 border border-green-200"
+                      : "bg-amber-50 border border-amber-200"
+                  }`}>
+                    <CheckCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                      meta.noteType === "success" ? "text-green-600" : "text-amber-600"
+                    }`} />
+                    <p className={`text-xs leading-relaxed ${
+                      meta.noteType === "success" ? "text-green-700" : "text-amber-700"
+                    }`}>
+                      <span className="font-semibold">Note:</span> {meta.note}
+                    </p>
+                  </div>
+                </React.Fragment>
+              )
+            })}
+
+            {/* ── Offline Payment (always shown last) ── */}
             <button
               onClick={() => router.push("/parent/payments")}
-              className="w-full flex items-center gap-4 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-left group"
+              disabled={!!gatewayProcessing}
+              className={`w-full flex items-center gap-4 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-left group
+                ${gatewayProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-gray-200 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -611,16 +730,15 @@ export function TeacherProfileClient({
             </div>
           </div>
 
-          {/* Next Steps for Student */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
+          {/* Next Steps */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3 text-left">
             <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2">
               <BookOpen className="w-4 h-4" /> Important Next Steps
             </h3>
             <div className="text-sm text-blue-700 space-y-2">
               <p>
-                To help your tutor prepare for the best possible session, please email your
-                syllabus, textbook chapters, or specific topics you&apos;d like to cover
-                <strong> at least 24 hours before the class</strong>.
+                Please email your syllabus or topics to cover
+                <strong> at least 24 hours before the class</strong> so your tutor can prepare.
               </p>
               <div className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-2 border border-blue-200">
                 <span className="text-xs text-blue-500 font-medium">Tutor&apos;s Email:</span>

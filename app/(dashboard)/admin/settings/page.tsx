@@ -13,7 +13,7 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
-  Gift, Sparkles,
+  Gift, Sparkles, CreditCard,
 } from "lucide-react"
 
 /* ═══════════════════════════════════════════════════════════════
@@ -49,6 +49,9 @@ type PlatformSettings = {
   referralRewardAmount: number
   welcomeOfferEnabled: boolean
   welcomeOfferAmount: number
+  paymentGatewayCcavenue: boolean
+  paymentGatewayPaypal: boolean
+  defaultPaymentGateway: string
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -845,10 +848,79 @@ function TabWelcomeOffer({ s, set, onSave, saving, saved }: {
   )
 }
 
+/* ═══════════════════════════════════════════════════════════
+   TAB 8 — Payment Gateways
+   ═══════════════════════════════════════════════════════════ */
+   function TabPaymentGateways({ s, set, onSave, saving, saved }: {
+    s: PlatformSettings; set: (k: keyof PlatformSettings, v: unknown) => void
+    onSave: () => void; saving: boolean; saved: boolean
+  }) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <SectionTitle>Payment Gateway Configuration</SectionTitle>
+        <InfoBanner>
+          Enable or disable payment gateways. At least one gateway must remain active.
+          The default gateway is pre-selected when parents initiate a payment.
+        </InfoBanner>
+  
+        {/* CCAvenue Toggle */}
+        <div className="border border-gray-100 rounded-lg px-4 mb-4">
+          <Toggle
+            checked={s.paymentGatewayCcavenue}
+            onChange={(v) => {
+              // Prevent disabling both gateways
+              if (!v && !s.paymentGatewayPaypal) return
+              set("paymentGatewayCcavenue", v)
+              // If disabling the current default, switch default
+              if (!v && s.defaultPaymentGateway === "CCAVENUE") {
+                set("defaultPaymentGateway", "PAYPAL")
+              }
+            }}
+            label="CCAvenue"
+            description="Credit card, debit card, net banking, UPI via CCAvenue"
+          />
+        </div>
+  
+        {/* PayPal Toggle */}
+        <div className="border border-gray-100 rounded-lg px-4 mb-4">
+          <Toggle
+            checked={s.paymentGatewayPaypal}
+            onChange={(v) => {
+              if (!v && !s.paymentGatewayCcavenue) return
+              set("paymentGatewayPaypal", v)
+              if (!v && s.defaultPaymentGateway === "PAYPAL") {
+                set("defaultPaymentGateway", "CCAVENUE")
+              }
+            }}
+            label="PayPal"
+            description="PayPal account, credit card, or debit card via PayPal"
+          />
+        </div>
+  
+        <Divider />
+  
+        {/* Default Gateway */}
+        <FormRow label="Default Payment Gateway" htmlFor="gw-default">
+          <SelectInput
+            id="gw-default"
+            options={[
+              ...(s.paymentGatewayCcavenue ? ["CCAVENUE"] : []),
+              ...(s.paymentGatewayPaypal ? ["PAYPAL"] : []),
+            ]}
+            value={s.defaultPaymentGateway}
+            onChange={(v) => set("defaultPaymentGateway", v)}
+          />
+        </FormRow>
+  
+        <SaveButton onClick={onSave} saving={saving} saved={saved} />
+      </div>
+    )
+  }  
+
 /* ═══════════════════════════════════════════════════════════════
    TAB DEFINITIONS
 ═══════════════════════════════════════════════════════════════ */
-type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users" | "referral" | "welcome_offer"
+type TabKey = "general" | "cancellation" | "packages" | "notifications" | "users" | "referral" | "welcome_offer" | "gateways"
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "general",       label: "General",              icon: Settings    },
@@ -858,6 +930,7 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "users",         label: "User Management",      icon: Users       },
   { key: "referral",      label: "Referral Program",     icon: Gift        },
   { key: "welcome_offer", label: "Welcome Offer",        icon: Sparkles    },
+  { key: "gateways",      label: "Payment Gateways",     icon: CreditCard  },
 ]
 
 /* ═══════════════════════════════════════════════════════════════
@@ -986,6 +1059,7 @@ export default function SettingsPage() {
       {activeTab === "users"         && <TabUserManagement s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
       {activeTab === "referral"      && <TabReferral s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
       {activeTab === "welcome_offer" && <TabWelcomeOffer s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
+      {activeTab === "gateways"      && <TabPaymentGateways s={settings} set={set} onSave={handleSave} saving={saving} saved={saved} />}
     </div>
   )
 }

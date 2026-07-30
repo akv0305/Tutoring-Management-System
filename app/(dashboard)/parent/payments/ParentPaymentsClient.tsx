@@ -12,6 +12,8 @@ import {
   Banknote,
   Smartphone,
   XCircle,
+  Loader2,
+  X,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -54,6 +56,28 @@ const METHOD_ICONS: Record<string, React.ReactNode> = {
   upi: <Smartphone className="w-4 h-4 text-[#F59E0B]" />,
 }
 
+/* ═══════════════════════════════════════════════════════════
+   GATEWAY LABELS & ICONS
+   ═══════════════════════════════════════════════════════════ */
+const GATEWAY_META: Record<
+  string,
+  { label: string; description: string; icon: React.ReactNode }
+> = {
+  CCAVENUE: {
+    label: "Credit / Debit Card",
+    description: "Pay via CCAvenue (cards, net banking, UPI)",
+    icon: <CreditCard className="w-5 h-5 text-[#1E3A5F]" />,
+  },
+  PAYPAL: {
+    label: "PayPal",
+    description: "Pay with your PayPal account or card",
+    icon: <DollarSign className="w-5 h-5 text-[#003087]" />,
+  },
+}
+
+/* ═══════════════════════════════════════════════════════════
+   REFUND ACTION CELL  (unchanged from original)
+   ═══════════════════════════════════════════════════════════ */
 function RefundActionCell({
   payment,
   onRequestRefund,
@@ -61,7 +85,6 @@ function RefundActionCell({
   payment: Payment
   onRequestRefund: (p: Payment) => void
 }) {
-  // Payment already fully refunded (DB status)
   if (payment.status === "refunded") {
     return (
       <span className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 border border-green-200 text-[#22C55E] rounded-lg text-xs font-medium">
@@ -71,7 +94,6 @@ function RefundActionCell({
     )
   }
 
-  // Only completed payments can have refund actions
   if (payment.status !== "completed") {
     if (payment.status === "pending") {
       return (
@@ -83,7 +105,6 @@ function RefundActionCell({
     return null
   }
 
-  // Refund status-based rendering — anything other than "none" means a refund exists
   switch (payment.refundStatus) {
     case "pending":
       return (
@@ -92,7 +113,6 @@ function RefundActionCell({
           Refund Pending
         </span>
       )
-
     case "approved":
       return (
         <span className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-medium">
@@ -100,7 +120,6 @@ function RefundActionCell({
           Refund Approved
         </span>
       )
-
     case "rejected":
       return (
         <span className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 border border-red-200 text-red-400 rounded-lg text-xs font-medium">
@@ -108,7 +127,6 @@ function RefundActionCell({
           Refund Rejected
         </span>
       )
-
     case "processed":
       return (
         <span className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 border border-green-200 text-[#22C55E] rounded-lg text-xs font-medium">
@@ -116,9 +134,7 @@ function RefundActionCell({
           Refund Processed
         </span>
       )
-
     case "none":
-      // No refund requested yet — show the Refund button
       return (
         <button
           type="button"
@@ -129,9 +145,7 @@ function RefundActionCell({
           Request Refund
         </button>
       )
-
     default:
-      // Safety: any unknown status = don't show refund button
       return (
         <span className="text-xs text-gray-400 italic">
           Refund: {payment.refundStatus}
@@ -140,6 +154,98 @@ function RefundActionCell({
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   GATEWAY SELECTION MODAL
+   ═══════════════════════════════════════════════════════════ */
+function GatewayModal({
+  gateways,
+  defaultGateway,
+  onSelect,
+  onClose,
+  processing,
+}: {
+  gateways: string[]
+  defaultGateway: string
+  onSelect: (gw: string) => void
+  onClose: () => void
+  processing: string | null
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-[#1E293B]">
+            Select Payment Method
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition"
+            disabled={!!processing}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="space-y-3">
+          {gateways.map((gw) => {
+            const meta = GATEWAY_META[gw] || {
+              label: gw,
+              description: "",
+              icon: <CreditCard className="w-5 h-5 text-gray-500" />,
+            }
+            const isProcessing = processing === gw
+            return (
+              <button
+                key={gw}
+                type="button"
+                disabled={!!processing}
+                onClick={() => onSelect(gw)}
+                className={`w-full flex items-center gap-3 p-4 border rounded-xl transition
+                  ${processing ? "opacity-60 cursor-not-allowed" : "hover:bg-gray-50 cursor-pointer"}
+                  ${gw === defaultGateway ? "border-[#0D9488] bg-teal-50/50" : "border-gray-200"}`}
+              >
+                <div className="flex-shrink-0">
+                  {isProcessing ? (
+                    <Loader2 className="w-5 h-5 text-[#0D9488] animate-spin" />
+                  ) : (
+                    meta.icon
+                  )}
+                </div>
+                <div className="flex-1 text-left">
+                  <span className="font-medium text-[#1E293B] text-sm">
+                    {meta.label}
+                  </span>
+                  {meta.description && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {meta.description}
+                    </p>
+                  )}
+                </div>
+                {gw === defaultGateway && !isProcessing && (
+                  <span className="text-xs text-teal-600 font-medium bg-teal-50 px-2 py-0.5 rounded-full">
+                    Default
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={!!processing}
+          className="w-full mt-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MAIN COMPONENT
+   ═══════════════════════════════════════════════════════════ */
 export function ParentPaymentsClient({
   childName,
   payments,
@@ -158,6 +264,13 @@ export function ParentPaymentsClient({
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all")
   const [refundPayment, setRefundPayment] = useState<Payment | null>(null)
 
+  // ── Gateway selection state ──
+  const [gatewayPaymentId, setGatewayPaymentId] = useState<string | null>(null)
+  const [gateways, setGateways] = useState<string[]>([])
+  const [defaultGateway, setDefaultGateway] = useState("")
+  const [gatewayProcessing, setGatewayProcessing] = useState<string | null>(null)
+  const [payButtonLoading, setPayButtonLoading] = useState<string | null>(null)
+
   const filtered = useMemo(
     () =>
       payments.filter((p) =>
@@ -172,6 +285,81 @@ export function ParentPaymentsClient({
     { key: "pending", label: "Pending", count: counts.pending },
     { key: "refunded", label: "Refunded", count: counts.refunded },
   ]
+
+  /* ── Proceed with the chosen gateway ── */
+  function proceedWithGateway(paymentId: string, gateway: string) {
+    setGatewayProcessing(gateway)
+
+    if (gateway === "CCAVENUE") {
+      // Submit a hidden form to CCAvenue redirect (existing flow)
+      const form = document.createElement("form")
+      form.method = "POST"
+      form.action = "/api/payments/ccavenue/redirect"
+      const input = document.createElement("input")
+      input.type = "hidden"
+      input.name = "paymentId"
+      input.value = paymentId
+      form.appendChild(input)
+      document.body.appendChild(form)
+      form.submit()
+    } else if (gateway === "PAYPAL") {
+      // Call PayPal create-order API, then redirect to approval URL
+      fetch("/api/payments/paypal/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.approvalUrl) {
+            window.location.href = data.approvalUrl
+          } else {
+            alert(data.error || "Failed to initiate PayPal payment")
+            setGatewayProcessing(null)
+            setGatewayPaymentId(null)
+            setPayButtonLoading(null)
+          }
+        })
+        .catch(() => {
+          alert("Failed to initiate PayPal payment. Please try again.")
+          setGatewayProcessing(null)
+          setGatewayPaymentId(null)
+          setPayButtonLoading(null)
+        })
+    }
+  }
+
+  /* ── Handle Pay Now click: fetch gateways then decide ── */
+  async function handlePayNow(paymentId: string) {
+    setPayButtonLoading(paymentId)
+    try {
+      const res = await fetch("/api/payments/gateways")
+      const data = await res.json()
+      const enabledGateways: string[] = data.gateways || []
+      const defaultGw: string = data.default || "CCAVENUE"
+
+      if (enabledGateways.length === 0) {
+        alert("No payment gateways are currently enabled. Please contact support.")
+        setPayButtonLoading(null)
+        return
+      }
+
+      // If only one gateway, auto-proceed
+      if (enabledGateways.length === 1) {
+        proceedWithGateway(paymentId, enabledGateways[0])
+        return
+      }
+
+      // Multiple gateways — show modal
+      setGateways(enabledGateways)
+      setDefaultGateway(defaultGw)
+      setGatewayPaymentId(paymentId)
+      setPayButtonLoading(null)
+    } catch {
+      alert("Failed to load payment methods. Please try again.")
+      setPayButtonLoading(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -328,30 +516,31 @@ export function ParentPaymentsClient({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 whitespace-nowrap">
-                        {/* Pay Now for pending payments */}
+                        {/* ── PAY NOW (gateway-aware) ── */}
                         {p.status === "pending" && (
-                          <form
-                            action="/api/payments/ccavenue/redirect"
-                            method="POST"
+                          <button
+                            type="button"
+                            disabled={payButtonLoading === p.id}
+                            onClick={() => handlePayNow(p.id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-semibold hover:bg-[#0B7C72] transition-colors disabled:opacity-60"
                           >
-                            <input
-                              type="hidden"
-                              name="paymentId"
-                              value={p.id}
-                            />
-                            <button
-                              type="submit"
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-semibold hover:bg-[#0B7C72] transition-colors"
-                            >
+                            {payButtonLoading === p.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
                               <CreditCard className="w-3.5 h-3.5" />
-                              Pay Now
-                            </button>
-                          </form>
+                            )}
+                            Pay Now
+                          </button>
                         )}
                         {p.status === "completed" && (
                           <button
                             type="button"
-                            onClick={() => window.open(`/api/payments/${p.id}/invoice`, "_blank")}
+                            onClick={() =>
+                              window.open(
+                                `/api/payments/${p.id}/invoice`,
+                                "_blank"
+                              )
+                            }
                             className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
                           >
                             <Download className="w-3.5 h-3.5" />
@@ -442,7 +631,23 @@ export function ParentPaymentsClient({
         </div>
       </div>
 
-      {/* Refund Modal */}
+      {/* ── Gateway Selection Modal ── */}
+      {gatewayPaymentId && (
+        <GatewayModal
+          gateways={gateways}
+          defaultGateway={defaultGateway}
+          processing={gatewayProcessing}
+          onSelect={(gw) => proceedWithGateway(gatewayPaymentId, gw)}
+          onClose={() => {
+            if (!gatewayProcessing) {
+              setGatewayPaymentId(null)
+              setGateways([])
+            }
+          }}
+        />
+      )}
+
+      {/* ── Refund Modal ── */}
       {refundPayment && (
         <RefundRequestModal
           open={true}

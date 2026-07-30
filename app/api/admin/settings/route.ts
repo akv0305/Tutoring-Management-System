@@ -25,6 +25,10 @@ export async function GET() {
       referralRewardAmount: Number(settings.referralRewardAmount),
       welcomeOfferEnabled: settings.welcomeOfferEnabled,
       welcomeOfferAmount: Number(settings.welcomeOfferAmount),
+      // ← ADDED: Payment gateway fields
+      paymentGatewayCcavenue: settings.paymentGatewayCcavenue,
+      paymentGatewayPaypal: settings.paymentGatewayPaypal,
+      defaultPaymentGateway: settings.defaultPaymentGateway,
     },
   })
 }
@@ -57,6 +61,8 @@ export async function PATCH(req: NextRequest) {
     users: ["minPasswordLength", "passwordResetExpiry", "maxLoginAttempts", "lockoutDuration"],
     referral: ["referralEnabled", "referralRewardAmount"],
     welcome_offer: ["welcomeOfferEnabled", "welcomeOfferAmount"],
+    // ← ADDED: Payment gateways tab whitelist
+    gateways: ["paymentGatewayCcavenue", "paymentGatewayPaypal", "defaultPaymentGateway"],
   }
 
   const tabAllowed = allowed[tab]
@@ -87,6 +93,10 @@ export async function PATCH(req: NextRequest) {
       teacherNoShowRatingHit: Number(updated.teacherNoShowRatingHit),
       referralRewardAmount: Number(updated.referralRewardAmount),
       welcomeOfferAmount: Number(updated.welcomeOfferAmount),
+      // ← ADDED: Return payment gateway fields in response
+      paymentGatewayCcavenue: updated.paymentGatewayCcavenue,
+      paymentGatewayPaypal: updated.paymentGatewayPaypal,
+      defaultPaymentGateway: updated.defaultPaymentGateway,
     },
   })
 }
