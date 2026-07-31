@@ -160,7 +160,9 @@ export function TeacherProfileClient({
   const [pendingPaymentId, setPendingPaymentId] = useState("")
 
   // Discount state
-  const [discountMethod, setDiscountMethod] = useState<"none" | "coupon" | "wallet">("none")
+  //const [discountMethod, setDiscountMethod] = useState<"none" | "coupon" | "wallet">("none")
+  // Discount state (simplified: only optional coupon; wallet is auto-applied)
+  const [useCoupon, setUseCoupon] = useState(false)
   const [couponCode, setCouponCode] = useState("")
   const [couponValidating, setCouponValidating] = useState(false)
   const [couponValid, setCouponValid] = useState<boolean | null>(null)
@@ -302,17 +304,11 @@ export function TeacherProfileClient({
     return 0
   }, [bookingType, selectedTemplate, selectedSlots.length, effectiveRate])
 
-  // Wallet deduction preview
-  const walletDeductionPreview = discountMethod === "wallet" && totalAmount > 0
-    ? Math.min(walletBalance, totalAmount)
-    : 0
-
-  // Coupon discount preview
-  const couponDeductionPreview = discountMethod === "coupon" && couponValid
-    ? couponDiscountAmount
-    : 0
-
-  const amountAfterDiscount = totalAmount - (discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview)
+  // Auto-applied: coupon first, then wallet
+  const couponDeduction = useCoupon && couponValid ? couponDiscountAmount : 0
+  const afterCoupon = Math.max(0, totalAmount - couponDeduction)
+  const walletDeduction = Math.min(walletBalance, afterCoupon)
+  const amountDue = Math.max(0, afterCoupon - walletDeduction)  
 
   const tzAbbr = useMemo(() => getTzAbbr(parentTimezone), [parentTimezone])
   const teacherTzAbbr = useMemo(() => getTzAbbr(teacher.timezone), [teacher.timezone])
@@ -359,17 +355,12 @@ export function TeacherProfileClient({
     setCouponName("")
   }
 
-  function handleDiscountMethodChange(method: "none" | "coupon" | "wallet") {
-    setDiscountMethod(method)
-    if (method !== "coupon") resetCoupon()
-  }
-
   function handleBookingTypeChange(type: BookingType) {
     setBookingType(type)
     setTemplateId("")
     setSelectedSlots([])
     setError("")
-    setDiscountMethod("none")
+    setUseCoupon(false)
     resetCoupon()
   }
 
@@ -378,7 +369,7 @@ export function TeacherProfileClient({
     setSelectedGradeId("")      // reset grade when subject changes
     setTemplateId("")
     setSelectedSlots([])
-    setDiscountMethod("none")   // reset discount since price may change
+    setUseCoupon(false)
     resetCoupon()
     if (bookingType === "trial") {
       const eligible = trialEligibility.find(
@@ -415,9 +406,10 @@ export function TeacherProfileClient({
   function handleGradeChange(newGradeId: string) {
     setSelectedGradeId(newGradeId)
     setSelectedSlots([])
-    setDiscountMethod("none")
+    setUseCoupon(false)
     resetCoupon()
   }
+
 
   function toggleSlot(viewerDateStr: string, viewerTimeStr: string) {
     const key = `${viewerDateStr}_${viewerTimeStr}`
@@ -472,7 +464,7 @@ export function TeacherProfileClient({
         slots,
         duration: 60,
         isTrial: bookingType === "trial",
-        discountMethod: bookingType === "trial" ? "none" : discountMethod,
+        discountMethod: bookingType === "trial" ? "none" : (walletDeduction > 0 ? "wallet" : "none"),
         // NEW: Send the selected gradeBandId so the API can look up the correct rate
         gradeBandId: selectedGradeBandId || undefined,
       }
@@ -480,7 +472,12 @@ export function TeacherProfileClient({
       if (bookingType === "package" && templateId) {
         payload.templateId = templateId
       }
-      if (discountMethod === "coupon" && couponValid && couponCode.trim()) {
+      if (useCoupon && couponValid && couponCode.trim()) {
+        payload.couponCode = couponCode.trim()
+      }
+      // If both coupon and wallet are used, signal wallet too
+      if (useCoupon && couponValid && walletDeduction > 0) {
+        payload.discountMethod = "wallet"
         payload.couponCode = couponCode.trim()
       }
 
@@ -878,138 +875,113 @@ export function TeacherProfileClient({
             </div>
           )}
 
-          {/* ── Discount Section (non-trial only) ── */}
+          {/* ── Discount & Price Breakdown (non-trial only) ── */}
           {bookingType !== "trial" && totalAmount > 0 && (
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-gray-700">Apply Discount (optional)</p>
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-[#1E293B]">Discount</h3>
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDiscountMethodChange("none")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    discountMethod === "none"
-                      ? "border-[#1E3A5F] bg-[#1E3A5F]/5 text-[#1E3A5F]"
-                      : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  <X className="w-3.5 h-3.5" />
-                  No Discount
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleDiscountMethodChange("coupon")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    discountMethod === "coupon"
-                      ? "border-[#0D9488] bg-[#0D9488]/5 text-[#0D9488]"
-                      : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  <Ticket className="w-3.5 h-3.5" />
-                  Use Coupon
-                </button>
-
-                {walletBalance > 0 && (
+              {/* Coupon toggle */}
+              <div className="border border-gray-100 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Ticket className="w-4 h-4 text-[#0D9488]" />
+                    <span className="text-sm font-medium text-[#1E293B]">Have a coupon code?</span>
+                  </div>
                   <button
-                    type="button"
-                    onClick={() => handleDiscountMethodChange("wallet")}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                      discountMethod === "wallet"
-                        ? "border-[#F59E0B] bg-[#F59E0B]/5 text-[#F59E0B]"
-                        : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                    onClick={() => { setUseCoupon(!useCoupon); if (useCoupon) resetCoupon() }}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                      useCoupon
+                        ? "bg-[#0D9488] text-white"
+                        : "border border-gray-300 text-gray-600 hover:bg-gray-50"
                     }`}
                   >
-                    <Wallet className="w-3.5 h-3.5" />
-                    Use Wallet (${walletBalance.toFixed(2)})
+                    {useCoupon ? "Remove" : "Apply Coupon"}
                   </button>
+                </div>
+
+                {useCoupon && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        value={couponCode}
+                        onChange={(e) => {
+                          setCouponCode(e.target.value.toUpperCase())
+                          if (couponValid !== null) resetCoupon()
+                        }}
+                        placeholder="Enter coupon code"
+                        className={`flex-1 px-3 py-2 border rounded-lg text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] ${
+                          couponValid === true ? "border-green-400 bg-green-50" :
+                          couponValid === false ? "border-red-300 bg-red-50" :
+                          "border-gray-200"
+                        }`}
+                        disabled={couponValidating}
+                      />
+                      <button
+                        onClick={validateCoupon}
+                        disabled={!couponCode.trim() || couponValidating || couponValid === true}
+                        className="px-4 py-2 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                      >
+                        {couponValidating ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : couponValid === true ? (
+                          <CheckCircle className="w-4 h-4" />
+                        ) : (
+                          "Apply"
+                        )}
+                      </button>
+                    </div>
+
+                    {couponMessage && (
+                      <div className={`flex items-start gap-2 p-2.5 rounded-lg text-sm ${
+                        couponValid
+                          ? "bg-green-50 border border-green-200 text-green-700"
+                          : "bg-red-50 border border-red-200 text-red-700"
+                      }`}>
+                        {couponValid ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+                        <span>{couponMessage}</span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
-              {/* Coupon input */}
-              {discountMethod === "coupon" && (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      value={couponCode}
-                      onChange={(e) => {
-                        setCouponCode(e.target.value.toUpperCase())
-                        if (couponValid !== null) resetCoupon()
-                      }}
-                      placeholder="Enter coupon code"
-                      className={`flex-1 px-3 py-2 border rounded-lg text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] ${
-                        couponValid === true ? "border-green-400 bg-green-50" :
-                        couponValid === false ? "border-red-300 bg-red-50" :
-                        "border-gray-200"
-                      }`}
-                      disabled={couponValidating}
-                    />
-                    <button
-                      onClick={validateCoupon}
-                      disabled={!couponCode.trim() || couponValidating || couponValid === true}
-                      className="px-4 py-2 bg-[#0D9488] text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
-                    >
-                      {couponValidating ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : couponValid === true ? (
-                        <CheckCircle className="w-4 h-4" />
-                      ) : (
-                        "Apply"
-                      )}
-                    </button>
-                  </div>
-
-                  {couponMessage && (
-                    <div className={`flex items-start gap-2 p-2.5 rounded-lg text-sm ${
-                      couponValid
-                        ? "bg-green-50 border border-green-200 text-green-700"
-                        : "bg-red-50 border border-red-200 text-red-700"
-                    }`}>
-                      {couponValid ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-                      <span>{couponMessage}</span>
-                    </div>
-                  )}
+              {/* Price Breakdown */}
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Subtotal ({selectedSlots.length} class{selectedSlots.length > 1 ? "es" : ""})</span>
+                  <span className="font-semibold text-[#1E293B]">${totalAmount.toFixed(2)}</span>
                 </div>
-              )}
 
-              {/* Wallet preview */}
-              {discountMethod === "wallet" && (
-                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-                  <Wallet className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Wallet balance: ${walletBalance.toFixed(2)}</p>
-                    <p className="text-xs mt-0.5">
-                      ${walletDeductionPreview.toFixed(2)} will be deducted from your wallet.
-                      {amountAfterDiscount > 0 && ` Remaining $${amountAfterDiscount.toFixed(2)} via payment.`}
-                      {amountAfterDiscount === 0 && " No additional payment needed!"}
-                    </p>
+                {couponDeduction > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-green-600">Coupon ({couponName})</span>
+                    <span className="font-semibold text-green-600">-${couponDeduction.toFixed(2)}</span>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Updated total */}
-              {(couponDeductionPreview > 0 || walletDeductionPreview > 0) && (
-                <div className="bg-gray-50 rounded-lg p-3 space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">Original Total</span>
-                    <span className="text-gray-400 line-through">${totalAmount.toFixed(2)}</span>
+                {walletDeduction > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[#0D9488]">Wallet Balance (auto-applied)</span>
+                    <span className="font-semibold text-[#0D9488]">-${walletDeduction.toFixed(2)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">
-                      {discountMethod === "coupon" ? `Coupon (${couponName})` : "Wallet Balance"}
-                    </span>
-                    <span className="text-green-600 font-medium">
-                      -${(discountMethod === "coupon" ? couponDeductionPreview : walletDeductionPreview).toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="border-t border-gray-200 pt-1 flex items-center justify-between">
-                    <span className="text-sm font-semibold text-[#1E293B]">Amount Due</span>
-                    <span className="text-lg font-bold text-[#0D9488]">${amountAfterDiscount.toFixed(2)}</span>
-                  </div>
+                )}
+
+                <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between">
+                  <span className="font-bold text-[#1E293B]">Amount Due</span>
+                  <span className="font-bold text-lg text-[#1E293B]">
+                    {amountDue > 0 ? `$${amountDue.toFixed(2)}` : "Free (Covered by wallet)"}
+                  </span>
                 </div>
-              )}
+
+                {walletBalance > 0 && (
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Wallet balance: ${walletBalance.toFixed(2)} — auto-applied after any coupon discount.
+                  </p>
+                )}
+              </div>
             </div>
           )}
+
 
           {/* Package info */}
           {bookingType === "package" && selectedTemplate && (
@@ -1049,8 +1021,11 @@ export function TeacherProfileClient({
                 ? <><Loader2 className="w-4 h-4 animate-spin" />Booking...</>
                 : bookingType === "trial"
                   ? "Book Trial Class"
-                  : <>Book {selectedSlots.length} Class{selectedSlots.length > 1 ? "es" : ""}</>
+                  : amountDue > 0
+                    ? <>Book & Pay ${amountDue.toFixed(2)}</>
+                    : <>Confirm Booking (Wallet Covers Full Amount)</>
               }
+
             </button>
           </div>
         </div>

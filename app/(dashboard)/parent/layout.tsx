@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Gift,
   Bell,
+  Wallet,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -21,6 +22,7 @@ const navItems = [
   { label: "My Classes",      icon: Calendar,        href: "/parent/classes" },
   { label: "Packages",        icon: Package,         href: "/parent/packages" },
   { label: "Payments",        icon: CreditCard,      href: "/parent/payments" },
+  { label: "Wallet",          icon: Wallet,          href: "/parent/wallet" },
   { label: "Progress",        icon: TrendingUp,      href: "/parent/progress" },
   { label: "Referrals",       icon: Gift,            href: "/parent/referrals" },
   { label: "Notifications",   icon: Bell,            href: "/parent/notifications" },

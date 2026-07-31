@@ -52,6 +52,8 @@ type PlatformSettings = {
   paymentGatewayCcavenue: boolean
   paymentGatewayPaypal: boolean
   defaultPaymentGateway: string
+  walletTopupMinAmount: number
+  walletTopupPresets: string
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -911,6 +913,42 @@ function TabWelcomeOffer({ s, set, onSave, saving, saved }: {
             onChange={(v) => set("defaultPaymentGateway", v)}
           />
         </FormRow>
+
+                {/* Wallet Top-Up Settings */}
+                <div className="border-t border-gray-100 mt-6 pt-6">
+          <h3 className="text-sm font-semibold text-[#1E293B] mb-4">Wallet Top-Up Settings</h3>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+            <Info className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-blue-700">
+              Configure the minimum amount and preset options shown to parents when they top up their wallet.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Minimum Top-Up Amount ($)</label>
+              <input
+                type="number"
+                value={s.walletTopupMinAmount}
+                onChange={(e) => set("walletTopupMinAmount", parseFloat(e.target.value) || 0)}
+                min={1}
+                step="0.01"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Preset Amounts (JSON array)</label>
+              <input
+                type="text"
+                value={s.walletTopupPresets}
+                onChange={(e) => set("walletTopupPresets", e.target.value)}
+                placeholder='[25, 50, 100, 200]'
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488] outline-none"
+              />
+              <p className="text-xs text-gray-400 mt-1">JSON array of dollar amounts, e.g. [25, 50, 100, 200]</p>
+            </div>
+          </div>
+        </div>
   
         <SaveButton onClick={onSave} saving={saving} saved={saved} />
       </div>

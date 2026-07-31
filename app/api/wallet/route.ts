@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 
-// ─── GET /api/wallet ────────────────────────────────────
+// ─── GET /api/wallet ────────────────────────────────────────────────
 // Returns the logged-in parent's wallet balance and transaction history
 export async function GET(req: NextRequest) {
   try {
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"))
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20")))
-    const typeFilter = searchParams.get("type") // REFERRAL_REWARD, BOOKING_DISCOUNT, ADMIN_ADJUSTMENT
+    const typeFilter = searchParams.get("type") // REFERRAL_REWARD, BOOKING_DISCOUNT, ADMIN_ADJUSTMENT, SELF_TOP_UP, WELCOME_OFFER
     const skip = (page - 1) * limit
 
     // Find or create wallet (auto-create with 0 balance if missing)
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
     // Build transaction filter
     const txWhere: any = { walletId: wallet.id }
     if (typeFilter) {
-      const validTypes = ["REFERRAL_REWARD", "BOOKING_DISCOUNT", "ADMIN_ADJUSTMENT"]
+      const validTypes = ["REFERRAL_REWARD", "BOOKING_DISCOUNT", "ADMIN_ADJUSTMENT", "SELF_TOP_UP", "WELCOME_OFFER"]
       if (validTypes.includes(typeFilter.toUpperCase())) {
         txWhere.type = typeFilter.toUpperCase()
       }
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
     // Compute summary stats
     const allTransactions = await prisma.walletTransaction.findMany({
       where: { walletId: wallet.id },
-      select: { amount: true, type: true },
+      select: { amount: true, type: true, createdAt: true },
     })
 
     const totalCredited = allTransactions
@@ -91,21 +91,66 @@ export async function GET(req: NextRequest) {
       .filter((t) => t.type === "REFERRAL_REWARD")
       .reduce((sum, t) => sum + Number(t.amount), 0)
 
-    const bookingDiscounts = allTransactions
-      .filter((t) => t.type === "BOOKING_DISCOUNT")
+    // Current month usage (debits only, current calendar month)
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthlyUsage = allTransactions
+      .filter((t) => Number(t.amount) < 0 && t.createdAt >= monthStart)
       .reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0)
 
-    // Map transactions for response
-    const mappedTransactions = transactions.map((t) => ({
-      id: t.id,
-      amount: Number(t.amount),
-      type: t.type,
-      typeLabel: getTypeLabel(t.type),
-      description: t.description,
-      referenceId: t.referenceId,
-      createdAt: t.createdAt.toISOString(),
-      timestamp: getRelativeTime(t.createdAt),
-    }))
+    // Enrich BOOKING_DISCOUNT transactions with booking details
+    const enrichedTransactions = await Promise.all(
+      transactions.map(async (t) => {
+        let description = t.description
+        let typeLabel = getTypeLabel(t.type)
+
+        // For BOOKING_DISCOUNT, try to fetch booking details
+        if (t.type === "BOOKING_DISCOUNT" && t.referenceId) {
+          try {
+            const bookingOrder = await prisma.bookingOrder.findUnique({
+              where: { id: t.referenceId },
+              include: {
+                classes: {
+                  take: 1,
+                  orderBy: { scheduledAt: "asc" },
+                  include: {
+                    subject: { select: { name: true } },
+                    teacher: {
+                      include: {
+                        user: { select: { firstName: true, lastName: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            })
+            if (bookingOrder?.classes?.[0]) {
+              const cls = bookingOrder.classes[0]
+              const teacherName = `${cls.teacher.user.firstName} ${cls.teacher.user.lastName}`
+              const subjectName = cls.subject.name
+              const classDate = cls.scheduledAt.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              })
+              description = `Used for booking · ${subjectName} with ${teacherName} · ${classDate}`
+            }
+          } catch {
+            // Keep original description if lookup fails
+          }
+        }
+
+        return {
+          id: t.id,
+          amount: Number(t.amount),
+          type: t.type,
+          typeLabel,
+          description,
+          referenceId: t.referenceId,
+          createdAt: t.createdAt.toISOString(),
+          timestamp: getRelativeTime(t.createdAt),
+        }
+      })
+    )
 
     return NextResponse.json({
       wallet: {
@@ -116,9 +161,9 @@ export async function GET(req: NextRequest) {
         totalCredited,
         totalDebited,
         referralEarnings,
-        bookingDiscounts,
+        monthlyUsage,
       },
-      transactions: mappedTransactions,
+      transactions: enrichedTransactions,
       pagination: {
         page,
         limit,
@@ -136,7 +181,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ─── PATCH /api/wallet ──────────────────────────────────
+// ─── PATCH /api/wallet ──────────────────────────────────────────────
 // Admin-only: manually adjust a parent's wallet balance
 // Body: { parentProfileId: string, amount: number, description: string }
 export async function PATCH(req: NextRequest) {
@@ -268,17 +313,19 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// ─── Helper: Transaction type label ─────────────────────
+// ─── Helper: Transaction type label ─────────────────────────────────
 function getTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     REFERRAL_REWARD: "Referral Reward",
-    BOOKING_DISCOUNT: "Booking Discount",
+    BOOKING_DISCOUNT: "Wallet Used",
     ADMIN_ADJUSTMENT: "Admin Adjustment",
+    SELF_TOP_UP: "Wallet Top-Up",
+    WELCOME_OFFER: "Welcome Offer",
   }
   return labels[type] || type
 }
 
-// ─── Helper: Relative time ──────────────────────────────
+// ─── Helper: Relative time ──────────────────────────────────────────
 function getRelativeTime(date: Date): string {
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()

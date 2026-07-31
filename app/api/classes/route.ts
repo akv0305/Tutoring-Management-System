@@ -153,7 +153,7 @@ async function applyWalletDiscount(
           walletId: wallet.id,
           amount: -walletDeduction,
           type: "BOOKING_DISCOUNT",
-          description: `Wallet applied to booking — $${walletDeduction.toFixed(2)} deducted`,
+          description: `Wallet used for class booking — $${walletDeduction.toFixed(2)} deducted`,
         },
       })
 
@@ -885,6 +885,30 @@ export async function POST(req: NextRequest) {
           },
           data: { bookingOrderId: bookingOrder.id },
         })
+      }
+
+      // After bookingOrder is created, link wallet transaction to this order
+      if (walletDeduction > 0 && txParentProfile) {
+        const wallet = await tx.wallet.findUnique({
+          where: { parentProfileId: txParentProfile.id },
+        })
+        if (wallet) {
+          // Update the most recent BOOKING_DISCOUNT transaction for this wallet to include the booking reference
+          const recentWalletTx = await tx.walletTransaction.findFirst({
+            where: {
+              walletId: wallet.id,
+              type: "BOOKING_DISCOUNT",
+              referenceId: null,
+            },
+            orderBy: { createdAt: "desc" },
+          })
+          if (recentWalletTx) {
+            await tx.walletTransaction.update({
+              where: { id: recentWalletTx.id },
+              data: { referenceId: bookingOrder.id },
+            })
+          }
+        }
       }
 
       const classStatus = finalAmountDue === 0 ? "SCHEDULED" : "PENDING_PAYMENT"

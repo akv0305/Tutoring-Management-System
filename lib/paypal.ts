@@ -1,4 +1,5 @@
 // lib/paypal.ts
+
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || ""
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET || ""
 const PAYPAL_MODE = process.env.PAYPAL_MODE || "sandbox"
@@ -38,6 +39,8 @@ export async function createPayPalOrder(params: {
   orderRef: string
   paymentId: string
   bookingOrderId: string
+  returnUrl?: string
+  cancelUrl?: string
 }): Promise<{ id: string; approvalUrl: string }> {
   const token = await getPayPalAccessToken()
   const appUrl = process.env.NEXTAUTH_URL || ""
@@ -63,8 +66,8 @@ export async function createPayPalOrder(params: {
       ],
       application_context: {
         brand_name: "Expert Guru",
-        return_url: `${appUrl}/api/payments/paypal/capture`,
-        cancel_url: `${appUrl}/api/payments/paypal/cancel`,
+        return_url: params.returnUrl || `${appUrl}/api/payments/paypal/capture`,
+        cancel_url: params.cancelUrl || `${appUrl}/api/payments/paypal/cancel`,
         user_action: "PAY_NOW",
         landing_page: "LOGIN",
       },
@@ -116,15 +119,22 @@ export async function capturePayPalOrder(paypalOrderId: string): Promise<{
   }
 
   const data = await res.json()
-  const capture = data.purchase_units?.[0]?.payments?.captures?.[0]
-  const customId = data.purchase_units?.[0]?.payments?.captures?.[0]?.custom_id ||
-    data.purchase_units?.[0]?.custom_id || ""
+  const capture =
+    data.purchase_units?.[0]?.payments?.captures?.[0]
+
+  const customId =
+    data.purchase_units?.[0]?.payments?.captures?.[0]?.custom_id ||
+    data.purchase_units?.[0]?.custom_id ||
+    ""
 
   return {
     status: data.status, // "COMPLETED" on success
     captureId: capture?.id || "",
     payerEmail: data.payer?.email_address || "",
-    amount: capture?.amount?.value || data.purchase_units?.[0]?.amount?.value || "",
+    amount:
+      capture?.amount?.value ||
+      data.purchase_units?.[0]?.amount?.value ||
+      "",
     customId,
   }
 }
@@ -153,6 +163,7 @@ export async function getPayPalOrderDetails(paypalOrderId: string): Promise<{
   }
 
   const data = await res.json()
+
   return {
     status: data.status,
     customId: data.purchase_units?.[0]?.custom_id || "",

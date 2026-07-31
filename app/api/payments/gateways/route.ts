@@ -28,13 +28,25 @@ export async function GET() {
     if (gateways.length === 0) gateways.push("CCAVENUE")
 
     // Ensure default is valid
-    const resolvedDefault = gateways.includes(defaultGateway)
-      ? defaultGateway
-      : gateways[0]
+    const resolvedDefault = gateways.includes(defaultGateway) ? defaultGateway : gateways[0]
+
+    // Parse top-up presets from JSON string
+    let topupPresets = [25, 50, 100, 200]
+    try {
+      if (settings && "walletTopupPresets" in settings && settings.walletTopupPresets) {
+        topupPresets = JSON.parse(settings.walletTopupPresets as string)
+      }
+    } catch {
+      // use defaults
+    }
 
     return NextResponse.json({
       gateways,
       default: resolvedDefault,
+      topupMinAmount: settings && "walletTopupMinAmount" in settings
+        ? Number(settings.walletTopupMinAmount)
+        : 15,
+      topupPresets,
     })
   } catch (error) {
     console.error("[Gateways API] Error:", error)

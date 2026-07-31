@@ -20,7 +20,7 @@ import {
   AlertCircle,
   Loader2,
   Info,
-  ArrowRight,
+  ArrowRight, Wallet,
 } from "lucide-react"
 import { KPICard } from "@/components/ui/KPICard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -181,14 +181,16 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-5">
-        <KPICard
-          title="Wallet Balance"
-          value={`$${data.walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-          subtitle={data.walletBalance > 0 ? "Available for bookings" : "No balance"}
-          change=""
-          changeType="neutral"
-          icon={CreditCard}
-        />
+        <div onClick={() => router.push("/parent/wallet")} className="cursor-pointer hover:ring-2 hover:ring-[#0D9488]/30 rounded-xl transition-all">
+          <KPICard
+            title="Wallet Balance"
+            value={`$${data.walletBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+            subtitle={data.walletBalance > 0 ? "Available for bookings" : "No balance"}
+            change=""
+            changeType="neutral"
+            icon={CreditCard}
+          />
+        </div>
         <KPICard
           title="Classes Remaining"
           value={data.totalRemaining.toString()}
@@ -346,6 +348,7 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
             <h2 className="text-base font-semibold text-[#1E293B] mb-4">Quick Actions</h2>
             <div className="flex flex-col gap-3">
               {[
+                { icon: Wallet, label: "Top Up Wallet", href: "/parent/wallet?action=topup" },
                 { icon: Search,       label: "Browse Teachers",  href: "/parent/teachers" },
                 { icon: CalendarPlus, label: "Schedule a Class", href: "/parent/teachers" },
                 { icon: Package,      label: "Buy Package",      href: "/parent/teachers" },
@@ -407,6 +410,7 @@ export function ParentDashboardClient({ data }: { data: DashboardData }) {
           {data.walletBalance > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h2 className="text-base font-semibold text-[#1E293B] mb-3">Wallet</h2>
+              <button onClick={() => router.push("/parent/wallet?action=topup")} className="px-3 py-1 bg-[#0D9488] text-white text-xs font-semibold rounded-lg hover:bg-teal-700 transition-colors">+ Top Up</button>
               <div className="flex items-center gap-3 mb-4 p-3 bg-[#0D9488]/5 rounded-lg border border-[#0D9488]/20">
                 <CreditCard className="w-6 h-6 text-[#0D9488]" />
                 <div>

@@ -69,7 +69,8 @@ export default function AdminLayout({
       href: "/admin/payments",
       ...(pendingPayments > 0 && { badge: pendingPayments }),
     },
-    { label: "Payouts", icon: Wallet, href: "/admin/payouts" },
+    { label: "Wallets", icon: Wallet, href: "/admin/wallets" },
+    { label: "Payouts", icon: DollarSign, href: "/admin/payouts" },
     {
       label: "Refund Requests",
       icon: RotateCcw,
