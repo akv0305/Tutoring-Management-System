@@ -18,13 +18,13 @@ export default async function CoordinatorClassesPage() {
 
   // Default to current month
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 4, 0, 23, 59, 59, 999)
+  const windowStart = new Date(now.getFullYear(), now.getMonth() - 6, 1)
+  const windowEnd = new Date(now.getFullYear(), now.getMonth() + 4, 0, 23, 59, 59, 999)
 
   const classesRaw = await prisma.class.findMany({
     where: {
       student: { coordinatorId: coordinator.id },
-      scheduledAt: { gte: monthStart, lte: monthEnd },
+      scheduledAt: { gte: windowStart, lte: windowEnd },
     },
     include: {
       student: {

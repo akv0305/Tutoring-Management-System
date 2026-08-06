@@ -10,7 +10,7 @@ import {
   CreditCard,
   GraduationCap,
   BarChart3,
-  Bell,
+  Bell, Package,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -49,6 +49,7 @@ export default function CoordinatorLayout({
     { label: "Dashboard",   icon: LayoutDashboard, href: "/coordinator" },
     { label: "My Students", icon: Users,           href: "/coordinator/students",   ...(totalStudents > 0 ? { badge: totalStudents } : {}) },
     { label: "Classes",     icon: Calendar,        href: "/coordinator/classes" },
+    { label: "Booking History", icon: Package, href: "/coordinator/booking-orders" },
     { label: "Onboarding",  icon: UserPlus,        href: "/coordinator/onboarding", ...(pendingOnboarding > 0 ? { badge: pendingOnboarding } : {}) },
     { label: "Payments",    icon: CreditCard,      href: "/coordinator/payments",   ...(pendingPayments > 0 ? { badge: pendingPayments } : {}) },
     { label: "Teachers",    icon: GraduationCap,   href: "/coordinator/teachers" },
