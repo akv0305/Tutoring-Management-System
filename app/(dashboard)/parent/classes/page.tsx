@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentClassesClient } from "./ParentClassesClient"
 import { getTzAbbr, utcToLocal } from "@/lib/timezone"
-import { expirePendingClasses } from "@/app/api/cron/expire-pending-classes/route"
+import { expirePendingClasses } from "@/lib/expire-pending-classes"
 
 export const dynamic = "force-dynamic"
 

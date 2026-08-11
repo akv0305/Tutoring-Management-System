@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentPaymentsClient } from "./ParentPaymentsClient"
 import { getTzAbbr } from "@/lib/timezone"
-import { expirePendingClasses } from "@/app/api/cron/expire-pending-classes/route"
+import { expirePendingClasses } from "@/lib/expire-pending-classes"
 
 // Prevent Next.js from caching this page — always fetch fresh data
 export const dynamic = "force-dynamic"
