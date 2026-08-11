@@ -759,10 +759,13 @@ export async function POST(req: NextRequest) {
       let amountDue = totalAmount
       let discountNotes: string | null = null
 
-      const chosenMethod = discountMethod || "none"
+      // ── COUPON + WALLET (combined flow) ──
+      // Coupon is applied first (if code provided), then wallet auto-applies
+      // on whatever amount remains. discountMethod value is ignored — both
+      // always run when applicable.
 
-      // ── COUPON PATH ──
-      if (chosenMethod === "coupon" && couponCode && txParentProfile) {
+      // ── Step 1: Apply coupon (if couponCode provided) ──
+      if (couponCode && txParentProfile) {
         const coupon = await tx.coupon.findFirst({
           where: {
             code: { equals: couponCode.trim().toUpperCase(), mode: "insensitive" },
@@ -775,13 +778,21 @@ export async function POST(req: NextRequest) {
 
         if (coupon) {
           const now = new Date()
-          const isWithinDates = now >= new Date(coupon.validFrom) && now <= new Date(coupon.validUntil)
-          const isUnderGlobalCap = coupon.maxUsesTotal === null || coupon.usedCount < coupon.maxUsesTotal
-          const meetsMinOrder = !coupon.minOrderAmount || totalAmount >= Number(coupon.minOrderAmount)
+          const isWithinDates =
+            now >= new Date(coupon.validFrom) && now <= new Date(coupon.validUntil)
+          const isUnderGlobalCap =
+            coupon.maxUsesTotal === null || coupon.usedCount < coupon.maxUsesTotal
+          const meetsMinOrder =
+            !coupon.minOrderAmount || totalAmount >= Number(coupon.minOrderAmount)
 
           let scopeValid = coupon.scope === "ALL_USERS"
-          if (!scopeValid && (coupon.scope === "SINGLE_USER" || coupon.scope === "MULTI_USER")) {
-            scopeValid = coupon.assignments.some((a) => a.parentProfileId === txParentProfile.id)
+          if (
+            !scopeValid &&
+            (coupon.scope === "SINGLE_USER" || coupon.scope === "MULTI_USER")
+          ) {
+            scopeValid = coupon.assignments.some(
+              (a) => a.parentProfileId === txParentProfile.id
+            )
           }
 
           const userUsageCount = await tx.couponUsage.count({
@@ -789,10 +800,19 @@ export async function POST(req: NextRequest) {
           })
           const isUnderUserCap = userUsageCount < coupon.maxUsesPerUser
 
-          if (isWithinDates && isUnderGlobalCap && meetsMinOrder && scopeValid && isUnderUserCap) {
+          if (
+            isWithinDates &&
+            isUnderGlobalCap &&
+            meetsMinOrder &&
+            scopeValid &&
+            isUnderUserCap
+          ) {
             if (coupon.discountType === "PERCENTAGE") {
               couponDiscount = (totalAmount * Number(coupon.discountValue)) / 100
-              if (coupon.maxDiscountAmount && couponDiscount > Number(coupon.maxDiscountAmount)) {
+              if (
+                coupon.maxDiscountAmount &&
+                couponDiscount > Number(coupon.maxDiscountAmount)
+              ) {
                 couponDiscount = Number(coupon.maxDiscountAmount)
               }
             } else {
@@ -821,21 +841,29 @@ export async function POST(req: NextRequest) {
               data: { usedCount: { increment: 1 } },
             })
 
-            const discountLabel = coupon.discountType === "PERCENTAGE"
-              ? `${Number(coupon.discountValue)}% off`
-              : `$${Number(coupon.discountValue).toFixed(2)} off`
+            const discountLabel =
+              coupon.discountType === "PERCENTAGE"
+                ? `${Number(coupon.discountValue)}% off`
+                : `$${Number(coupon.discountValue).toFixed(2)} off`
             discountNotes = `Coupon ${coupon.code} applied (${discountLabel}): -$${couponDiscount.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
           }
         }
       }
 
-      // ── WALLET PATH ──
-      if (chosenMethod === "wallet" && txParentProfile && couponDiscount === 0) {
-        const walletResult = await applyWalletDiscount(tx, txParentProfile.id, totalAmount)
+      // ── Step 2: Auto-apply wallet on remaining amount ──
+      if (txParentProfile && amountDue > 0) {
+        const walletResult = await applyWalletDiscount(
+          tx,
+          txParentProfile.id,
+          amountDue
+        )
         walletDeduction = walletResult.walletDeduction
         amountDue = walletResult.amountDue
         if (walletDeduction > 0) {
-          discountNotes = `Wallet discount applied: $${walletDeduction.toFixed(2)}. Original total: $${totalAmount.toFixed(2)}`
+          const walletNote = `Wallet applied: -$${walletDeduction.toFixed(2)}`
+          discountNotes = discountNotes
+            ? `${discountNotes}. ${walletNote}`
+            : `${walletNote}. Original total: $${totalAmount.toFixed(2)}`
         }
       }
 
