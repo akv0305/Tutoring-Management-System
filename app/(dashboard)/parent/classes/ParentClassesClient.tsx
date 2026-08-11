@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import {
   Calendar,
@@ -19,6 +19,8 @@ import {
   FileText,
   Save,
   Loader2,
+  Filter,
+  AlertTriangle,
 } from "lucide-react"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { RatingStars } from "@/components/ui/RatingStars"
@@ -27,45 +29,45 @@ import { CancelClassModal } from "@/components/modals/CancelClassModal"
 import { RateClassModal } from "@/components/modals/RateClassModal"
 import { ClassDetailsModal } from "@/components/modals/ClassDetailsModal"
 
-type UpcomingClass = {
+/* ──────────────────── Types ──────────────────── */
+
+type ClassRow = {
   id: string
+  scheduledAt: string
   dayLabel: string
   dateNum: number
   month: string
+  dateFormatted: string
   time: string
   duration: string
   teacher: string
   teacherInitials: string
-  subject: string
-  status: string
-  canJoin: boolean
-  isTrial: boolean
   teacherId: string
-  meetingLink: string | null
-  studentNotes: string
-}
-
-type CompletedClass = {
-  id: string
-  date: string
   subject: string
   topic: string
-  teacher: string
-  duration: string
+  status: string
+  statusLower: string
+  canJoin: boolean
+  isTrial: boolean
+  meetingLink: string | null
+  studentNotes: string
+  cancelReason: string
   rated: boolean
   rating: number | null
   hasNotes: boolean
+  isPast: boolean
+  isUpcoming: boolean
+  isCompleted: boolean
+  isCancelled: boolean
 }
 
-type CancelledClass = {
-  id: string
-  date: string
-  subject: string
-  teacher: string
-  reason: string
+type KPIs = {
+  total: number
+  upcoming: number
+  completed: number
+  cancelled: number
+  pendingPayment: number
 }
-
-type MonthStats = { scheduled: number; completed: number; cancelled: number }
 
 type CalendarData = {
   year: number
@@ -75,6 +77,10 @@ type CalendarData = {
   classDates: number[]
   today: number
 }
+
+type StatusFilter = "all" | "upcoming" | "completed" | "cancelled"
+
+/* ──────────────────── Mini Calendar ──────────────────── */
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -137,9 +143,7 @@ function MiniCalendar({ data }: { data: CalendarData }) {
   )
 }
 
-/* ────────────────────────────────────────────────
-   Student Notes Modal
-   ──────────────────────────────────────────────── */
+/* ──────────────────── Student Notes Modal ──────────────────── */
 
 function StudentNotesModal({
   open,
@@ -148,7 +152,7 @@ function StudentNotesModal({
 }: {
   open: boolean
   onClose: () => void
-  cls: UpcomingClass
+  cls: ClassRow
 }) {
   const [notes, setNotes] = useState(cls.studentNotes || "")
   const [saving, setSaving] = useState(false)
@@ -196,7 +200,7 @@ function StudentNotesModal({
           {cls.studentNotes ? "Edit" : "Add"} Notes for Tutor
         </h3>
         <p className="text-sm text-gray-500 mb-4">
-          {cls.subject} — {cls.time}
+          {cls.subject} · {cls.time}
         </p>
         <p className="text-xs text-gray-400 mb-3">
           Share your syllabus, topics to cover, or any preparation notes. Your tutor will see these before the class.
@@ -218,7 +222,7 @@ function StudentNotesModal({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={5}
-          placeholder="e.g., Please focus on Chapter 5 — Quadratic Equations. Student is struggling with word problems. Textbook: NCERT Class 10 Mathematics."
+          placeholder="e.g., Please focus on Chapter 5 — Quadratic Equations. Student is struggling with word problems."
           className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488] focus:border-transparent resize-none"
           disabled={saving || saved}
         />
@@ -240,60 +244,114 @@ function StudentNotesModal({
   )
 }
 
-/* ────────────────────────────────────────────────
-   Main Component
-   ──────────────────────────────────────────────── */
+/* ──────────────────── Status Icon Helper ──────────────────── */
 
-type Tab = "upcoming" | "completed" | "cancelled"
+function ClassStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case "COMPLETED":
+      return <CheckCircle className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
+    case "SCHEDULED":
+    case "CONFIRMED":
+      return <Clock className="w-5 h-5 text-[#0D9488] flex-shrink-0" />
+    case "PENDING_PAYMENT":
+      return <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+    case "CANCELLED_STUDENT":
+    case "CANCELLED_TEACHER":
+      return <XCircle className="w-5 h-5 text-[#EF4444] flex-shrink-0" />
+    case "NO_SHOW_STUDENT":
+    case "NO_SHOW_TEACHER":
+      return <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
+    default:
+      return <Clock className="w-5 h-5 text-gray-400 flex-shrink-0" />
+  }
+}
+
+/* ──────────────────── Status Label Helper ──────────────────── */
+
+function statusLabel(status: string): string {
+  const map: Record<string, string> = {
+    COMPLETED: "completed",
+    SCHEDULED: "scheduled",
+    CONFIRMED: "confirmed",
+    PENDING_PAYMENT: "pending payment",
+    CANCELLED_STUDENT: "cancelled",
+    CANCELLED_TEACHER: "cancelled by teacher",
+    NO_SHOW_STUDENT: "no show",
+    NO_SHOW_TEACHER: "teacher no show",
+  }
+  return map[status] || status.toLowerCase()
+}
+
+/* ──────────────────── Left Border Color ──────────────────── */
+
+function borderColor(status: string): string {
+  switch (status) {
+    case "COMPLETED":
+      return "border-l-[#22C55E]"
+    case "SCHEDULED":
+    case "CONFIRMED":
+      return "border-l-[#0D9488]"
+    case "PENDING_PAYMENT":
+      return "border-l-amber-400"
+    case "CANCELLED_STUDENT":
+    case "CANCELLED_TEACHER":
+      return "border-l-[#EF4444]"
+    case "NO_SHOW_STUDENT":
+    case "NO_SHOW_TEACHER":
+      return "border-l-orange-400"
+    default:
+      return "border-l-gray-300"
+  }
+}
+
+/* ──────────────────── Main Component ──────────────────── */
 
 export function ParentClassesClient({
   childName,
-  upcoming,
-  completed,
-  cancelled,
-  monthStats,
+  classes,
+  kpis,
   calendarData,
-  defaultTab = "upcoming",
 }: {
   childName: string
-  upcoming: UpcomingClass[]
-  completed: CompletedClass[]
-  cancelled: CancelledClass[]
-  monthStats: MonthStats
+  classes: ClassRow[]
+  kpis: KPIs
   calendarData: CalendarData
-  defaultTab?: Tab
 }) {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState<Tab>(defaultTab)
+  const [filter, setFilter] = useState<StatusFilter>("all")
 
-  // Reschedule modal
-  const [rescheduleClass, setRescheduleClass] = useState<UpcomingClass | null>(null)
+  // Modals
+  const [rescheduleClass, setRescheduleClass] = useState<ClassRow | null>(null)
   const [teacherSlots, setTeacherSlots] = useState<any>(null)
+  const [cancelClass, setCancelClass] = useState<ClassRow | null>(null)
+  const [rateClass, setRateClass] = useState<ClassRow | null>(null)
+  const [detailsClass, setDetailsClass] = useState<ClassRow | null>(null)
+  const [notesClass, setNotesClass] = useState<ClassRow | null>(null)
+
   useEffect(() => {
     if (rescheduleClass) {
       fetch(`/api/classes/teacher-slots?teacherId=${rescheduleClass.teacherId}`)
-        .then((r) => r.json()).then((d) => setTeacherSlots(d)).catch(() => {})
+        .then((r) => r.json())
+        .then((d) => setTeacherSlots(d))
+        .catch(() => {})
     } else {
       setTeacherSlots(null)
     }
   }, [rescheduleClass])
 
-  // Cancel modal
-  const [cancelClass, setCancelClass] = useState<UpcomingClass | null>(null)
+  const filtered = useMemo(() => {
+    if (filter === "all") return classes
+    if (filter === "upcoming") return classes.filter((c) => c.isUpcoming)
+    if (filter === "completed") return classes.filter((c) => c.isCompleted)
+    if (filter === "cancelled") return classes.filter((c) => c.isCancelled)
+    return classes
+  }, [classes, filter])
 
-  // Rate modal
-  const [rateClass, setRateClass] = useState<CompletedClass | null>(null)
-
-  // Details modal
-  const [detailsClass, setDetailsClass] = useState<UpcomingClass | null>(null)
-
-  // Student notes modal
-  const [notesClass, setNotesClass] = useState<UpcomingClass | null>(null)
-
-  const tabs: { key: Tab; label: string; badge?: number }[] = [
-    { key: "upcoming", label: "Upcoming", badge: upcoming.length || undefined },
-    { key: "completed", label: "Completed", badge: completed.length || undefined },
-    { key: "cancelled", label: "Cancelled", badge: cancelled.length || undefined },
+  const filters: { key: StatusFilter; label: string; count: number }[] = [
+    { key: "all", label: "All Classes", count: kpis.total },
+    { key: "upcoming", label: "Upcoming", count: kpis.upcoming },
+    { key: "completed", label: "Completed", count: kpis.completed },
+    { key: "cancelled", label: "Cancelled", count: kpis.cancelled },
   ]
 
   return (
@@ -314,261 +372,234 @@ export function ParentClassesClient({
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 w-fit">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={[
-              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-              activeTab === t.key ? "bg-[#1E3A5F] text-white shadow-sm" : "text-gray-600 hover:bg-gray-50",
-            ].join(" ")}
-          >
-            {t.label}
-            {t.badge && (
-              <span className={[
-                "inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold",
-                activeTab === t.key ? "bg-white/20 text-white" : "bg-[#0D9488]/10 text-[#0D9488]",
-              ].join(" ")}>{t.badge}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      {/* Layout: List + Sidebar */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main List */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 w-fit">
+            {filters.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={[
+                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                  filter === f.key
+                    ? "bg-[#1E3A5F] text-white shadow-sm"
+                    : "text-gray-600 hover:bg-gray-50",
+                ].join(" ")}
+              >
+                {f.label}
+                <span
+                  className={[
+                    "inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full text-xs font-bold",
+                    filter === f.key
+                      ? "bg-white/20 text-white"
+                      : "bg-[#0D9488]/10 text-[#0D9488]",
+                  ].join(" ")}
+                >
+                  {f.count}
+                </span>
+              </button>
+            ))}
+          </div>
 
-      {/* UPCOMING */}
-      {activeTab === "upcoming" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <h2 className="text-sm font-semibold text-[#1E293B] mb-4">
-                Upcoming Classes ({upcoming.length})
+          {/* Classes List */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+            <div className="p-5 border-b border-gray-100">
+              <h2 className="text-sm font-semibold text-[#1E293B]">
+                {filter === "all" ? "All Classes" : filters.find((f) => f.key === filter)?.label}
               </h2>
-              <div className="space-y-4">
-                {upcoming.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">No upcoming classes scheduled.</p>
-                ) : (
-                  upcoming.map((cls) => {
-                    const isPending = cls.status === "pending_payment"
+              <p className="text-xs text-gray-500 mt-0.5">
+                {filtered.length} session{filtered.length !== 1 ? "s" : ""} · sorted by date (newest first)
+              </p>
+            </div>
 
-                    return (
-                      <div
-                        key={cls.id}
-                        className={[
-                          "flex gap-4 p-4 rounded-xl border border-gray-100 border-l-4 hover:bg-gray-50 transition-colors",
-                          isPending
-                            ? "border-l-amber-400 bg-amber-50/30"
-                            : "border-l-[#0D9488] bg-gray-50/40",
-                        ].join(" ")}
-                      >
-                        <div className="flex-shrink-0 w-14 text-center">
-                          <div className="bg-[#1E3A5F] text-white rounded-lg py-1.5 px-2">
-                            <p className="text-xs font-medium uppercase">{cls.month}</p>
-                            <p className="text-2xl font-bold leading-tight">{cls.dateNum}</p>
-                          </div>
-                          <p className="text-xs text-gray-500 mt-1">{cls.dayLabel}</p>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2 flex-wrap">
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="text-sm font-semibold text-[#1E293B]">{cls.subject}</h3>
-                                {cls.isTrial && (
-                                  <span className="px-2 py-0.5 bg-[#F59E0B]/10 text-[#B45309] text-xs font-semibold rounded-full border border-[#F59E0B]/30">TRIAL</span>
-                                )}
-                                {isPending && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full border border-amber-300">
-                                    <Clock className="w-3 h-3" />Payment Pending
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{cls.time}</span>
-                                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{cls.duration}</span>
-                              </div>
-                            </div>
-                            {isPending ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-600 text-xs font-medium rounded-full border border-amber-200">
-                                <Clock className="w-3 h-3" />Awaiting Payment
+            <div className="divide-y divide-gray-50">
+              {filtered.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-10">
+                  No classes found.
+                </p>
+              ) : (
+                filtered.map((cls) => (
+                  <div
+                    key={cls.id}
+                    className={`flex gap-4 px-5 py-4 border-l-4 hover:bg-gray-50/50 transition-colors ${borderColor(cls.status)}`}
+                  >
+                    {/* Date block */}
+                    <div className="flex-shrink-0 w-14 text-center">
+                      <div className="bg-[#1E3A5F] text-white rounded-lg py-1.5 px-2">
+                        <p className="text-xs font-medium uppercase">{cls.month}</p>
+                        <p className="text-2xl font-bold leading-tight">{cls.dateNum}</p>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1">{cls.dayLabel}</p>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      {/* Row 1: Subject + Status */}
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <ClassStatusIcon status={cls.status} />
+                            <h3 className="text-sm font-semibold text-[#1E293B]">
+                              {cls.subject}
+                              {cls.topic && (
+                                <span className="text-gray-500 font-normal"> · {cls.topic}</span>
+                              )}
+                            </h3>
+                            {cls.isTrial && (
+                              <span className="px-2 py-0.5 bg-[#F59E0B]/10 text-[#B45309] text-xs font-semibold rounded-full border border-[#F59E0B]/30">
+                                TRIAL
                               </span>
-                            ) : (
-                              <StatusBadge status={cls.status} />
                             )}
                           </div>
-                          <div className="flex items-center gap-2 mt-2">
-                            <div className="w-7 h-7 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-xs font-bold">{cls.teacherInitials}</div>
-                            <span className="text-xs text-gray-600 font-medium">{cls.teacher}</span>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />{cls.time}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />{cls.duration}
+                            </span>
                           </div>
-
-                          {/* Show existing student notes indicator */}
-                          {cls.studentNotes && (
-                            <div className="mt-2 flex items-start gap-1.5 p-2 bg-blue-50 border border-blue-100 rounded-lg">
-                              <FileText className="w-3 h-3 text-blue-500 mt-0.5 flex-shrink-0" />
-                              <p className="text-xs text-blue-700 line-clamp-2">{cls.studentNotes}</p>
-                            </div>
-                          )}
-
-                          {isPending ? (
-                            <div className="mt-3">
-                              <p className="text-xs text-amber-600">
-                                Your coordinator will contact you with a payment link. Class will be confirmed once payment is verified.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 mt-3 flex-wrap">
-                              {cls.canJoin && cls.meetingLink ? (
-                                <button
-                                  onClick={() => window.open(cls.meetingLink!, "_blank", "noopener,noreferrer")}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors"
-                                >
-                                  <Video className="w-3 h-3" />Join Class
-                                </button>
-                              ) : null}
-                              <button
-                                onClick={() => setDetailsClass(cls)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors"
-                              >
-                                <Eye className="w-3 h-3" />View Details
-                              </button>
-                              <button
-                                onClick={() => setRescheduleClass(cls)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
-                              >
-                                <RotateCcw className="w-3 h-3" />Reschedule
-                              </button>
-                              <button
-                                onClick={() => setCancelClass(cls)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
-                              >
-                                <XCircle className="w-3 h-3" />Cancel
-                              </button>
-                              <button
-                                onClick={() => setNotesClass(cls)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 border border-teal-200 text-teal-700 rounded-lg text-xs font-medium hover:bg-teal-50 transition-colors"
-                              >
-                                <FileText className="w-3 h-3" />
-                                {cls.studentNotes ? "Edit Notes" : "Add Notes"}
-                              </button>
-                            </div>
-                          )}
                         </div>
+                        <StatusBadge status={statusLabel(cls.status)} />
                       </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-          <div>
-            <MiniCalendar data={calendarData} />
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mt-4">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">This Month</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: "Scheduled", val: String(monthStats.scheduled), color: "text-[#0D9488]" },
-                  { label: "Completed", val: String(monthStats.completed), color: "text-[#22C55E]" },
-                  { label: "Cancelled", val: String(monthStats.cancelled), color: "text-[#EF4444]" },
-                  { label: "Remaining", val: String(monthStats.scheduled), color: "text-[#F59E0B]" },
-                ].map((s) => (
-                  <div key={s.label} className="text-center p-2 bg-gray-50 rounded-lg">
-                    <p className={`text-xl font-bold ${s.color}`}>{s.val}</p>
-                    <p className="text-xs text-gray-500">{s.label}</p>
+
+                      {/* Row 2: Teacher */}
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="w-7 h-7 rounded-full bg-[#0D9488] flex items-center justify-center text-white text-xs font-bold">
+                          {cls.teacherInitials}
+                        </div>
+                        <span className="text-xs text-gray-600 font-medium">{cls.teacher}</span>
+                      </div>
+
+                      {/* Student notes (if any, for upcoming classes) */}
+                      {cls.studentNotes && cls.isUpcoming && (
+                        <div className="mt-2 flex items-start gap-1.5 p-2 bg-blue-50 border border-blue-100 rounded-lg">
+                          <FileText className="w-3 h-3 text-blue-500 mt-0.5 flex-shrink-0" />
+                          <p className="text-xs text-blue-700 line-clamp-2">{cls.studentNotes}</p>
+                        </div>
+                      )}
+
+                      {/* Cancel reason (for cancelled/no-show) */}
+                      {cls.isCancelled && cls.cancelReason && (
+                        <p className="text-xs text-[#F97316] mt-2 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />{cls.cancelReason}
+                        </p>
+                      )}
+
+                      {/* Pending payment message */}
+                      {cls.status === "PENDING_PAYMENT" && (
+                        <p className="text-xs text-amber-600 mt-2">
+                          Your coordinator will contact you with a payment link. Class will be confirmed once payment is verified.
+                        </p>
+                      )}
+
+                      {/* Actions row */}
+                      <div className="flex items-center gap-2 mt-3 flex-wrap">
+                        {/* Upcoming actions */}
+                        {cls.isUpcoming && cls.status !== "PENDING_PAYMENT" && (
+                          <>
+                            {cls.canJoin && cls.meetingLink && (
+                              <button
+                                onClick={() => window.open(cls.meetingLink!, "_blank", "noopener,noreferrer")}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] text-white rounded-lg text-xs font-medium hover:bg-[#0D9488]/90 transition-colors"
+                              >
+                                <Video className="w-3 h-3" />Join Class
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setDetailsClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A5F] text-white rounded-lg text-xs font-medium hover:bg-[#1E3A5F]/90 transition-colors"
+                            >
+                              <Eye className="w-3 h-3" />View Details
+                            </button>
+                            <button
+                              onClick={() => setRescheduleClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                            >
+                              <RotateCcw className="w-3 h-3" />Reschedule
+                            </button>
+                            <button
+                              onClick={() => setCancelClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
+                            >
+                              <XCircle className="w-3 h-3" />Cancel
+                            </button>
+                            <button
+                              onClick={() => setNotesClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-teal-200 text-teal-700 rounded-lg text-xs font-medium hover:bg-teal-50 transition-colors"
+                            >
+                              <FileText className="w-3 h-3" />
+                              {cls.studentNotes ? "Edit Notes" : "Add Notes"}
+                            </button>
+                          </>
+                        )}
+
+                        {/* Completed actions */}
+                        {cls.isCompleted && (
+                          <>
+                            {cls.rated && cls.rating ? (
+                              <div className="flex items-center gap-1.5">
+                                <RatingStars rating={cls.rating} size="sm" />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setRateClass(cls)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#0D9488] text-[#0D9488] rounded-lg text-xs font-medium hover:bg-[#0D9488]/5 transition-colors"
+                              >
+                                <Star className="w-3 h-3" />Rate Class
+                              </button>
+                            )}
+                            {cls.hasNotes && (
+                              <button
+                                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-[#1E3A5F] rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                                title="View session notes"
+                              >
+                                <Eye className="w-3 h-3" />Session Notes
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
           </div>
         </div>
-      )}
 
-      {/* COMPLETED */}
-      {activeTab === "completed" && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-[#1E293B]">Completed Classes</h2>
-              <p className="text-xs text-gray-500 mt-0.5">{completed.length} sessions completed</p>
-            </div>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {completed.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-10">No completed classes yet.</p>
-            ) : (
-              completed.map((cls) => (
-                <div key={cls.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50/50 transition-colors">
-                  <CheckCircle className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[#1E293B]">
-                      {cls.subject}  <span className="text-gray-500 font-normal">{cls.topic}</span>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {cls.teacher}  {cls.date}  {cls.duration}
-                    </p>
-                  </div>
-                  <StatusBadge status="completed" />
-                  <div className="w-40 flex items-center justify-end gap-2">
-                    {cls.rated && cls.rating ? (
-                      <RatingStars rating={cls.rating} size="sm" />
-                    ) : (
-                      <button
-                        onClick={() => setRateClass(cls)}
-                        className="flex items-center gap-1 text-xs font-medium text-[#0D9488] hover:text-[#0D9488]/80"
-                      >
-                        <Star className="w-3.5 h-3.5" />Rate Class
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    className={[
-                      "p-1.5 rounded-lg transition-colors",
-                      cls.hasNotes ? "text-[#1E3A5F] hover:bg-[#1E3A5F]/10" : "text-gray-300 cursor-not-allowed",
-                    ].join(" ")}
-                    title={cls.hasNotes ? "View session notes" : "No session notes available"}
-                    disabled={!cls.hasNotes}
-                  >
-                    <Eye className="w-4 h-4" />
-                  </button>
+        {/* Sidebar */}
+        <div className="space-y-4">
+          <MiniCalendar data={calendarData} />
+
+          {/* Summary Card */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Summary
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Total", val: String(kpis.total), color: "text-[#1E293B]" },
+                { label: "Upcoming", val: String(kpis.upcoming), color: "text-[#0D9488]" },
+                { label: "Completed", val: String(kpis.completed), color: "text-[#22C55E]" },
+                { label: "Cancelled", val: String(kpis.cancelled), color: "text-[#EF4444]" },
+              ].map((s) => (
+                <div key={s.label} className="text-center p-2 bg-gray-50 rounded-lg">
+                  <p className={`text-xl font-bold ${s.color}`}>{s.val}</p>
+                  <p className="text-xs text-gray-500">{s.label}</p>
                 </div>
-              ))
-            )}
+              ))}
+            </div>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* CANCELLED */}
-      {activeTab === "cancelled" && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="p-5 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-[#1E293B]">Cancelled Classes</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{cancelled.length} cancelled sessions</p>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {cancelled.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-10">No cancelled classes.</p>
-            ) : (
-              cancelled.map((cls) => (
-                <div key={cls.id} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50/50 transition-colors">
-                  <AlertCircle className="w-5 h-5 text-[#EF4444] flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[#1E293B]">
-                      {cls.subject}  <span className="text-gray-500 font-normal">{cls.teacher}</span>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">{cls.date}</p>
-                    <p className="text-xs text-[#F97316] mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />{cls.reason}
-                    </p>
-                  </div>
-                  <StatusBadge status="cancelled" />
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      {/* ── MODALS ── */}
 
-      {/*  MODALS  */}
-
-      {/* Reschedule Modal */}
+      {/* Reschedule */}
       {rescheduleClass && teacherSlots && (
         <RescheduleModal
           open={!!rescheduleClass}
@@ -585,7 +616,7 @@ export function ParentClassesClient({
         />
       )}
 
-      {/* Cancel Modal */}
+      {/* Cancel */}
       {cancelClass && (
         <CancelClassModal
           open={!!cancelClass}
@@ -600,7 +631,7 @@ export function ParentClassesClient({
         />
       )}
 
-      {/* Class Details Modal */}
+      {/* Details */}
       {detailsClass && (
         <ClassDetailsModal
           open={!!detailsClass}
@@ -613,14 +644,14 @@ export function ParentClassesClient({
             date: `${detailsClass.dayLabel}, ${detailsClass.month} ${detailsClass.dateNum}`,
             time: detailsClass.time,
             duration: detailsClass.duration,
-            status: detailsClass.status,
+            status: detailsClass.statusLower,
             isTrial: detailsClass.isTrial,
             meetingLink: detailsClass.meetingLink,
           }}
         />
       )}
 
-      {/* Rate Modal */}
+      {/* Rate */}
       {rateClass && (
         <RateClassModal
           open={!!rateClass}
@@ -629,11 +660,11 @@ export function ParentClassesClient({
           classId={rateClass.id}
           subject={rateClass.subject}
           teacherName={rateClass.teacher}
-          classDate={rateClass.date}
+          classDate={rateClass.dateFormatted}
         />
       )}
 
-      {/* Student Notes Modal */}
+      {/* Student Notes */}
       {notesClass && (
         <StudentNotesModal
           open={!!notesClass}

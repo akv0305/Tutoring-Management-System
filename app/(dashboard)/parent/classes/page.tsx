@@ -4,27 +4,20 @@ import { authOptions } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ParentClassesClient } from "./ParentClassesClient"
 import { getTzAbbr, utcToLocal } from "@/lib/timezone"
+import { expirePendingClasses } from "@/app/api/cron/expire-pending-classes/route"
 
 export const dynamic = "force-dynamic"
 
-type Tab = "upcoming" | "completed" | "cancelled"
+const UPCOMING_STATUSES = ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"]
+const COMPLETED_STATUSES = ["COMPLETED"]
+const CANCELLED_STATUSES = [
+  "CANCELLED_STUDENT",
+  "CANCELLED_TEACHER",
+  "NO_SHOW_STUDENT",
+  "NO_SHOW_TEACHER",
+]
 
-const VALID_TABS: Record<string, Tab> = {
-  upcoming: "upcoming",
-  scheduled: "upcoming",
-  confirmed: "upcoming",
-  pending_payment: "upcoming",
-  completed: "completed",
-  cancelled: "cancelled",
-  cancelled_student: "cancelled",
-  cancelled_teacher: "cancelled",
-}
-
-export default async function ClassesPage({
-  searchParams,
-}: {
-  searchParams: { status?: string }
-}) {
+export default async function ClassesPage() {
   const session = await getServerSession(authOptions)
   if (!session || session.user.role !== "PARENT") redirect("/unauthorized")
 
@@ -33,125 +26,132 @@ export default async function ClassesPage({
     include: { students: { select: { id: true, firstName: true } } },
   })
   if (!parent) redirect("/unauthorized")
-  
+
   const parentTZ = parent.timezone || "America/New_York"
   const tzLabel = getTzAbbr(parentTZ)
-
-  // Resolve default tab from query param
-  const rawStatus = (searchParams.status ?? "").toLowerCase().trim()
-  const defaultTab: Tab = VALID_TABS[rawStatus] ?? "upcoming"
 
   const studentIds = parent.students.map((s) => s.id)
   const childName = parent.students[0]?.firstName ?? "your child"
 
+  // ── AUTO-EXPIRE past pending-payment classes before fetching ──
+  await expirePendingClasses({ studentIds })
+
   const allClasses = await prisma.class.findMany({
     where: { studentId: { in: studentIds } },
     include: {
-      teacher: { include: { user: { select: { firstName: true, lastName: true } } } },
+      teacher: {
+        include: {
+          user: { select: { firstName: true, lastName: true } },
+        },
+      },
       subject: { select: { name: true } },
       student: { select: { firstName: true, lastName: true } },
     },
-    orderBy: { scheduledAt: "asc" },
+    orderBy: { scheduledAt: "desc" },
   })
 
   const now = new Date()
 
-  // Upcoming — include PENDING_PAYMENT so parents can see reserved classes
-  const upcoming = allClasses
-    .filter(
-      (c) =>
-        c.scheduledAt >= now &&
-        ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
-    )
-    .map((c) => {
-      const dt = c.scheduledAt
-      const endTime = new Date(dt.getTime() + (c.duration ?? 60) * 60000)
-      const teacherName = `${c.teacher.user.firstName} ${c.teacher.user.lastName}`
-      const initials = `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`
-      // Can join if class starts within 15 minutes
-      const canJoin = dt.getTime() - now.getTime() < 15 * 60000 && dt.getTime() > now.getTime() - 60 * 60000
+  // ── Build unified ClassRow[] ──
+  const classes = allClasses.map((c) => {
+    const dt = c.scheduledAt
+    const endTime = new Date(dt.getTime() + (c.duration ?? 60) * 60_000)
+    const teacherName = `${c.teacher.user.firstName} ${c.teacher.user.lastName}`
+    const initials = `${c.teacher.user.firstName[0]}${c.teacher.user.lastName[0]}`
 
-      return {
-        id: c.id,
-        dayLabel: dt.toLocaleDateString("en-US", { weekday: "long", timeZone: parentTZ }),
-        dateNum: parseInt(utcToLocal(dt, parentTZ).dateStr.split("-")[2]),
-        month: dt.toLocaleDateString("en-US", { month: "short", timeZone: parentTZ }),
-        time:
-          dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: parentTZ }) +
-          " – " +
-          endTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: parentTZ }) +
-          " " + tzLabel,
-        duration: `${c.duration ?? 60} min`,
-        teacher: teacherName,
-        teacherInitials: initials,
-        subject: `${c.subject.name}${c.topicCovered ? " — " + c.topicCovered : ""}`,
-        status: c.status.toLowerCase(),
-        canJoin,
-        isTrial: c.isTrial,
-        teacherId: c.teacherId,
-        meetingLink: c.meetingLink || null,
-        studentNotes: c.studentNotes ?? "",
-      }
-    })
+    const isUpcoming = UPCOMING_STATUSES.includes(c.status)
+    const isCompleted = COMPLETED_STATUSES.includes(c.status)
+    const isCancelled = CANCELLED_STATUSES.includes(c.status)
+    const isPast = dt < now && !isCompleted && !isCancelled
 
-  // Completed
-  const completed = allClasses
-    .filter((c) => c.status === "COMPLETED")
-    .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0))
-    .map((c) => ({
+    // Can join if class starts within 15 min and hasn't ended
+    const canJoin =
+      isUpcoming &&
+      dt.getTime() - now.getTime() < 15 * 60_000 &&
+      endTime.getTime() > now.getTime()
+
+    return {
       id: c.id,
-      date: (c.completedAt ?? c.scheduledAt).toLocaleDateString("en-US", {
+      scheduledAt: dt.toISOString(),
+      dayLabel: dt.toLocaleDateString("en-US", {
+        weekday: "long",
+        timeZone: parentTZ,
+      }),
+      dateNum: parseInt(utcToLocal(dt, parentTZ).dateStr.split("-")[2]),
+      month: dt.toLocaleDateString("en-US", {
+        month: "short",
+        timeZone: parentTZ,
+      }),
+      dateFormatted: dt.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
-        timeZone: parentTZ,   // ← ADD THIS
+        timeZone: parentTZ,
       }),
-      subject: c.subject.name,
-      topic: c.topicCovered ?? "—",
-      teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
+      time:
+        dt.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: parentTZ,
+        }) +
+        " – " +
+        endTime.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+          timeZone: parentTZ,
+        }) +
+        " " +
+        tzLabel,
       duration: `${c.duration ?? 60} min`,
+      teacher: teacherName,
+      teacherInitials: initials,
+      teacherId: c.teacherId,
+      subject: c.subject.name,
+      topic: c.topicCovered ?? "",
+      status: c.status,
+      statusLower: c.status.toLowerCase(),
+      canJoin,
+      isTrial: c.isTrial,
+      meetingLink: c.meetingLink || null,
+      studentNotes: c.studentNotes ?? "",
+      cancelReason:
+        c.cancelReason ?? (isCancelled ? c.status.toLowerCase().replace(/_/g, " ") : ""),
       rated: c.parentRating !== null,
       rating: c.parentRating,
       hasNotes: !!c.sessionNotes,
-    }))
+      isPast,
+      isUpcoming,
+      isCompleted,
+      isCancelled,
+    }
+  })
 
-  // Cancelled
-  const cancelled = allClasses
-    .filter((c) =>
-      ["CANCELLED_STUDENT", "CANCELLED_TEACHER", "NO_SHOW_STUDENT", "NO_SHOW_TEACHER"].includes(c.status)
-    )
-    .sort((a, b) => b.scheduledAt.getTime() - a.scheduledAt.getTime())
-    .map((c) => ({
-      id: c.id,
-      date: c.scheduledAt.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        timeZone: parentTZ,   // ← ADD THIS
-      }),
-      subject: c.subject.name,
-      teacher: `${c.teacher.user.firstName} ${c.teacher.user.lastName}`,
-      reason: c.cancelReason ?? c.status.toLowerCase().replace("_", " "),
-    }))
-
-  // Month stats — include PENDING_PAYMENT in scheduled count
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
-  const monthClasses = allClasses.filter(
-    (c) => c.scheduledAt >= monthStart && c.scheduledAt <= monthEnd
-  )
-  const monthStats = {
-    scheduled: monthClasses.filter((c) => ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)).length,
-    completed: monthClasses.filter((c) => c.status === "COMPLETED").length,
-    cancelled: monthClasses.filter((c) =>
-      ["CANCELLED_STUDENT", "CANCELLED_TEACHER", "NO_SHOW_STUDENT", "NO_SHOW_TEACHER"].includes(c.status)
+  // ── KPIs ──
+  const kpis = {
+    total: classes.length,
+    upcoming: classes.filter((c) => c.isUpcoming).length,
+    completed: classes.filter((c) => c.isCompleted).length,
+    cancelled: classes.filter((c) => c.isCancelled).length,
+    pendingPayment: classes.filter(
+      (c) => c.status === "PENDING_PAYMENT"
     ).length,
   }
 
-  // Calendar class dates this month — include PENDING_PAYMENT
+  // ── Calendar data ──
   const todayLocal = utcToLocal(now, parentTZ)
+  const monthStart = new Date(todayLocal.year, todayLocal.month - 1, 1)
+  const monthEnd = new Date(
+    todayLocal.year,
+    todayLocal.month,
+    0,
+    23,
+    59,
+    59,
+    999
+  )
 
-  // Calendar class dates this month
   const classDates = [
     ...new Set(
       allClasses
@@ -159,18 +159,18 @@ export default async function ClassesPage({
           (c) =>
             c.scheduledAt >= monthStart &&
             c.scheduledAt <= monthEnd &&
-            ["PENDING_PAYMENT", "SCHEDULED", "CONFIRMED"].includes(c.status)
+            [...UPCOMING_STATUSES, ...COMPLETED_STATUSES].includes(c.status)
         )
-        .map((c) => {
-          const local = utcToLocal(c.scheduledAt, parentTZ)
-          return local.day
-        })
+        .map((c) => utcToLocal(c.scheduledAt, parentTZ).day)
     ),
   ]
 
   const calendarData = {
     year: todayLocal.year,
-    month: now.toLocaleDateString("en-US", { month: "long", timeZone: parentTZ }),
+    month: now.toLocaleDateString("en-US", {
+      month: "long",
+      timeZone: parentTZ,
+    }),
     startDay: new Date(todayLocal.year, todayLocal.month - 1, 1).getDay(),
     days: new Date(todayLocal.year, todayLocal.month, 0).getDate(),
     classDates,
@@ -180,12 +180,9 @@ export default async function ClassesPage({
   return (
     <ParentClassesClient
       childName={childName}
-      upcoming={upcoming}
-      completed={completed}
-      cancelled={cancelled}
-      monthStats={monthStats}
+      classes={classes}
+      kpis={kpis}
       calendarData={calendarData}
-      defaultTab={defaultTab}
     />
   )
 }

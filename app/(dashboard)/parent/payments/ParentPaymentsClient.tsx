@@ -31,6 +31,7 @@ type Payment = {
   status: string
   studentId: string
   refundStatus: string
+  canRetry: boolean // ← NEW
 }
 
 type Counts = {
@@ -516,8 +517,8 @@ export function ParentPaymentsClient({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 whitespace-nowrap">
-                        {/* ── PAY NOW (gateway-aware) ── */}
-                        {p.status === "pending" && (
+                        {/* ── PAY NOW (only if retry is possible) ── */}
+                        {p.status === "pending" && p.canRetry && (
                           <button
                             type="button"
                             disabled={payButtonLoading === p.id}
@@ -532,6 +533,14 @@ export function ParentPaymentsClient({
                             Pay Now
                           </button>
                         )}
+                        {/* ── EXPIRED badge for pending payments that can't be retried ── */}
+                        {p.status === "pending" && !p.canRetry && (
+                          <span className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 border border-gray-200 text-gray-500 rounded-lg text-xs font-medium">
+                            <XCircle className="w-3.5 h-3.5" />
+                            Expired
+                          </span>
+                        )}
+
                         {p.status === "completed" && (
                           <button
                             type="button"
