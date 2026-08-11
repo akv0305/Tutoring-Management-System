@@ -1,18 +1,28 @@
 import { NextRequest, NextResponse } from "next/server"
 import { expirePendingClasses } from "@/lib/expire-pending-classes"
 
+// Ensure this route is not statically cached
+export const dynamic = "force-dynamic"
+
 export async function GET(req: NextRequest) {
-  // Validate cron secret
+  // ── Auth: accept secret via query param OR header ──
   const secret = process.env.CRON_SECRET
   if (secret) {
-    const auth = req.headers.get("authorization")
-    if (auth !== `Bearer ${secret}`) {
+    const { searchParams } = new URL(req.url)
+    const querySecret = searchParams.get("secret")
+    const headerAuth = req.headers.get("authorization")
+
+    const isValidQuery = querySecret === secret
+    const isValidHeader = headerAuth === `Bearer ${secret}`
+
+    if (!isValidQuery && !isValidHeader) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
   }
 
   try {
     const result = await expirePendingClasses()
+    console.log("[Cron] expire-pending-classes result:", result)
     return NextResponse.json({
       ok: true,
       ...result,
