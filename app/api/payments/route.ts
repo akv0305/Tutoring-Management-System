@@ -292,96 +292,155 @@ export async function PATCH(req: NextRequest) {
         )
       }
 
-      const updated = await prisma.payment.update({
-        where: { id },
-        data: {
-          status: "FAILED",
-          adminNotes: notes,
-        },
-        include: {
-          student: { select: { firstName: true, lastName: true } },
-        },
-      })
-
-      const bookingOrder = await prisma.bookingOrder.findUnique({
-        where: { paymentId: payment.id },
-      })
-
-      let classesCancelled = 0
-
-      if (bookingOrder) {
-        await prisma.bookingOrder.update({
-          where: { id: bookingOrder.id },
-          data: { status: "CANCELLED" },
-        })
-
-        const result = await prisma.class.updateMany({
-          where: {
-            bookingOrderId: bookingOrder.id,
-            status: "PENDING_PAYMENT",
-          },
+      const result = await prisma.$transaction(async (tx) => {
+        const updated = await tx.payment.update({
+          where: { id },
           data: {
-            status: "CANCELLED_STUDENT",
-            cancelledAt: new Date(),
-            cancelReason: notes,
+            status: "FAILED",
+            adminNotes: notes,
+          },
+          include: {
+            student: { select: { firstName: true, lastName: true } },
           },
         })
 
-        classesCancelled = result.count
-
-        const student = await prisma.student.findUnique({
-          where: { id: bookingOrder.studentId },
+        const bookingOrder = await tx.bookingOrder.findUnique({
+          where: { paymentId: payment.id },
           include: {
-            parent: {
+            student: {
               include: {
-                user: {
-                  select: { id: true, firstName: true, email: true },
+                parent: {
+                  include: {
+                    user: {
+                      select: { id: true, firstName: true, email: true },
+                    },
+                  },
                 },
               },
             },
           },
         })
 
-        if (student) {
-          await prisma.notification.create({
-            data: {
-              userId: student.parent.user.id,
-              type: "PAYMENT",
-              title: "Payment Rejected — Classes Cancelled",
-              message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) was rejected. ${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled. Reason: ${notes}`,
-            },
+        let classesCancelled = 0
+        let walletRefunded = 0
+        let couponRestored = false
+
+        if (bookingOrder) {
+          await tx.bookingOrder.update({
+            where: { id: bookingOrder.id },
+            data: { status: "CANCELLED" },
           })
 
-          if (student.parent?.user?.email) {
-            const appUrl = process.env.NEXTAUTH_URL || ""
+          const cancelResult = await tx.class.updateMany({
+            where: {
+              bookingOrderId: bookingOrder.id,
+              status: "PENDING_PAYMENT",
+            },
+            data: {
+              status: "CANCELLED_STUDENT",
+              cancelledAt: new Date(),
+              cancelReason: `Payment rejected by admin: ${notes}`,
+            },
+          })
+          classesCancelled = cancelResult.count
 
-            sendEmail({
-              to: student.parent.user.email,
-              subject: `Payment update — ${bookingOrder.orderRef} — Expert Guru`,
-              react: PaymentRejected({
-                parentName: student.parent.user.firstName,
-                studentName: `${student.firstName} ${student.lastName}`,
-                orderRef: bookingOrder.orderRef,
-                amount: Number(payment.amount).toLocaleString(),
-                classesCancelled: classesCancelled,
-                reason: notes,
-                dashboardUrl: `${appUrl}/parent`,
-              }),
-            }).catch((err) =>
-              console.error("[Payment Reject] Parent email failed:", err)
-            )
+          // ── Refund wallet deduction ──
+          const walletDeduction = Number(bookingOrder.walletDeduction ?? 0)
+          if (walletDeduction > 0 && bookingOrder.student.parent) {
+            const wallet = await tx.wallet.findUnique({
+              where: {
+                parentProfileId: bookingOrder.student.parent.id,
+              },
+            })
+
+            if (wallet) {
+              await tx.wallet.update({
+                where: { id: wallet.id },
+                data: { balance: { increment: walletDeduction } },
+              })
+
+              await tx.walletTransaction.create({
+                data: {
+                  walletId: wallet.id,
+                  amount: walletDeduction,
+                  type: "ADMIN_ADJUSTMENT",
+                  description: `Refund: payment for booking ${bookingOrder.orderRef} rejected by admin`,
+                  referenceId: bookingOrder.id,
+                },
+              })
+              walletRefunded = walletDeduction
+            }
+          }
+
+          // ── Reverse coupon usage ──
+          if (bookingOrder.couponId) {
+            await tx.couponUsage.deleteMany({
+              where: {
+                couponId: bookingOrder.couponId,
+                bookingOrderId: bookingOrder.id,
+              },
+            })
+
+            await tx.coupon.update({
+              where: { id: bookingOrder.couponId },
+              data: { usedCount: { decrement: 1 } },
+            })
+            couponRestored = true
+          }
+
+          // ── Notify parent ──
+          const parentUserId = bookingOrder.student.parent?.user?.id
+          if (parentUserId) {
+            const walletMsg = walletRefunded > 0
+              ? ` $${walletRefunded.toFixed(2)} has been refunded to your wallet.`
+              : ""
+            const couponMsg = couponRestored
+              ? " Your coupon has been restored."
+              : ""
+
+            await tx.notification.create({
+              data: {
+                userId: parentUserId,
+                type: "PAYMENT",
+                title: "Payment Rejected — Classes Cancelled",
+                message: `Your payment of $${Number(payment.amount)} (Ref: ${bookingOrder.orderRef}) was rejected. ${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled. Reason: ${notes}.${walletMsg}${couponMsg}`,
+              },
+            })
+
+            if (bookingOrder.student.parent.user.email) {
+              const appUrl = process.env.NEXTAUTH_URL || ""
+              sendEmail({
+                to: bookingOrder.student.parent.user.email,
+                subject: `Payment update — ${bookingOrder.orderRef} — Expert Guru`,
+                react: PaymentRejected({
+                  parentName: bookingOrder.student.parent.user.firstName,
+                  studentName: `${updated.student.firstName} ${updated.student.lastName}`,
+                  orderRef: bookingOrder.orderRef,
+                  amount: Number(payment.amount).toLocaleString(),
+                  classesCancelled,
+                  reason: notes,
+                  dashboardUrl: `${appUrl}/parent`,
+                }),
+              }).catch((err) =>
+                console.error("[Payment Reject] Parent email failed:", err)
+              )
+            }
           }
         }
-      }
+
+        return { updated, classesCancelled, walletRefunded, couponRestored }
+      })
 
       return NextResponse.json({
         message: "Payment rejected",
-        classesCancelled,
+        classesCancelled: result.classesCancelled,
+        walletRefunded: result.walletRefunded,
+        couponRestored: result.couponRestored,
         payment: {
-          id: updated.id,
-          student: `${updated.student.firstName} ${updated.student.lastName}`,
-          amount: Number(updated.amount),
-          status: updated.status,
+          id: result.updated.id,
+          student: `${result.updated.student.firstName} ${result.updated.student.lastName}`,
+          amount: Number(result.updated.amount),
+          status: result.updated.status,
           adminNotes: notes,
         },
       })

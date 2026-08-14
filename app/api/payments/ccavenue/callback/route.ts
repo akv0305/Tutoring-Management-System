@@ -267,75 +267,28 @@ export async function POST(req: NextRequest) {
       )
     }
 
+        // ═══════════════════════════════════════════════════════
+    //  FAILURE (gateway declined — keep retryable)
     // ═══════════════════════════════════════════════════════
-    //  FAILURE (gateway declined)
-    // ═══════════════════════════════════════════════════════
+    // Do NOT cancel classes or booking order. Parent can retry
+    // from the Payments tab with a different card or wallet top-up.
     await prisma.payment.update({
       where: { id: paymentId },
       data: {
-        status: "FAILED",
-        method: "CCAVENUE",
-        bankReference: `${orderStatus}|${trackingId}|${bankRefNo}|${response.failure_message || ""}`,
+        bankReference: `FAILED|${trackingId}|${bankRefNo}|${response.failure_message || ""}`,
       },
     })
 
-    let classesCancelled = 0
-
-    if (bookingOrderId) {
-      const bookingOrder = await prisma.bookingOrder.findUnique({
-        where: { id: bookingOrderId },
-      })
-
-      if (bookingOrder) {
-        await prisma.bookingOrder.update({
-          where: { id: bookingOrder.id },
-          data: { status: "CANCELLED" },
-        })
-
-        const result = await prisma.class.updateMany({
-          where: {
-            bookingOrderId: bookingOrder.id,
-            status: "PENDING_PAYMENT",
-          },
-          data: {
-            status: "CANCELLED_STUDENT",
-            cancelledAt: new Date(),
-            cancelReason: `Payment failed via CCAvenue: ${response.failure_message || orderStatus}`,
-          },
-        })
-
-        classesCancelled = result.count
-      }
-    }
-
-    if (payment.student.parent?.user) {
+    // Notify parent about the failure (but don't cancel anything)
+    if (payment.student.parent?.user?.id) {
       await prisma.notification.create({
         data: {
           userId: payment.student.parent.user.id,
           type: "PAYMENT",
-          title: "Payment Failed",
-          message: `Your payment of $${amount} (Ref: ${orderId}) was not successful. ${classesCancelled > 0 ? `${classesCancelled} class${classesCancelled > 1 ? "es have" : " has"} been cancelled.` : ""} You can retry from your dashboard.`,
+          title: "Payment Unsuccessful",
+          message: `Your payment of $${amount} (Ref: ${orderId}) was not successful: ${response.failure_message || "Card declined"}. Your booking is still reserved — you can retry from the Payments tab.`,
         },
       })
-
-      if (payment.student.parent.user.email) {
-        sendEmail({
-          to: payment.student.parent.user.email,
-          subject: `Payment update — ${orderId} — Expert Guru`,
-          react: PaymentRejected({
-            parentName: payment.student.parent.user.firstName,
-            studentName: `${payment.student.firstName} ${payment.student.lastName}`,
-            orderRef: orderId,
-            amount: amount,
-            classesCancelled: classesCancelled,
-            reason:
-              response.failure_message || "Payment was not completed",
-            dashboardUrl: `${appUrl}/parent`,
-          }),
-        }).catch((err) =>
-          console.error("[CCAvenue] Rejection email failed:", err)
-        )
-      }
     }
 
     return NextResponse.redirect(
@@ -344,6 +297,7 @@ export async function POST(req: NextRequest) {
       ),
       { status: 303 }
     )
+
   } catch (error) {
     console.error("[CCAvenue Callback] Error:", error)
     return NextResponse.redirect(

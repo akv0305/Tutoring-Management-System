@@ -11,6 +11,7 @@ import ClassRescheduled from "@/emails/class-rescheduled"
 import MeetingLinkShared from "@/emails/meeting-link-shared"
 import ClassCompleted from "@/emails/class-completed"
 import { formatDateTime, getTzAbbr } from "@/lib/timezone"
+import PaymentPendingAdmin from "@/emails/payment-pending-admin"
 
 // ── Timezone-aware date formatter (used throughout for emails & notifications) ──
 function fmtDateTz(date: Date, timezone: string): string {
@@ -1020,6 +1021,56 @@ export async function POST(req: NextRequest) {
     } catch (notifyError) {
       console.error("Failed to send booking notifications:", notifyError)
     }
+
+    // ── Send admin email for pending (bank transfer / offline) payments ──
+    if (result.bookingOrder.status === "PENDING_PAYMENT") {
+      try {
+        const { default: PaymentPendingAdmin } = await import("@/emails/payment-pending-admin")
+        const adminsForEmail = await prisma.user.findMany({
+          where: { role: "ADMIN", status: "ACTIVE" },
+          select: { email: true, firstName: true },
+        })
+        const studentFullNameAdmin = `${student.firstName} ${student.lastName}`
+        const teacherFullNameAdmin = `${teacher.user.firstName} ${teacher.user.lastName}`
+        const adminDashUrl = `${process.env.NEXTAUTH_URL || ""}/admin`
+        const parentFormattedSlotsAdmin = slotList.map((slot: string) =>
+          fmtDateTz(new Date(slot), parentTZ)
+        )
+
+        const hasWalletAdmin = Number(result.bookingOrder.walletDeduction) > 0
+        const hasCouponAdmin = Number(result.bookingOrder.couponDiscount) > 0
+
+        for (const admin of adminsForEmail) {
+          sendEmail({
+            to: admin.email,
+            subject: `Payment Pending — ${result.bookingOrder.orderRef} — ${studentFullNameAdmin} — Expert Guru`,
+            react: PaymentPendingAdmin({
+              adminName: admin.firstName,
+              studentName: studentFullNameAdmin,
+              teacherName: teacherFullNameAdmin,
+              subject: subject.name,
+              totalClasses: slotList.length,
+              scheduledSlots: parentFormattedSlotsAdmin,
+              duration: classDuration,
+              orderRef: result.bookingOrder.orderRef,
+              totalAmount: `$${totalAmount.toFixed(2)}`,
+              walletDeduction: hasWalletAdmin
+                ? `$${Number(result.bookingOrder.walletDeduction).toFixed(2)}`
+                : undefined,
+              couponDiscount: hasCouponAdmin
+                ? `$${Number(result.bookingOrder.couponDiscount).toFixed(2)}`
+                : undefined,
+              amountDue: `$${Number(result.payment.amount).toFixed(2)}`,
+              parentName: student.parent?.user?.firstName || "Parent",
+              parentEmail: student.parent?.user?.email || "",
+              dashboardUrl: adminDashUrl,
+            }),
+          }).catch((err) => console.error("[Booking] Admin pending-payment email failed:", err))
+        }
+      } catch (adminEmailErr) {
+        console.error("[Booking] Failed to send admin pending-payment emails:", adminEmailErr)
+      }
+    }    
 
     // ─── Send booking emails (non-blocking) ───
     const appUrl = process.env.NEXTAUTH_URL || ""

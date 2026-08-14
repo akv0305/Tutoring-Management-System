@@ -11,7 +11,6 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  // Upsert ensures the singleton row exists
   const settings = await prisma.platformSettings.upsert({
     where: { id: "default" },
     update: {},
@@ -25,8 +24,9 @@ export async function GET() {
       referralRewardAmount: Number(settings.referralRewardAmount),
       welcomeOfferEnabled: settings.welcomeOfferEnabled,
       welcomeOfferAmount: Number(settings.welcomeOfferAmount),
-      walletTopupMinAmount: "walletTopupMinAmount" in settings ? Number(settings.walletTopupMinAmount) : 15,
-      walletTopupPresets: "walletTopupPresets" in settings ? settings.walletTopupPresets : "[25,50,100,200]",
+      walletTopupMinAmount: Number(settings.walletTopupMinAmount),
+      walletTopupPresets: settings.walletTopupPresets,
+      emailCcAddress: settings.emailCcAddress,
     },
   })
 }
@@ -45,9 +45,11 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Tab identifier is required" }, { status: 400 })
   }
 
-  // Whitelist fields per tab to prevent accidental overwrites
   const allowed: Record<string, string[]> = {
-    general: ["platformName", "supportEmail", "supportPhone", "defaultTimezone", "currency"],
+    general: [
+      "platformName", "supportEmail", "supportPhone",
+      "defaultTimezone", "currency", "emailCcAddress",
+    ],
     cancellation: [
       "studentFreeWindow", "lateCancelPenalty", "noShowPenalty",
       "teacherMaxCancellations", "teacherNoShowRatingHit",
@@ -93,8 +95,9 @@ export async function PATCH(req: NextRequest) {
       teacherNoShowRatingHit: Number(updated.teacherNoShowRatingHit),
       referralRewardAmount: Number(updated.referralRewardAmount),
       welcomeOfferAmount: Number(updated.welcomeOfferAmount),
-      walletTopupMinAmount: "walletTopupMinAmount" in updated ? Number(updated.walletTopupMinAmount) : 15,
-      walletTopupPresets: "walletTopupPresets" in updated ? updated.walletTopupPresets : "[25,50,100,200]",
+      walletTopupMinAmount: Number(updated.walletTopupMinAmount),
+      walletTopupPresets: updated.walletTopupPresets,
+      emailCcAddress: updated.emailCcAddress,
     },
   })
 }

@@ -54,6 +54,7 @@ type PlatformSettings = {
   defaultPaymentGateway: string
   walletTopupMinAmount: number
   walletTopupPresets: string
+  emailCcAddress: string
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -279,6 +280,15 @@ function TabGeneral({ s, set, onSave, saving, saved }: {
           options={["USD", "INR"]}
         />
       </FormRow>
+      <FormRow label="CC Email (All Outgoing)" htmlFor="g-cc">
+        <TextInput
+          id="g-cc"
+          type="email"
+          value={s.emailCcAddress}
+          onChange={(v) => set("emailCcAddress", v)}
+        />
+      </FormRow>
+
       <SaveButton onClick={onSave} saving={saving} saved={saved} />
     </div>
   )
