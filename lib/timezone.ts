@@ -246,10 +246,15 @@ export const DAY_NAME_MAP: Record<number, string> = {
  *
  * Returns a Map<dateStr, timeStr[]> where both keys are in the viewer's TZ.
  * Also returns a parallel slotMap: Map<"dateStr_timeStr", utcISO> for booking submission.
+ *
+ * FIX: To handle cross-timezone day shifts (e.g., teacher's Monday morning IST
+ * becoming parent's Sunday evening CDT), we process availability for the
+ * surrounding days (previous week's last day + next week's first day) as well,
+ * then filter results to only include dates within the current week view.
  */
 export function convertAvailabilitySlots(
   availability: { dayOfWeek: string; startTime: string; endTime: string }[],
-  weekDates: Date[],
+  weekDates: Date[],          // Mon–Sun of the viewer's current week
   teacherTimezone: string,
   viewerTimezone: string
 ): { availSlots: Map<string, string[]>; slotToUTC: Map<string, string> } {
@@ -261,37 +266,63 @@ export function convertAvailabilitySlots(
     FRIDAY: 4, SATURDAY: 5, SUNDAY: 6,
   }
 
+  // Build a set of valid viewer date strings for this week (for filtering)
+  const validDateStrs = new Set<string>()
+  for (const wd of weekDates) {
+    validDateStrs.add(refDateToLocalStr(wd))
+  }
+
+  // Generate an extended set of reference dates:
+  // Previous week's days + current week's days + next week's days
+  // This ensures that cross-timezone shifts are captured.
+  // e.g., Teacher's next-Monday morning IST → viewer's current-Sunday evening CDT
+  const extendedDates: Date[] = []
+  const mondayMs = weekDates[0].getTime()
+  for (let i = -7; i < 14; i++) {
+    extendedDates.push(new Date(mondayMs + i * 86400000))
+  }
+
   for (const avail of availability) {
     const dayIdx = dayNameToIdx[avail.dayOfWeek.toUpperCase()]
     if (dayIdx === undefined) continue
 
-    const refDate = weekDates[dayIdx]
-    if (!refDate) continue
-    const refDateStr = refDateToLocalStr(refDate)
-
     const startH = parseInt(to24(avail.startTime).split(":")[0])
     const endH = parseInt(to24(avail.endTime).split(":")[0])
 
-    for (let h = startH; h < endH; h++) {
-      const teacherTimeStr = `${String(h).padStart(2, "0")}:00`
+    // Find all dates in the extended range that match this day of week
+    for (const refDate of extendedDates) {
+      // refDate is a UTC midnight date; check its day of week
+      const refDow = refDate.getUTCDay() // 0=Sun, 1=Mon, ... 6=Sat
+      // Convert our dayIdx (0=Mon...6=Sun) to JS day (1=Mon...0=Sun)
+      const jsDow = dayIdx === 6 ? 0 : dayIdx + 1
+      if (refDow !== jsDow) continue
 
-      // Teacher's local → UTC
-      const utcDate = localToUTC(refDateStr, teacherTimeStr, teacherTimezone)
+      const refDateStr = refDateToLocalStr(refDate)
 
-      // UTC → viewer's local
-      const viewerLocal = utcToLocal(utcDate, viewerTimezone)
+      for (let h = startH; h < endH; h++) {
+        const teacherTimeStr = `${String(h).padStart(2, "0")}:00`
 
-      const existing = availSlots.get(viewerLocal.dateStr) || []
-      existing.push(viewerLocal.timeStr)
-      availSlots.set(viewerLocal.dateStr, existing)
+        // Teacher's local → UTC
+        const utcDate = localToUTC(refDateStr, teacherTimeStr, teacherTimezone)
 
-      slotToUTC.set(`${viewerLocal.dateStr}_${viewerLocal.timeStr}`, utcDate.toISOString())
+        // UTC → viewer's local
+        const viewerLocal = utcToLocal(utcDate, viewerTimezone)
+
+        // Only include if the viewer's date falls within the current week
+        if (!validDateStrs.has(viewerLocal.dateStr)) continue
+
+        const existing = availSlots.get(viewerLocal.dateStr) || []
+        existing.push(viewerLocal.timeStr)
+        availSlots.set(viewerLocal.dateStr, existing)
+
+        slotToUTC.set(`${viewerLocal.dateStr}_${viewerLocal.timeStr}`, utcDate.toISOString())
+      }
     }
   }
 
   // Sort time slots within each date
   for (const [key, slots] of availSlots) {
-    availSlots.set(key, slots.sort())
+    availSlots.set(key, [...new Set(slots)].sort())
   }
 
   return { availSlots, slotToUTC }
