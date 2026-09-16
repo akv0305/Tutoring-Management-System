@@ -18,6 +18,7 @@ import {
   Bell,
   Ticket,
   CalendarDays,  DollarSign, UserCheck,  
+  CalendarPlus,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -62,6 +63,7 @@ export default function AdminLayout({
     { label: "Pricing", icon: DollarSign, href: "/admin/pricing" },
     { label: "Classes", icon: CalendarDays, href: "/admin/classes" },
     { label: "Booking History", icon: Package, href: "/admin/booking-orders" },
+    { label: "Book Slot",        icon: CalendarPlus,  href: "/admin/book-slot" },
     { label: "Packages", icon: Package, href: "/admin/packages" },
     { label: "Coupons", icon: Ticket, href: "/admin/coupons" },
     {

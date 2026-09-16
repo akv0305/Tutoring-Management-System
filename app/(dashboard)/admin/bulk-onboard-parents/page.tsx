@@ -21,7 +21,7 @@ export default async function BulkOnboardParentsPage() {
     include: { user: { select: { firstName: true, lastName: true } } },
   })
 
-  const coordList = coordinators.map((c) => ({
+  const coordList = coordinators.map((c: typeof coordinators[number]) => ({
     id: c.id,
     name: `${c.user.firstName} ${c.user.lastName}`,
   }))

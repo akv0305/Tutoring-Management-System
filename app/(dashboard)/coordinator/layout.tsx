@@ -11,6 +11,7 @@ import {
   GraduationCap,
   BarChart3,
   Bell, Package,
+  CalendarPlus,
 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
@@ -48,6 +49,7 @@ export default function CoordinatorLayout({
   const navItems = [
     { label: "Dashboard",   icon: LayoutDashboard, href: "/coordinator" },
     { label: "My Students", icon: Users,           href: "/coordinator/students",   ...(totalStudents > 0 ? { badge: totalStudents } : {}) },
+    { label: "Book Slot",       icon: CalendarPlus,  href: "/coordinator/book-slot" },
     { label: "Classes",     icon: Calendar,        href: "/coordinator/classes" },
     { label: "Booking History", icon: Package, href: "/coordinator/booking-orders" },
     { label: "Onboarding",  icon: UserPlus,        href: "/coordinator/onboarding", ...(pendingOnboarding > 0 ? { badge: pendingOnboarding } : {}) },
