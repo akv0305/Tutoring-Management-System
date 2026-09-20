@@ -48,14 +48,21 @@ type Props = {
   teachers: Teacher[]
   teacherRates: TeacherRate[]
   packageTemplates: PackageTemplate[]
+  allGrades: GradeOption[]
 }
 
 type Step = "select" | "slots" | "confirm"
 type SlotMode = "availability" | "custom"
 
+// Add this type near the top with other types
+type GradeOption = {
+  id: string; name: string; shortName: string; sortOrder: number
+  gradeBandId: string; gradeBandName: string
+}
+
 /* ──────────────────── Component ──────────────────── */
 
-export function BookSlotClient({ role, students, teachers, teacherRates, packageTemplates }: Props) {
+export function BookSlotClient({ role, students, teachers, teacherRates, packageTemplates, allGrades }: Props) {
   // Step state
   const [step, setStep] = useState<Step>("select")
 
@@ -65,6 +72,7 @@ export function BookSlotClient({ role, students, teachers, teacherRates, package
   const [subjectId, setSubjectId] = useState("")
   const [templateId, setTemplateId] = useState("")
   const [couponCode, setCouponCode] = useState("")
+  const [selectedGradeId, setSelectedGradeId] = useState("")
 
   // Step 2 — slots
   const [slotMode, setSlotMode] = useState<SlotMode>("availability")
@@ -94,18 +102,37 @@ export function BookSlotClient({ role, students, teachers, teacherRates, package
     [templateId, packageTemplates]
   )
 
-  // Rate
+    // Derive gradeBandId from the selected grade (not from student profile)
+  const selectedGrade = useMemo(() => {
+    if (!selectedGradeId) return null
+    return allGrades.find((g) => g.id === selectedGradeId) || null
+  }, [selectedGradeId, allGrades])
+
+  const selectedGradeBandId = selectedGrade?.gradeBandId || null
+
+  // Filter grades to only those whose grade-band has an active rate for this teacher+subject
+  const eligibleGrades = useMemo(() => {
+    if (!teacherId || !subjectId) return []
+    const eligibleBandIds = new Set(
+      teacherRates
+        .filter((r) => r.teacherId === teacherId && r.subjectId === subjectId)
+        .map((r) => r.gradeBandId)
+    )
+    if (eligibleBandIds.size === 0) return []
+    return allGrades.filter((g) => eligibleBandIds.has(g.gradeBandId))
+  }, [teacherId, subjectId, teacherRates, allGrades])
+
+  // Rate: grade-band rate if found, else teacher's default
   const effectiveRate = useMemo(() => {
     if (!teacherId || !subjectId) return 0
-    const gradeBandId = selectedStudent?.gradeBandId
-    if (gradeBandId) {
+    if (selectedGradeBandId) {
       const rate = teacherRates.find(
-        (r) => r.teacherId === teacherId && r.subjectId === subjectId && r.gradeBandId === gradeBandId
+        (r) => r.teacherId === teacherId && r.subjectId === subjectId && r.gradeBandId === selectedGradeBandId
       )
       if (rate) return rate.studentFacingRate
     }
     return selectedTeacher?.defaultRate || 0
-  }, [teacherId, subjectId, selectedStudent, teacherRates, selectedTeacher])
+  }, [teacherId, subjectId, selectedGradeBandId, teacherRates, selectedTeacher])
 
   const totalAmount = useMemo(() => {
     if (selectedTemplate) return selectedTemplate.suggestedPrice
@@ -178,6 +205,14 @@ export function BookSlotClient({ role, students, teachers, teacherRates, package
     setTemplateId("")
     setSelectedSlots([])
     setError("")
+    // Auto-select grade from student's profile if available
+    const student = students.find((s) => s.id === id)
+    if (student?.gradeBandId) {
+      const matchingGrade = allGrades.find((g) => g.gradeBandId === student.gradeBandId)
+      setSelectedGradeId(matchingGrade?.id || "")
+    } else {
+      setSelectedGradeId("")
+    }
   }
 
   function handleTeacherChange(id: string) {
@@ -194,6 +229,13 @@ export function BookSlotClient({ role, students, teachers, teacherRates, package
     setTemplateId("")
     setSelectedSlots([])
     setError("")
+    // Keep selectedGradeId — but if it's no longer eligible, clear it
+    if (selectedGradeId) {
+      const stillEligible = teacherRates.some(
+        (r) => r.teacherId === teacherId && r.subjectId === id && r.gradeBandId === (allGrades.find((g) => g.id === selectedGradeId)?.gradeBandId || "")
+      )
+      if (!stillEligible) setSelectedGradeId("")
+    }
   }
 
   function toggleSlot(dateStr: string, timeStr: string) {
@@ -425,6 +467,38 @@ export function BookSlotClient({ role, students, teachers, teacherRates, package
               ))}
             </select>
           </div>
+
+          {/* Grade */}
+          {subjectId && eligibleGrades.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Grade</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                value={selectedGradeId}
+                onChange={(e) => setSelectedGradeId(e.target.value)}
+              >
+                <option value="">Select grade…</option>
+                {eligibleGrades.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.gradeBandName})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Show rate info */}
+          {subjectId && teacherId && (
+            <div className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
+              Rate: <span className="font-semibold text-[#1E293B]">${effectiveRate}/hr</span>
+              {selectedGradeBandId ? (
+                <span className="text-xs text-green-600 ml-2">(grade-band rate)</span>
+              ) : (
+                <span className="text-xs text-amber-600 ml-2">(teacher default rate — select a grade for subject-specific pricing)</span>
+              )}
+            </div>
+          )}
+
 
           {/* Rate info */}
           {subjectId && effectiveRate > 0 && (

@@ -139,13 +139,34 @@ export default async function AdminBookSlotPage() {
     isPopular: t.isPopular,
   }))
 
+  // ── 5. All active grades for grade selection ──
+  const allGradesRaw = await prisma.grade.findMany({
+    where: { isActive: true },
+    select: {
+      id: true, name: true, shortName: true, sortOrder: true,
+      gradeBandId: true,
+      gradeBand: { select: { id: true, displayName: true } },
+    },
+    orderBy: { sortOrder: "asc" },
+  })
+
+  const allGrades = allGradesRaw.map((g: typeof allGradesRaw[number]) => ({
+    id: g.id,
+    name: g.name,
+    shortName: g.shortName,
+    sortOrder: g.sortOrder,
+    gradeBandId: g.gradeBandId,
+    gradeBandName: g.gradeBand.displayName,
+  }))
+
   return (
     <BookSlotClient
       students={students}
       teachers={teachers}
       teacherRates={teacherRates}
       packageTemplates={packageTemplates}
-      role="ADMIN"
+      allGrades={allGrades}
+      role="ADMIN"  // or "COORDINATOR"
     />
   )
 }
