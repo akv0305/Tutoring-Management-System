@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     const now = new Date()
     const fourWeeks = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
 
-    const [availability, bookedClasses, blockedDates] = await Promise.all([
+    const [availability, bookedClasses, blockedDates, teacherProfile] = await Promise.all([
       prisma.teacherAvailability.findMany({
         where: { teacherId, isEnabled: true },
         select: { dayOfWeek: true, startTime: true, endTime: true },
@@ -32,9 +32,14 @@ export async function GET(req: NextRequest) {
         where: { teacherId, blockedDate: { gte: now } },
         select: { blockedDate: true },
       }),
+      prisma.teacherProfile.findUnique({
+        where: { id: teacherId },
+        select: { timezone: true },
+      }),
     ])
 
     return NextResponse.json({
+      teacherTimezone: teacherProfile?.timezone || "Asia/Kolkata",
       availability: availability.map((a) => ({ dayOfWeek: a.dayOfWeek, startTime: a.startTime, endTime: a.endTime })),
       bookedSlots: bookedClasses.map((c) => ({
         start: c.scheduledAt.toISOString(),

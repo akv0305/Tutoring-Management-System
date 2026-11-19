@@ -41,7 +41,7 @@ export function RescheduleModal({
 }: Props): React.ReactNode {
   // Determine effective timezones
   const effectiveViewerTZ = viewerTimezone || (typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "America/New_York")
-  const effectiveTeacherTZ = teacherTimezone || "America/New_York"
+  const effectiveTeacherTZ = teacherTimezone || "Asia/Kolkata"
   const tzAbbr = getTzAbbr(effectiveViewerTZ)
 
   const [weekOffset, setWeekOffset] = useState(0)

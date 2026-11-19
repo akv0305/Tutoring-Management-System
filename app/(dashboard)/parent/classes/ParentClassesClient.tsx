@@ -613,6 +613,7 @@ export function ParentClassesClient({
           teacherAvailability={teacherSlots.availability}
           teacherBookedSlots={teacherSlots.bookedSlots}
           teacherBlockedDates={teacherSlots.blockedDates}
+          teacherTimezone={teacherSlots.teacherTimezone}
         />
       )}
 
