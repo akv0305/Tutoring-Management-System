@@ -1,0 +1,268 @@
+# Expert Guru — Tutoring Management System (TMS)
+## Complete Technical & Business Reference Document
+### For AI Assistant Handoff — November 2026
+
+---
+
+## 1. WHAT THIS APPLICATION IS
+
+Expert Guru (branded "Test Prep Pundits" on the frontend) is a full-stack tutoring management platform connecting US-based parents/students with India-based teachers for one-on-one online tutoring sessions. The platform handles the entire lifecycle: student onboarding, teacher availability, class scheduling, payments, wallet management, coupons, referrals, payouts, and reporting.
+
+**Repository**: `https://github.com/akv0305/Tutoring-Management-System`
+
+**Production URL**: Deployed via Docker + PM2 (see `Dockerfile`, `ecosystem.config.cjs`, `start.sh`)
+
+---
+
+## 2. TECH STACK
+
+The application is built as a Next.js 14.2.5 monolith using the App Router pattern. The database is PostgreSQL accessed through Prisma ORM (v6.19.2). Authentication uses NextAuth v4 with credentials-based JWT sessions. The UI is React 18 with Tailwind CSS, Lucide icons, and Radix UI primitives. Emails are sent via Resend using React Email templates. Payment gateways are CCAvenue (Fiserv IPG at `www4.ipg-online.com`) and PayPal. The TypeScript config has `strict: true` enabled, which means every `.map()`, `.filter()`, `.forEach()` callback on Prisma query results must have explicit type annotations (use `typeof arrayVariable[number]` pattern). The project package name is `expert-guru`.
+
+Key dependencies: `next@14.2.5`, `react@18`, `@prisma/client@6.19.2`, `next-auth@4.24.11`, `resend@6.12.0`, `react-email@6.0.0`, `bcryptjs@3.0.3`, `lucide-react@0.447.0`, `tailwindcss@3.4.13`, plus Radix UI components.
+
+---
+
+## 3. USER ROLES & DASHBOARD STRUCTURE
+
+The application has four roles, each with its own dashboard under `app/(dashboard)/{role}/`. Middleware (`middleware.ts`) uses NextAuth `withAuth` to enforce strict role isolation — each role can only access its own dashboard prefix.
+
+**ADMIN** (`/admin/`): Full platform control. Pages include dashboard (KPIs, quick actions), students management, teachers management, coordinators, classes (with earnings calculations), packages (templates + purchased), pricing (grade-band rate matrix), payments, payouts, refunds, coupons, subjects & grade bands, booking orders, wallets, reports, settings, bulk onboard parents, bulk onboard teachers, and book-slot (admin booking on behalf of parents).
+
+**COORDINATOR** (`/coordinator/`): Assigned a bucket of students. Pages include dashboard, students (assigned only), classes (assigned students only), schedule (weekly calendar view), payments, teachers (read-only), booking orders, reports, notifications, and book-slot.
+
+**TEACHER** (`/teacher/`): Manages own availability and classes. Pages include dashboard (today's classes, week view, earnings), availability (weekly recurring slots with day toggles), schedule (calendar with class blocks), students (assigned via packages), earnings (payout history), and class history.
+
+**PARENT** (`/parent/`): Views child's classes and manages wallet. Pages include dashboard (upcoming classes, packages, coordinator info, wallet balance), classes (upcoming/completed/cancelled with reschedule/cancel/rate modals), packages (active + catalog), wallet (balance, top-up via CCAvenue/PayPal, transaction history), and browse teachers (currently being disabled — booking is shifting to admin/coordinator). The browse-teachers flow lives under `parent/teachers/[id]/TeacherProfileClient.tsx` (67KB, 1495 lines — the largest file in the codebase).
+
+---
+
+## 4. DATABASE SCHEMA (KEY MODELS)
+
+The full Prisma schema is at `prisma/schema.prisma`. All models use `@map()` to snake_case table names. Key relationships:
+
+**User** is the authentication master. Has `firstName`, `lastName`, `email`, `passwordHash`, `role` (enum), `status` (ACTIVE/INACTIVE/SUSPENDED), `phone`, `referralCode`. Does NOT have a `timezone` field — timezone lives on the profile models. One-to-one relations to `CoordinatorProfile`, `TeacherProfile`, `ParentProfile`. Has lockout fields (`failedLoginAttempts`, `lockedUntil`).
+
+**ParentProfile** owns `timezone` (default "America/New_York"), has one `Wallet`, many `Students`, coupon assignments and usages.
+
+**TeacherProfile** owns `timezone` (default "America/New_York" in schema but most teachers are IST), `compensationRate` (admin-only, what platform pays teacher), `studentFacingRate` (what parent sees), `rating`, `status` (ACTIVE/ON_LEAVE/INACTIVE). Has `availabilities` (TeacherAvailability), `blockedDates` (TeacherBlockedDate), `subjects` (TeacherSubject junction), `subjectRates` (TeacherSubjectRate — grade-band-specific pricing), packages, classes, payouts.
+
+**Student** has `firstName`, `lastName`, `grade` (string), `gradeId` (FK to Grade), `parentId` (FK to ParentProfile), `coordinatorId` (FK to CoordinatorProfile, nullable), `status` (ACTIVE/INACTIVE/TRIAL_PENDING/DROPPED), `onboardingStage` (NEW_LEAD through CONVERTED/DROPPED).
+
+**TeacherAvailability** stores recurring weekly slots: `dayOfWeek` (enum MONDAY-SUNDAY), `startTime`/`endTime` (strings like "09:00"/"17:00" in 24h format, in the teacher's timezone), `isEnabled`. Unique constraint on [teacherId, dayOfWeek, startTime].
+
+**TeacherSubjectRate** is the pricing matrix: `teacherId` + `subjectId` + `gradeBandId` → `compensationRate` + `studentFacingRate`. When a grade-band-specific rate exists, it takes precedence over the teacher's default `studentFacingRate`. If no grade-band rate is found, the teacher's profile-level `studentFacingRate` is the fallback.
+
+**GradeBand** groups grades (e.g., "Elementary" = Grades K-6, "Secondary" = 7-12). Each **Grade** belongs to one GradeBand. Students link to Grade via `gradeId`/`gradeRef`.
+
+**Class** is a single tutoring session: `studentId`, `teacherId`, `subjectId`, `packageId` (optional), `bookingOrderId`, `scheduledAt` (DateTime — stored in UTC), `duration` (minutes, default 60), `status` (PENDING_PAYMENT → SCHEDULED → CONFIRMED → COMPLETED or CANCELLED_*/NO_SHOW_*), `isTrial`, `rescheduleCount`, snapshot rates frozen at booking time. The `timezone` field on Class is a display hint only — `scheduledAt` is always UTC.
+
+**BookingOrder** groups one or more classes from a single booking action: `orderRef` (unique, generated), `studentId`, `teacherId`, `subjectId`, `totalClasses`, `totalAmount`, `walletDeduction`, `couponId`, `couponDiscount`, `status` (PENDING_PAYMENT/PAID/CANCELLED), `paymentId`.
+
+**Payment** tracks money in: `amount`, `walletDeduction`, `couponDiscount`, `method` (BANK_TRANSFER/CREDIT_CARD/WALLET/CCAVENUE/PAYPAL/etc.), `status` (PENDING/CONFIRMED/REFUNDED/FAILED), `confirmedById` (admin who confirmed), `bankReference`, `adminNotes`.
+
+**Payout** tracks money out to teachers: `periodMonth`/`periodYear`, `classesCompleted`, `compensationRate`, `grossAmount`, `deductions`, `bonus`, `netAmount`, `status` (PENDING/PROCESSING/PAID/ON_HOLD).
+
+**Wallet** belongs to ParentProfile: `balance` (Decimal). **WalletTransaction** tracks credits/debits: `amount` (positive=credit, negative=debit), `type` (REFERRAL_REWARD/BOOKING_DISCOUNT/ADMIN_ADJUSTMENT/WELCOME_OFFER/SELF_TOP_UP), `description`, `referenceId`.
+
+**Coupon**: `code`, `discountType` (PERCENTAGE/FIXED_AMOUNT), `discountValue`, `scope` (ALL_USERS/MULTI_USER/SINGLE_USER), `maxUsesTotal`, `maxUsesPerUser`, `minOrderAmount`, `maxDiscountAmount`, `validFrom`/`validUntil`, `status`. Has `CouponAssignment` (which parents can use it) and `CouponUsage` (actual usage records).
+
+**PackageTemplate** is the catalog of purchasable class bundles: `name`, `subjectId`, `classesIncluded`, `validityDays`, `suggestedPrice`, `isPopular`, `gradeBandId` (optional). **Package** is a purchased instance: tracks `classesUsed` vs `classesIncluded`, `expiryDate`, linked to student + teacher + subject.
+
+**PlatformSettings** (single-row, id="default"): Contains all configurable policies — reschedule windows, cancel fees, referral rewards, welcome offers, payment gateway toggles, wallet presets, `emailCcAddress` (global CC for all outgoing emails), and more.
+
+---
+
+## 5. CRITICAL BUSINESS LOGIC
+
+### 5a. Timezone Handling (THE MOST BUG-PRONE AREA)
+
+Teachers are predominantly in IST (Asia/Kolkata, UTC+5:30). Parents are predominantly in US timezones (PST/CST/EST). The half-hour offset in IST causes slots to cross day boundaries during conversion — e.g., Tuesday 6 AM IST = Monday 4:30 PM PST.
+
+The core timezone utility is `lib/timezone.ts`. Key functions:
+
+`utcToLocal(date, timezone)` — Converts a UTC Date to `{ year, month, day, dateStr, timeStr, hour, minute }` in the given IANA timezone.
+
+`localToUTC(dateStr, timeStr, timezone)` — Inverse: takes "YYYY-MM-DD" + "HH:MM" in a timezone and returns a UTC Date.
+
+`convertAvailabilitySlots(availability, teacherTimezone, viewerTimezone, weekDates, bookedSlots, blockedDates)` — The critical function. Takes teacher's weekly recurring availability slots, generates 1-hour slots within each availability window, converts each slot from teacher-tz → UTC → viewer-tz. It uses an EXTENDED 21-day range (previous week + current week + next week) to catch slots that cross day boundaries during conversion, then filters to only slots whose converted date falls within the viewer's current `weekDates`. Returns `{ availSlots: Map<dateStr, timeStr[]>, slotToUTC: Map<"dateStr_timeStr", isoString> }`.
+
+`getWeekDatesInTZ(timezone)` — Returns 7 Date objects (Mon-Sun) for the current week in the given timezone.
+
+**Known past bugs**: (1) The original `convertAvailabilitySlots` only used 7 reference dates, so cross-day-boundary slots were lost. Fixed by extending to 21 days. (2) The `RescheduleModal` component defaulted `teacherTimezone` to `"America/New_York"` instead of the teacher's actual timezone. This caused IST→PST conversion to be treated as ET→PST (3h diff instead of 13.5h), making Monday evening slots invisible. Fixed by passing `teacherTimezone` from the API (`app/api/classes/teacher-slots/route.ts`).
+
+**Rule for future work**: Every component that displays teacher availability to a parent MUST receive the teacher's actual timezone from the server. Never default to "America/New_York" for teachers — use "Asia/Kolkata" as fallback if unavailable.
+
+### 5b. Pricing Resolution
+
+Pricing has three tiers (checked in order):
+1. **TeacherSubjectRate** (grade-band specific): Looked up by `teacherId + subjectId + gradeBandId`. If the student's grade falls within a grade band that has a configured rate, use `studentFacingRate` from this record.
+2. **Teacher profile rate**: If no grade-band rate exists, fall back to `teacherProfile.studentFacingRate`.
+3. **Subject base price**: `subject.basePriceHour` (rarely used as a final fallback).
+
+The admin/coordinator Book Slot page requires a grade dropdown so the grade-band rate lookup works correctly. Without grade selection, it falls to the teacher's default rate which may be lower than the configured subject-specific rate.
+
+### 5c. Booking Flow (Admin/Coordinator — Current Primary Flow)
+
+Parent self-booking via Browse Teachers is being deprecated. The primary booking flow is now Admin/Coordinator > Book Slot (`app/(dashboard)/admin/book-slot/BookSlotClient.tsx` and API at `app/api/admin/book-slot/route.ts`).
+
+The flow is a 3-step wizard: (1) Select student, teacher, subject, grade, optional package template, optional coupon. (2) Pick slots from availability calendar or add custom time slots. (3) Confirm — shows dual-timezone preview, rate, total, wallet balance. On confirm, the API runs a Prisma transaction that: validates all inputs, checks scheduling conflicts, optionally creates a package, records coupon usage, deducts from wallet, creates a CONFIRMED payment, creates a PAID booking order, creates Class records (status SCHEDULED), sends email notifications.
+
+Wallet must have sufficient balance — if insufficient, the booking is rejected (parent must top up first).
+
+### 5d. Payment Gateway
+
+Two gateways are supported, configured in PlatformSettings:
+
+**CCAvenue** (Fiserv IPG): Encryption/decryption utility at `lib/ccavenue.ts`. Gateway URL is `www4.ipg-online.com` — this is the India/APAC production cluster. Do NOT change to `www2` without confirming with Fiserv, as merchant credentials are cluster-specific. Some US customers experience DNS resolution failures with this domain — this is a client-side DNS issue, not an application bug.
+
+**PayPal**: Utility at `lib/paypal.ts`.
+
+Wallet top-up goes through these gateways. The wallet balance is then used for class bookings.
+
+### 5e. Email System
+
+All emails go through `lib/email.ts` which wraps the Resend API. Features: (1) Global CC address fetched from PlatformSettings with 5-minute cache. (2) Deduplication of CC addresses. (3) All sends are logged to `EmailLog` table. (4) Graceful degradation when `RESEND_API_KEY` is not set (logs to console, records as "skipped").
+
+Email templates are React Email components in `emails/`: booking-confirmation, class-cancelled, class-completed, class-rescheduled, coordinator-assigned, meeting-link-shared, new-registration-alert, payment-confirmed, payment-pending-admin, payment-rejected, payout-paid, refund-update, reset-password, teacher-new-class, verify-email, welcome-parent, welcome-staff. Shared layout component in `emails/components/`.
+
+Templates import from `"react-email"` (not `"@react-email/components"` — this was a past bug source).
+
+### 5f. Policy Engine
+
+`lib/policyEngine.ts` evaluates reschedule and cancellation policies. It checks the class time against configurable windows from PlatformSettings: `rescheduleWindowHours`, `rescheduleLateFeePercent`, `rescheduleHardCutoffHours`, `cancelFreeWindowHours`, `cancelLateFeePercent`, `cancelHardCutoffHours`, `cancelHardCutoffFeePercent`, `maxReschedulesPerClass`. Returns whether the action is allowed, any applicable fee percentage, and a human-readable reason.
+
+### 5g. Referral & Welcome Offer
+
+When a parent registers with a referral code, the referrer gets `referralRewardAmount` (default $25) credited to their wallet upon conversion. New parents get `welcomeOfferAmount` (default $10) credited to their wallet on registration, if `welcomeOfferEnabled` is true.
+
+### 5h. Class Expiry
+
+`lib/expire-pending-classes.ts` auto-expires classes in PENDING_PAYMENT status when their `scheduledAt` has passed. Called before fetching classes in the parent's classes page.
+
+---
+
+## 6. DIRECTORY STRUCTURE
+
+```
+/
+├── app/
+│   ├── (auth)/              # Login, forgot-password, register, verify-email
+│   ├── (dashboard)/
+│   │   ├── admin/           # ~15 pages: students, teachers, classes, pricing, etc.
+│   │   │   └── book-slot/   # Admin booking on behalf of parents (NEW)
+│   │   ├── coordinator/     # ~10 pages: students, classes, schedule, etc.
+│   │   │   └── book-slot/   # Uses shared BookSlotClient from admin
+│   │   ├── parent/          # classes, packages, wallet, teachers (being disabled)
+│   │   └── teacher/         # availability, schedule, students, earnings, history
+│   ├── api/                 # ~25 API route directories (REST endpoints)
+│   │   ├── admin/           # settings, book-slot, coordinators, notifications, etc.
+│   │   ├── classes/         # POST (booking), PATCH, teacher-slots
+│   │   ├── payments/        # payment processing, confirmation
+│   │   ├── wallet/          # balance, top-up, transactions
+│   │   ├── coupons/         # CRUD + validate
+│   │   └── ...
+│   └── layout.tsx, page.tsx # Root layout + landing page
+├── components/
+│   ├── booking-orders/      # BookingOrdersClient (shared between admin/coordinator)
+│   ├── layout/              # Sidebar, TopBar
+│   ├── modals/              # RescheduleModal, CancelClassModal, RateClassModal, etc.
+│   ├── teachers/            # TeacherAvailabilityList
+│   ├── tables/              # Reusable table components
+│   ├── ui/                  # KPICard, StatusBadge, RatingStars, etc.
+│   ├── landing/             # Hero, Navbar, Subjects, ValueProps
+│   └── providers/           # SessionProvider wrapper
+├── emails/                  # React Email templates (16 templates + components/)
+├── lib/
+│   ├── auth.ts              # NextAuth config (CredentialsProvider, JWT callbacks)
+│   ├── auth-utils.ts        # getSession helper
+│   ├── prisma.ts            # PrismaClient singleton
+│   ├── timezone.ts          # All timezone conversion logic (CRITICAL)
+│   ├── email.ts             # sendEmail with global CC, logging
+│   ├── policyEngine.ts      # Reschedule/cancel policy evaluation
+│   ├── ccavenue.ts          # CCAvenue encrypt/decrypt
+│   ├── paypal.ts            # PayPal SDK helpers
+│   ├── currency.ts          # Currency formatting
+│   ├── expire-pending-classes.ts  # Auto-expire overdue pending classes
+│   └── utils.ts             # cn() for Tailwind class merging
+├── prisma/
+│   ├── schema.prisma        # Complete schema (~600 lines)
+│   └── seed.ts              # Database seeder
+├── types/                   # Shared TypeScript type definitions
+├── middleware.ts             # Role-based route protection
+├── tsconfig.json             # strict: true (IMPORTANT for type annotations)
+├── Dockerfile               # Production container build
+├── ecosystem.config.cjs      # PM2 process manager config
+└── package.json              # Dependencies and scripts
+```
+
+---
+
+## 7. AUTHENTICATION FLOW
+
+NextAuth v4 with CredentialsProvider. JWT strategy (not database sessions). Session max age: 24 hours. Cookie names adapt for HTTPS (`__Secure-` prefix). The JWT carries `userRole`, `userFirstName`, `userLastName` in custom claims. Session callback injects `id`, `role`, `firstName`, `lastName` into `session.user`.
+
+Login includes brute-force protection: failed attempts are counted, and after `maxLoginAttempts` (default 5), the account locks for `lockoutDuration` (default 30 minutes). These values come from PlatformSettings.
+
+---
+
+## 8. KNOWN GOTCHAS FOR AI ASSISTANTS
+
+**TypeScript strict mode**: The `tsconfig.json` has `"strict": true`. This means: (a) Every `.map()` / `.filter()` / `.forEach()` callback parameter on a Prisma query result needs an explicit type annotation. Use the pattern `arrayVariable.map((item: typeof arrayVariable[number]) => ...)`. (b) When generating new server-side `page.tsx` files, every callback must be typed. This was a frequent source of build errors.
+
+**Prisma field naming**: The `User` model uses `firstName`/`lastName` (NOT `name`). The User model does NOT have `timezone` or `active` fields. Status filtering is `{ status: "ACTIVE" }` not `{ active: true }`. Timezone is on `ParentProfile.timezone` and `TeacherProfile.timezone`.
+
+**Named vs default exports**: The codebase mixes both. `BookSlotClient` uses a named export (`export function BookSlotClient`). Always check the actual export style before writing imports — `import { X }` vs `import X`. Build errors with TS2613 indicate this mismatch.
+
+**Decimal fields**: Many financial fields (`amount`, `balance`, `compensationRate`, `studentFacingRate`, etc.) are `Decimal` in Prisma. When serializing for client components, always convert with `Number()` or `.toNumber()`. Direct JSON serialization of Decimal will fail.
+
+**Large files**: `TeacherProfileClient.tsx` is 69KB/1495 lines. Fetching it raw from GitHub often fails with gzip decode errors. Use the GitHub API blob endpoint instead, or accept partial content and search for specific sections.
+
+**GitHub raw file issues**: Files larger than ~15KB often fail to fetch via `raw.githubusercontent.com` due to gzip encoding issues. Use `api.github.com/repos/{owner}/{repo}/contents/{path}` instead, which returns base64-encoded content.
+
+**Email imports**: Email templates import from `"react-email"`, NOT `"@react-email/components"`. Using the wrong import path causes TS2307.
+
+---
+
+## 9. ENVIRONMENT VARIABLES
+
+Based on `.env.example` and code analysis: `DATABASE_URL` (PostgreSQL connection string), `NEXTAUTH_URL` (site URL), `NEXTAUTH_SECRET` (JWT secret), `RESEND_API_KEY` (email sending), `EMAIL_FROM` (sender address, default "Expert Guru <noreply@expertguru.net>"), `CCAVENUE_MERCHANT_ID`, `CCAVENUE_ACCESS_CODE`, `CCAVENUE_WORKING_KEY`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MODE` ("sandbox" or "live").
+
+---
+
+## 10. RECENT CHANGES (November 2026 Session)
+
+Changes made during the current development session, some committed and some pending local commit:
+
+1. **Email CC**: Added `emailCcAddress` field to PlatformSettings. Rewrote `lib/email.ts` to auto-fetch and merge global CC address (5-min cache). Added CC address input to Admin > Settings UI.
+
+2. **Admin payment notification**: When a booking results in PENDING_PAYMENT status (bank transfer/offline), all active admins receive an email notification using the `payment-pending-admin.tsx` template.
+
+3. **Admin/Coordinator Book Slot**: New feature allowing admin and coordinators to book classes on behalf of parents. Files: `admin/book-slot/page.tsx`, `admin/book-slot/BookSlotClient.tsx` (shared), `coordinator/book-slot/page.tsx`, `api/admin/book-slot/route.ts`. Parent's Browse Teachers nav item is being disabled.
+
+4. **Timezone fix — `convertAvailabilitySlots`**: Extended reference dates from 7 to 21 days to fix cross-day-boundary slot conversion between IST and US timezones (the "Sunday slots missing" bug).
+
+5. **Timezone fix — RescheduleModal**: Added `teacherTimezone` to the `teacher-slots` API response and passed it to the `RescheduleModal` component. Changed default fallback from "America/New_York" to "Asia/Kolkata".
+
+6. **Pricing fix (pending)**: The BookSlotClient pricing resolution needs a grade dropdown (similar to the parent's TeacherProfileClient) so that TeacherSubjectRate lookup uses the correct gradeBandId instead of falling to the teacher's default rate.
+
+---
+
+## 11. PENDING ISSUES / KNOWN BUGS
+
+1. **Pricing in BookSlotClient**: The admin booking page may show the teacher's base rate ($18) instead of the configured subject-specific rate ($22) when the student's grade doesn't resolve to a grade band. Fix requires adding a grade selector and passing `allGrades` prop.
+
+2. **Parent Browse Teachers**: This flow is being deprecated but the code still exists. If re-enabled, it needs the same timezone fixes applied to the reschedule modal.
+
+3. **CCAvenue DNS**: Some US customers can't resolve `www4.ipg-online.com`. This is a client-side DNS issue, not application code. Advise customers to use Google DNS (8.8.8.8) or Cloudflare DNS (1.1.1.1). Do NOT change the gateway URL without consulting Fiserv — credentials are cluster-specific.
+
+4. **Build warnings**: Multiple `react-hooks/exhaustive-deps` and `react/no-unescaped-entities` ESLint warnings exist across the codebase. These are non-blocking (warnings, not errors) but should be cleaned up over time.
+
+---
+
+## 12. HOW TO WORK WITH THIS CODEBASE
+
+When asked to modify code, always: (1) Read the actual file from the repo first — do not guess field names or types. (2) Cross-reference against `prisma/schema.prisma` for database field names. (3) Check whether the component uses named or default exports. (4) Add explicit type annotations to all `.map()`/`.filter()` callbacks in server components. (5) Use `Number()` when serializing Prisma Decimal fields. (6) Test with `npm run build` (not just IDE type checking) since `next build` performs a stricter full-project type check. (7) When adding timezone-dependent features, always pass the teacher's actual timezone from the server — never rely on defaults.
+
+---
+
+*Document generated November 19, 2026. Repository: github.com/akv0305/Tutoring-Management-System*
